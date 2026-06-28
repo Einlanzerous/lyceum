@@ -8,6 +8,9 @@
 # Local data / blob storage
 /data/
 
+# Sample books for local testing (not redistributable)
+/example_docs/
+
 # Web (see web/.gitignore for node_modules / dist / test artifacts; the
 # placeholder web/dist/.gitkeep is kept so //go:embed in web/embed.go compiles)
 
