@@ -1,14 +1,15 @@
 # Binaries
 /bin/
-lyceum
+# Anchored so it only ignores the root-built ./lyceum binary, NOT the
+# cmd/lyceum/ package directory (an unanchored `lyceum` ignored the entrypoint).
+/lyceum
 *.exe
 
 # Local data / blob storage
 /data/
 
-# Web
-web/node_modules/
-web/dist/
+# Web (see web/.gitignore for node_modules / dist / test artifacts; the
+# placeholder web/dist/.gitkeep is kept so //go:embed in web/embed.go compiles)
 
 # Native build artifacts
 build/bin/

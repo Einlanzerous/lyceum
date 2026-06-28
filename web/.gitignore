@@ -1,0 +1,11 @@
+node_modules
+# Ignore the built bundle but keep the placeholder dist/.gitkeep that
+# //go:embed (embed.go) needs to compile. Real bundle: `make build-web`.
+dist/*
+!dist/.gitkeep
+dist-ssr
+*.local
+.DS_Store
+coverage
+test-results
+playwright-report
