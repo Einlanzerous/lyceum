@@ -26,4 +26,21 @@ describe('getDeviceId', () => {
     resetDeviceIdCache()
     expect(getDeviceId()).toBe(first)
   })
+
+  it('still produces a valid UUID in an insecure context (no crypto.randomUUID)', () => {
+    // crypto.randomUUID is undefined on plain-HTTP LAN origins; getRandomValues
+    // remains available. The id must still be a well-formed v4 UUID.
+    const original = crypto.randomUUID
+    try {
+      // @ts-expect-error simulate the insecure-context absence
+      crypto.randomUUID = undefined
+      const id = getDeviceId()
+      expect(id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      )
+      expect(localStorage.getItem('lyceum.device_id')).toBe(id)
+    } finally {
+      crypto.randomUUID = original
+    }
+  })
 })
