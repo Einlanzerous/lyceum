@@ -1,0 +1,18 @@
+# Binaries
+/bin/
+lyceum
+*.exe
+
+# Local data / blob storage
+/data/
+
+# Web
+web/node_modules/
+web/dist/
+
+# Native build artifacts
+build/bin/
+android/
+
+# Env
+.env
