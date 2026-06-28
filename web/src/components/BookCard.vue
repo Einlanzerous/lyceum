@@ -37,9 +37,9 @@ const cover = computed(() =>
         <span class="card__tick" :class="{ 'card__tick--active': hasProgress }" />
         <span class="card__fallback-title">{{ book.title }}</span>
         <span class="card__fallback-author">{{ book.author }}</span>
+        <!-- Hatch only textures the generated fallback tile; never real art. -->
+        <div class="card__hatch" aria-hidden="true" />
       </template>
-
-      <div class="card__hatch" aria-hidden="true" />
 
       <span v-if="hasProgress" class="card__pill">{{ progressLabel }}</span>
       <div v-if="hasProgress" class="card__seam" aria-hidden="true">
