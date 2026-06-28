@@ -5,8 +5,10 @@ import { useReader } from '@/reader/useReader'
 import { createPositionSync } from '@/reader/sync'
 import { useUnloadFlush } from '@/reader/useUnloadFlush'
 import { putPositionKeepalive } from '@/api/client'
-import ThemeToggle from '@/components/ThemeToggle.vue'
 import { formatProgress } from '@/api/progress'
+import { useTheme, type Theme } from '@/theme'
+import { useReadingFont } from '@/reader/readingFont'
+import { READING_FONTS, resolveFontFamily } from '@/reader/font'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -15,6 +17,17 @@ const bookId = computed(() => Number(props.id))
 const container = ref<HTMLElement | null>(null)
 const chromeHidden = ref(false)
 const tocOpen = ref(false)
+const settingsOpen = ref(false)
+
+// Reading preferences, shared with the Settings page via the same persisted
+// stores — changing them here also updates Settings, and vice versa.
+const { theme, set: setTheme } = useTheme()
+const { font, set: setFont } = useReadingFont()
+const themeOptions: { value: Theme; label: string }[] = [
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+]
+const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--font-read)')
 const resumedVisible = ref(false)
 let resumedTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -51,7 +64,8 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'ArrowRight') reader.next()
   else if (event.key === 'ArrowLeft') reader.prev()
   else if (event.key === 'Escape') {
-    if (tocOpen.value) tocOpen.value = false
+    if (settingsOpen.value) settingsOpen.value = false
+    else if (tocOpen.value) tocOpen.value = false
     else void router.push('/')
   }
 }
@@ -69,7 +83,12 @@ function onTouchEnd(event: TouchEvent): void {
 }
 
 function openToc(): void {
+  settingsOpen.value = false
   tocOpen.value = true
+}
+function toggleSettings(): void {
+  tocOpen.value = false
+  settingsOpen.value = !settingsOpen.value
 }
 function goTo(href: string): void {
   reader.goTo(href)
@@ -110,17 +129,83 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="rbar__right">
-        <div class="rbar__fonts">
-          <button type="button" aria-label="Smaller text" @click="reader.decreaseFont()">A−</button>
-          <span class="rbar__div" />
-          <button type="button" class="rbar__fonts-up" aria-label="Larger text" @click="reader.increaseFont()">
-            A+
-          </button>
-        </div>
-        <ThemeToggle />
-        <button type="button" class="circle" aria-label="Contents" @click="openToc()">⋯</button>
+        <button
+          type="button"
+          class="circle"
+          :class="{ 'is-active': settingsOpen }"
+          aria-label="Reading settings"
+          aria-haspopup="dialog"
+          :aria-expanded="settingsOpen"
+          @click="toggleSettings()"
+        >
+          ⚙
+        </button>
+        <button type="button" class="circle" aria-label="Contents" @click="openToc()">☰</button>
       </div>
     </header>
+
+    <!-- Reading settings popover (font size · theme · reading font) -->
+    <Transition name="pop">
+      <div v-if="settingsOpen" class="rset">
+        <div class="rset__scrim" @click="settingsOpen = false" />
+        <div class="rset__panel" role="dialog" aria-label="Reading settings">
+          <div class="rset__row">
+            <span class="rset__label">Text size</span>
+            <div class="rset__size">
+              <button type="button" aria-label="Smaller text" @click="reader.decreaseFont()">
+                A−
+              </button>
+              <span class="rset__val">{{ reader.fontSize.value }}%</span>
+              <button
+                type="button"
+                class="rset__up"
+                aria-label="Larger text"
+                @click="reader.increaseFont()"
+              >
+                A+
+              </button>
+            </div>
+          </div>
+
+          <div class="rset__row">
+            <span class="rset__label">Theme</span>
+            <div class="seg" role="group" aria-label="Theme">
+              <button
+                v-for="opt in themeOptions"
+                :key="opt.value"
+                type="button"
+                class="seg__btn"
+                :class="{ 'is-active': theme === opt.value }"
+                @click="setTheme(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <div class="rset__row rset__row--stack">
+            <span class="rset__label">Font</span>
+            <div class="seg" role="group" aria-label="Reading font">
+              <button
+                v-for="opt in READING_FONTS"
+                :key="opt.id"
+                type="button"
+                class="seg__btn"
+                :class="{ 'is-active': font === opt.id }"
+                :title="opt.hint"
+                @click="setFont(opt.id)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+
+          <p class="rset__specimen" :style="{ fontFamily: specimenFamily }">
+            The quick brown fox jumps over the lazy dog.
+          </p>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Reading surface (epub.js iframe) -->
     <div
@@ -153,7 +238,11 @@ onBeforeUnmount(() => {
     <!-- Mobile tap zones -->
     <div class="tapzones" aria-hidden="true">
       <button type="button" class="tapzones__z tapzones__z--prev" @click="reader.prev()" />
-      <button type="button" class="tapzones__z tapzones__z--mid" @click="chromeHidden = !chromeHidden" />
+      <button
+        type="button"
+        class="tapzones__z tapzones__z--mid"
+        @click="chromeHidden = !chromeHidden"
+      />
       <button type="button" class="tapzones__z tapzones__z--next" @click="reader.next()" />
     </div>
 
@@ -182,7 +271,9 @@ onBeforeUnmount(() => {
     <div v-else-if="reader.error.value" class="overlay overlay--error" role="alert">
       <div class="overlay__bang">!</div>
       <div class="overlay__title">This book won't open</div>
-      <div class="overlay__sub">The EPUB may be damaged or unsupported. Your reading place is safe.</div>
+      <div class="overlay__sub">
+        The EPUB may be damaged or unsupported. Your reading place is safe.
+      </div>
       <div class="overlay__actions">
         <button type="button" class="btn btn--brass" @click="router.go(0)">↻ Retry</button>
         <button type="button" class="btn btn--ghost" @click="router.push('/')">← Library</button>
@@ -194,7 +285,9 @@ onBeforeUnmount(() => {
       <div v-if="resumedVisible" class="resumed">
         <span class="resumed__dot" />
         <span class="resumed__text">Resumed where you left off</span>
-        <span v-if="reader.page.value > 0" class="resumed__page">· page {{ reader.page.value }}</span>
+        <span v-if="reader.page.value > 0" class="resumed__page"
+          >· page {{ reader.page.value }}</span
+        >
       </div>
     </Transition>
 
@@ -205,7 +298,9 @@ onBeforeUnmount(() => {
         <aside class="toc__panel">
           <div class="toc__head">
             <span>Contents</span>
-            <button type="button" class="circle" aria-label="Close" @click="tocOpen = false">✕</button>
+            <button type="button" class="circle" aria-label="Close" @click="tocOpen = false">
+              ✕
+            </button>
           </div>
           <nav class="toc__list">
             <button
@@ -246,7 +341,9 @@ onBeforeUnmount(() => {
   padding: 18px 28px;
   padding-top: max(18px, env(safe-area-inset-top));
   background: linear-gradient(var(--bg) 40%, transparent);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 .reader--chromeless .rbar {
   opacity: 0;
@@ -274,33 +371,7 @@ onBeforeUnmount(() => {
 .rbar__right {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-.rbar__fonts {
-  display: flex;
-  align-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--glass);
-  backdrop-filter: blur(8px);
-  overflow: hidden;
-}
-.rbar__fonts button {
-  padding: 8px 13px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font: 600 12px var(--font-ui);
-  cursor: pointer;
-}
-.rbar__fonts-up {
-  color: var(--text) !important;
-  font: 700 15px var(--font-ui) !important;
-}
-.rbar__div {
-  width: 1px;
-  height: 18px;
-  background: var(--border-strong);
+  gap: 8px;
 }
 
 .pill {
@@ -340,6 +411,127 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.circle.is-active {
+  border-color: rgba(201, 154, 78, 0.4);
+  background: rgba(201, 154, 78, 0.14);
+  color: var(--brass-bright);
+}
+
+/* ── Reading settings popover ── */
+.rset {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+}
+.reader--chromeless .rset {
+  opacity: 0;
+  pointer-events: none;
+}
+.rset__scrim {
+  position: absolute;
+  inset: 0;
+}
+.rset__panel {
+  position: absolute;
+  top: 62px;
+  right: clamp(16px, 4vw, 28px);
+  width: min(304px, calc(100vw - 32px));
+  padding: 6px 16px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-pop);
+}
+.rset__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 0;
+}
+.rset__row + .rset__row {
+  border-top: 1px solid var(--border);
+}
+.rset__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.rset__label {
+  font: 600 13px var(--font-ui);
+  color: var(--text);
+}
+.rset__size {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  overflow: hidden;
+}
+.rset__size button {
+  padding: 7px 13px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13px var(--font-ui);
+  cursor: pointer;
+}
+.rset__size .rset__up {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 15px;
+}
+.rset__val {
+  min-width: 42px;
+  text-align: center;
+  font: 600 12px var(--font-ui);
+  color: var(--dim);
+}
+
+/* segmented control — mirrors the Settings page */
+.seg {
+  display: flex;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+  flex: none;
+}
+.rset__row--stack .seg {
+  width: 100%;
+}
+.seg__btn {
+  flex: 1;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font: 700 12.5px var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg__btn.is-active {
+  background: var(--brass);
+  color: var(--on-brass);
+}
+.rset__specimen {
+  margin: 12px 0 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--reading);
+}
+
+.pop-enter-active {
+  animation: lycFade 0.16s ease both;
+}
+.pop-leave-active {
+  transition: opacity 0.14s ease;
+}
+.pop-leave-to {
+  opacity: 0;
 }
 
 /* ── Reading surface ── a centered reading measure, inset from the chrome. */
@@ -440,7 +632,9 @@ onBeforeUnmount(() => {
   padding: 18px 40px 22px;
   padding-bottom: max(22px, env(safe-area-inset-bottom));
   background: linear-gradient(transparent, var(--bg) 60%);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 .reader--chromeless .rprog {
   opacity: 0;
