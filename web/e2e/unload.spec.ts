@@ -21,7 +21,7 @@ test('flushes the latest position immediately on backgrounding', async ({ page }
   await expect.poll(async () => reader.getAttribute('data-cfi')).not.toBe('')
 
   const startCfi = await reader.getAttribute('data-cfi')
-  await page.locator('.reader__nav--next').click()
+  await page.locator('.snav--next').click()
   await expect.poll(async () => reader.getAttribute('data-cfi')).not.toBe(startCfi)
 
   // Background the page and time the resulting flush.

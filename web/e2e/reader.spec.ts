@@ -18,7 +18,7 @@ test('opens a book and advances pages', async ({ page }) => {
   expect((await frameBody.innerText()).trim().length).toBeGreaterThan(0)
 
   // Loading overlay cleared once the first page rendered.
-  await expect(page.locator('.reader__overlay')).toHaveCount(0)
+  await expect(page.locator('.overlay')).toHaveCount(0)
 
   // epub.js paginates a section with CSS columns, so body text is constant
   // within a section; the CFI is the reliable signal that the page advanced.
@@ -26,14 +26,14 @@ test('opens a book and advances pages', async ({ page }) => {
   await expect.poll(async () => reader.getAttribute('data-cfi')).not.toBe('')
   const firstCfi = await reader.getAttribute('data-cfi')
 
-  await page.locator('.reader__nav--next').click()
+  await page.locator('.snav--next').click()
   await expect.poll(async () => reader.getAttribute('data-cfi'), { timeout: 20_000 }).not.toBe(
     firstCfi,
   )
 
   // And prev returns toward the start.
   const advancedCfi = await reader.getAttribute('data-cfi')
-  await page.locator('.reader__nav--prev').click()
+  await page.locator('.snav--prev').click()
   await expect
     .poll(async () => reader.getAttribute('data-cfi'), { timeout: 20_000 })
     .not.toBe(advancedCfi)

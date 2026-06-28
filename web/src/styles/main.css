@@ -1,9 +1,85 @@
-:root {
+/* Self-hosted fonts (offline-capable LAN server, no external CDN). */
+@import '@fontsource/archivo/500.css';
+@import '@fontsource/archivo/600.css';
+@import '@fontsource/archivo/700.css';
+@import '@fontsource/archivo/800.css';
+@import '@fontsource/archivo/900.css';
+@import '@fontsource-variable/hanken-grotesk';
+
+/* ── Design tokens ──────────────────────────────────────────────────────────
+   Dark is the default; [data-theme="light"] is warm paper. Tokens are semantic
+   so components never hard-code a palette. */
+:root,
+:root[data-theme='dark'] {
+  --bg: #171717;
+  --surface: #1c1c1a;
+  --surface-raised: #201f1c;
+  --panel: #1a1a18;
+
+  --text: #eaeae5;
+  --reading: #d8d6cf;
+  --muted: #9a9a92;
+  --dim: #7a7a72;
+  --dimmer: #6f6f68;
+
+  --brass: #c99a4e;
+  --brass-bright: #ddb066;
+  --on-brass: #171717;
+
+  --border: rgba(234, 234, 229, 0.08);
+  --border-strong: rgba(234, 234, 229, 0.14);
+  --hatch: rgba(234, 234, 229, 0.04);
+  --hatch-fallback: rgba(234, 234, 229, 0.05);
+
+  --glass: rgba(20, 20, 19, 0.5);
+  --pill-on-cover: rgba(12, 12, 11, 0.66);
+
+  --error: #e08a6e;
+  --success: #5aa86a;
+
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 12px 30px rgba(0, 0, 0, 0.45);
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
   --bg: #f7f5f0;
-  --fg: #1c1a17;
-  --accent: #7c3aed;
+  --surface: #efece4;
+  --surface-raised: #fffdf8;
+  --panel: #efece4;
+
+  --text: #1c1a17;
+  --reading: #2c2925;
   --muted: #6b6660;
-  color-scheme: light dark;
+  --dim: #908a80;
+  --dimmer: #908a80;
+
+  --brass: #9c6f2e;
+  --brass-bright: #b3853c;
+  --on-brass: #fffdf8;
+
+  --border: rgba(28, 26, 23, 0.1);
+  --border-strong: rgba(28, 26, 23, 0.12);
+  --hatch: rgba(28, 26, 23, 0.04);
+  --hatch-fallback: rgba(28, 26, 23, 0.04);
+
+  --glass: rgba(255, 253, 248, 0.7);
+  --pill-on-cover: rgba(255, 253, 248, 0.92);
+
+  --error: #b4502f;
+  --success: #4f8a5e;
+
+  --shadow-card: 0 5px 14px rgba(28, 26, 23, 0.16);
+  --shadow-pop: 0 12px 30px rgba(28, 26, 23, 0.2);
+
+  color-scheme: light;
+}
+
+:root {
+  --font-display: 'Archivo', system-ui, sans-serif;
+  --font-ui: 'Hanken Grotesk Variable', 'Hanken Grotesk', system-ui, sans-serif;
+  --font-read: Georgia, 'Times New Roman', serif;
 }
 
 * {
@@ -18,38 +94,70 @@ body,
 }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 #app {
   display: flex;
   flex-direction: column;
-}
-
-.app-header {
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.app-title {
-  font-weight: 700;
-  font-size: 1.1rem;
-  color: var(--accent);
-  text-decoration: none;
+  min-height: 100%;
 }
 
 .app-main {
   flex: 1;
   min-height: 0;
-  padding: 1.25rem;
 }
 
-.app-main--chromeless {
-  padding: 0;
+button {
+  font-family: var(--font-ui);
 }
 
-.placeholder {
-  color: var(--muted);
+/* Shared motion (design: page-turn 180ms, toast rises 16px / 200ms). */
+@keyframes lycFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lycRise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+@keyframes lycPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes lycShimmer {
+  0% {
+    background-position: -180% 0;
+  }
+  100% {
+    background-position: 180% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

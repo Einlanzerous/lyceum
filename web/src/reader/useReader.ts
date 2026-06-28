@@ -1,29 +1,30 @@
 // epub.js integration as a Vue composable. Owns the Book + Rendition lifecycle,
-// exposes reactive UI state (loading/error/progress/nav bounds), and folds in
-// font-size + theme controls. The rendering it drives runs in a real iframe and
-// is not unit-testable under jsdom — see the reader smoke verification.
+// exposes reactive UI state (loading/error/progress/nav bounds + chapter/page +
+// title/author + TOC), and applies the app theme + font size to the rendered
+// document. The rendering it drives runs in a real iframe and is not unit-
+// testable under jsdom — see the reader smoke verification.
 //
-// The relocate callback and initial-CFI hooks exist so LYCM-205 can capture and
+// The relocate callback and initial-CFI hooks let the reader view capture and
 // restore reading position without reaching into epub.js internals.
 
-import { onMounted, ref, shallowRef, type Ref } from 'vue'
+import { onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import ePub, { type Book, type Rendition } from 'epubjs'
 import type { Location } from 'epubjs'
+import type { NavItem } from 'epubjs'
 import { bookFileUrl } from '@/api/client'
 import { clampProgress } from '@/api/progress'
-import {
-  FONT_SIZE_DEFAULT,
-  fontSizeCss,
-  otherTheme,
-  stepFontSize,
-  themeStyles,
-  type ReaderTheme,
-} from './theme'
+import { useTheme } from '@/theme'
+import { FONT_SIZE_DEFAULT, fontSizeCss, stepFontSize, themeStyles } from './theme'
 
 /** Position information emitted on every relocate, for syncing. */
 export interface RelocateInfo {
   cfi: string
   progress: number
+}
+
+export interface TocEntry {
+  label: string
+  href: string
 }
 
 export interface UseReaderOptions {
@@ -37,31 +38,46 @@ export interface ReaderControls {
   loading: Ref<boolean>
   error: Ref<string | null>
   progress: Ref<number>
-  /** CFI of the current page; '' before the first render. */
   cfi: Ref<string>
   atStart: Ref<boolean>
   atEnd: Ref<boolean>
   fontSize: Ref<number>
-  theme: Ref<ReaderTheme>
+  title: Ref<string>
+  author: Ref<string>
+  chapter: Ref<string>
+  page: Ref<number>
+  totalPages: Ref<number>
+  toc: Ref<TocEntry[]>
   next(): void
   prev(): void
   increaseFont(): void
   decreaseFont(): void
-  toggleTheme(): void
+  /** Jump to a TOC href. */
+  goTo(href: string): void
   /** Current position, or null before the first render. For unload flush. */
   currentPosition(): RelocateInfo | null
   destroy(): void
 }
 
 const REGISTERED_THEME = 'lyceum'
-// Density of the generated locations index; higher = finer progress, slower gen.
 const LOCATION_GRANULARITY = 1600
+
+function flattenToc(items: NavItem[]): TocEntry[] {
+  const out: TocEntry[] = []
+  for (const item of items) {
+    out.push({ label: (item.label ?? '').trim(), href: item.href })
+    if (item.subitems?.length) out.push(...flattenToc(item.subitems))
+  }
+  return out
+}
 
 export function useReader(
   container: Ref<HTMLElement | null>,
   bookId: number,
   options: UseReaderOptions = {},
 ): ReaderControls {
+  const { theme } = useTheme()
+
   const loading = ref(true)
   const error = ref<string | null>(null)
   const progress = ref(0)
@@ -69,7 +85,12 @@ export function useReader(
   const atStart = ref(true)
   const atEnd = ref(false)
   const fontSize = ref(FONT_SIZE_DEFAULT)
-  const theme = ref<ReaderTheme>('light')
+  const title = ref('')
+  const author = ref('')
+  const chapter = ref('')
+  const page = ref(0)
+  const totalPages = ref(0)
+  const toc = ref<TocEntry[]>([])
 
   const book = shallowRef<Book | null>(null)
   const rendition = shallowRef<Rendition | null>(null)
@@ -86,6 +107,25 @@ export function useReader(
     rendition.value?.themes.fontSize(fontSizeCss(fontSize.value))
   }
 
+  function recomputePage(): void {
+    const b = book.value
+    if (!b || totalPages.value <= 0 || !lastPosition?.cfi) return
+    const pct = b.locations.percentageFromCfi(lastPosition.cfi)
+    page.value = Math.min(totalPages.value, Math.max(1, Math.round(pct * totalPages.value)))
+  }
+
+  function chapterFor(href: string): string {
+    const nav = book.value?.navigation
+    if (!nav) return ''
+    const direct = nav.get(href)
+    if (direct?.label) return direct.label.trim()
+    // Fall back to a prefix match against the flattened TOC (hrefs may carry
+    // fragments the spine href doesn't).
+    const base = href.split('#')[0]
+    const hit = toc.value.find((t) => t.href.split('#')[0] === base)
+    return hit?.label ?? ''
+  }
+
   function onRelocated(loc: Location): void {
     atStart.value = loc.atStart
     atEnd.value = loc.atEnd
@@ -93,6 +133,8 @@ export function useReader(
     if (typeof pct === 'number' && pct > 0) progress.value = clampProgress(pct)
     cfi.value = loc.start.cfi
     lastPosition = { cfi: loc.start.cfi, progress: progress.value }
+    chapter.value = chapterFor(loc.start.href)
+    recomputePage()
     options.onRelocate?.(lastPosition)
   }
 
@@ -119,7 +161,9 @@ export function useReader(
         width: '100%',
         height: '100%',
         flow: 'paginated',
-        spread: 'auto',
+        // Single column — the host element is constrained to a centered reading
+        // measure, so we never want epub.js's two-up spread.
+        spread: 'none',
         allowScriptedContent: false,
       })
       rendition.value = r
@@ -127,22 +171,37 @@ export function useReader(
       applyTheme()
       applyFontSize()
       r.on('relocated', onRelocated)
-      r.on('keyup', onKeyup) // key events originating inside the iframe
+      r.on('keyup', onKeyup)
+
+      // Metadata + TOC for the chrome (best-effort, non-fatal).
+      b.loaded.metadata
+        .then((md) => {
+          title.value = (md.title ?? '').trim()
+          author.value = (md.creator ?? '').trim()
+        })
+        .catch(() => {})
+      b.loaded.navigation
+        .then((nav) => {
+          toc.value = flattenToc(nav.toc ?? [])
+          if (lastPosition?.cfi) chapter.value = chapterFor(cfi.value)
+        })
+        .catch(() => {})
 
       const startCfi = options.initialCfi ? await options.initialCfi() : null
       await r.display(startCfi ?? undefined)
       loading.value = false
 
-      // Build the locations index in the background for a real progress %.
+      // Locations index → real page numbers + accurate progress.
       b.ready
         .then(() => b.locations.generate(LOCATION_GRANULARITY))
         .then(() => {
-          const cfi = lastPosition?.cfi
-          if (cfi) progress.value = clampProgress(b.locations.percentageFromCfi(cfi))
+          totalPages.value = b.locations.length()
+          if (lastPosition?.cfi) {
+            progress.value = clampProgress(b.locations.percentageFromCfi(lastPosition.cfi))
+            recomputePage()
+          }
         })
-        .catch(() => {
-          /* progress stays at the relocate estimate; non-fatal */
-        })
+        .catch(() => {})
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'failed to open book'
       loading.value = false
@@ -163,9 +222,8 @@ export function useReader(
     fontSize.value = stepFontSize(fontSize.value, -1)
     applyFontSize()
   }
-  function toggleTheme(): void {
-    theme.value = otherTheme(theme.value)
-    applyTheme()
+  function goTo(href: string): void {
+    void rendition.value?.display(href)
   }
   function currentPosition(): RelocateInfo | null {
     return lastPosition
@@ -183,7 +241,9 @@ export function useReader(
     book.value = null
   }
 
-  // Defer until the template's container element is in the DOM.
+  // Re-theme the rendered document whenever the app theme flips.
+  watch(theme, applyTheme)
+
   onMounted(() => void load())
 
   return {
@@ -194,12 +254,17 @@ export function useReader(
     atStart,
     atEnd,
     fontSize,
-    theme,
+    title,
+    author,
+    chapter,
+    page,
+    totalPages,
+    toc,
     next,
     prev,
     increaseFont,
     decreaseFont,
-    toggleTheme,
+    goTo,
     currentPosition,
     destroy,
   }

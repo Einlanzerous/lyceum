@@ -1,18 +1,11 @@
 <script setup lang="ts">
-// Root shell. The header is hidden on the reader route so the reading surface
-// gets the full viewport.
-import { computed } from 'vue'
-import { useRoute, RouterView, RouterLink } from 'vue-router'
-
-const route = useRoute()
-const chromeless = computed(() => route.meta.chromeless === true)
+// Root shell. Both routes own their full chrome (the library has a floating top
+// bar; the reader is edge-to-edge), so App is just the themed viewport.
+import { RouterView } from 'vue-router'
 </script>
 
 <template>
-  <header v-if="!chromeless" class="app-header">
-    <RouterLink to="/" class="app-title">Lyceum</RouterLink>
-  </header>
-  <main class="app-main" :class="{ 'app-main--chromeless': chromeless }">
+  <main class="app-main">
     <RouterView />
   </main>
 </template>

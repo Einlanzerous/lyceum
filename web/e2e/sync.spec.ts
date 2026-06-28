@@ -19,9 +19,9 @@ test('persists reading position and restores it on reopen', async ({ page, reque
   const startCfi = await reader.getAttribute('data-cfi')
 
   // Advance a couple of pages.
-  await page.locator('.reader__nav--next').click()
+  await page.locator('.snav--next').click()
   await expect.poll(async () => reader.getAttribute('data-cfi')).not.toBe(startCfi)
-  await page.locator('.reader__nav--next').click()
+  await page.locator('.snav--next').click()
 
   // The debounced PUT /sync converges the backend to the page on screen. Poll
   // until the stored position (latest across devices) matches the displayed
@@ -45,6 +45,6 @@ test('persists reading position and restores it on reopen', async ({ page, reque
   await expect.poll(async () => reader.getAttribute('data-cfi'), { timeout: 20_000 }).not.toBe('')
   // Restored to a non-first page: Prev is enabled (bound to atStart) and the
   // restored CFI is not the page we started this test on.
-  await expect(page.locator('.reader__nav--prev')).toBeEnabled()
+  await expect(page.locator('.snav--prev')).toBeEnabled()
   expect(await reader.getAttribute('data-cfi')).not.toBe(startCfi)
 })

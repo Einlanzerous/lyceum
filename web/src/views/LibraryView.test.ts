@@ -47,7 +47,7 @@ describe('LibraryView', () => {
 
     // Progress badge only on the book that has progress.
     expect(wrapper.text()).toContain('42%')
-    expect(wrapper.findAll('.book-card__progress')).toHaveLength(1)
+    expect(wrapper.findAll('.card__pill')).toHaveLength(1)
   })
 
   it('shows an empty-state message when there are no books', async () => {
@@ -76,7 +76,23 @@ describe('LibraryView', () => {
     await flushPromises()
 
     expect(store.uploadMany).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('1 added')
-    expect(wrapper.text()).toContain('1 already in your library')
+    expect(wrapper.text()).toContain('1 added to your library')
+    expect(wrapper.text()).toContain('1 already on the shelf')
+  })
+
+  it('reports a dropped non-EPUB instead of silently dropping it', async () => {
+    const wrapper = mountView()
+    const store = useLibraryStore()
+    store.loading = false
+    await flushPromises()
+
+    const input = wrapper.find('input[type="file"]')
+    const pdf = new File(['x'], 'rules.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [pdf], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(store.uploadMany).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain("isn't an EPUB")
   })
 })

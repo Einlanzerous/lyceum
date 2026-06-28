@@ -40,10 +40,12 @@ export function otherTheme(theme: ReaderTheme): ReaderTheme {
  * iframe content, not the host app, so it must set its own colors.
  */
 export function themeStyles(theme: ReaderTheme): Record<string, Record<string, string>> {
+  // Background matches the app bg so the page text sits directly on the reading
+  // surface (the design has no separate page card).
   const palette =
     theme === 'dark'
-      ? { color: '#e6e1d8', background: '#16140f' }
-      : { color: '#1c1a17', background: '#f7f5f0' }
+      ? { color: '#d8d6cf', background: '#171717' }
+      : { color: '#2c2925', background: '#f7f5f0' }
   return {
     body: {
       color: `${palette.color} !important`,
