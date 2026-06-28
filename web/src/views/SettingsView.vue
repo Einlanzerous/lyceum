@@ -1,16 +1,25 @@
 <script setup lang="ts">
-// Preferences home (LYCM-501). Today: theme. The Reading section reserves the
-// slot for the opt-in reading font (LYCM-502).
+// Preferences home (LYCM-501). Theme (LYCM-501) + opt-in reading font
+// (LYCM-502). Both write to persisted reactive stores the reader watches, so a
+// change here re-renders an open book live.
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme, type Theme } from '@/theme'
+import { useReadingFont } from '@/reader/readingFont'
+import { READING_FONTS, resolveFontFamily } from '@/reader/font'
 
 const router = useRouter()
 const { theme, set } = useTheme()
+const { font, set: setFont } = useReadingFont()
 
 const themeOptions: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
   { value: 'light', label: 'Light' },
 ]
+
+// Preview the chosen face. "Publisher" has no stack of its own, so fall back to
+// the design's default reading serif as a stand-in for typical book typography.
+const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--font-read)')
 </script>
 
 <template>
@@ -57,16 +66,28 @@ const themeOptions: { value: Theme; label: string }[] = [
           <div class="row">
             <div class="row__text">
               <div class="row__name">Font</div>
-              <div class="row__hint">Books render in their publisher's typography.</div>
+              <div class="row__hint">
+                Overrides every book's typeface. “Publisher” keeps the book's own.
+              </div>
             </div>
-            <span class="badge">Publisher · default</span>
+            <div class="seg" role="group" aria-label="Reading font">
+              <button
+                v-for="opt in READING_FONTS"
+                :key="opt.id"
+                type="button"
+                class="seg__btn"
+                :class="{ 'is-active': font === opt.id }"
+                :title="opt.hint"
+                @click="setFont(opt.id)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
           </div>
-          <div class="row row--muted">
-            <div class="row__text">
-              <div class="row__name">Custom reading font</div>
-              <div class="row__hint">Pick your own typeface for every book.</div>
-            </div>
-            <span class="badge badge--soon">Coming soon</span>
+          <div class="row">
+            <p class="specimen" :style="{ fontFamily: specimenFamily }">
+              The quick brown fox jumps over the lazy dog.
+            </p>
           </div>
         </div>
       </div>
@@ -145,9 +166,6 @@ const themeOptions: { value: Theme; label: string }[] = [
 .row + .row {
   border-top: 1px solid var(--border);
 }
-.row--muted {
-  opacity: 0.66;
-}
 .row__name {
   font: 600 14px var(--font-ui);
   color: var(--text);
@@ -178,18 +196,10 @@ const themeOptions: { value: Theme; label: string }[] = [
   color: var(--on-brass);
 }
 
-.badge {
-  flex: none;
-  padding: 5px 11px;
-  border-radius: 999px;
-  border: 1px solid rgba(201, 154, 78, 0.3);
-  background: rgba(201, 154, 78, 0.1);
-  color: var(--brass-bright);
-  font: 700 11px var(--font-ui);
-}
-.badge--soon {
-  border-color: var(--border-strong);
-  background: transparent;
-  color: var(--dim);
+.specimen {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--reading);
 }
 </style>

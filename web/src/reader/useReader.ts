@@ -15,6 +15,8 @@ import { bookFileUrl } from '@/api/client'
 import { clampProgress } from '@/api/progress'
 import { useTheme } from '@/theme'
 import { FONT_SIZE_DEFAULT, fontSizeCss, stepFontSize, themeStyles } from './theme'
+import { useReadingFont } from './readingFont'
+import { resolveFontFamily } from './font'
 
 /** Position information emitted on every relocate, for syncing. */
 export interface RelocateInfo {
@@ -77,6 +79,7 @@ export function useReader(
   options: UseReaderOptions = {},
 ): ReaderControls {
   const { theme } = useTheme()
+  const { font } = useReadingFont()
 
   const loading = ref(true)
   const error = ref<string | null>(null)
@@ -105,6 +108,23 @@ export function useReader(
 
   function applyFontSize(): void {
     rendition.value?.themes.fontSize(fontSizeCss(fontSize.value))
+  }
+
+  // Override the book's typeface, or remove the override to restore the
+  // publisher's own fonts. epub.js re-applies overrides to each rendered
+  // section, so this survives page turns; family and size stay independent.
+  function applyFont(): void {
+    const r = rendition.value
+    if (!r) return
+    const family = resolveFontFamily(font.value)
+    if (family) r.themes.font(family)
+    // removeOverride drops the inline font-family so the publisher's own fonts
+    // win again. It ships in epub.js (themes.js) but is missing from the
+    // bundled type defs, hence the cast.
+    else
+      (r.themes as typeof r.themes & { removeOverride(name: string): void }).removeOverride(
+        'font-family',
+      )
   }
 
   function recomputePage(): void {
@@ -170,6 +190,7 @@ export function useReader(
 
       applyTheme()
       applyFontSize()
+      applyFont()
       r.on('relocated', onRelocated)
       r.on('keyup', onKeyup)
 
@@ -243,6 +264,8 @@ export function useReader(
 
   // Re-theme the rendered document whenever the app theme flips.
   watch(theme, applyTheme)
+  // Re-apply the typeface when the reading font is changed from Settings.
+  watch(font, applyFont)
 
   onMounted(() => void load())
 
