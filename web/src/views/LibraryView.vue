@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import BookCard from '@/components/BookCard.vue'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useLibraryStore } from '@/stores/library'
 import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
@@ -128,10 +129,11 @@ function onDragLeave(): void {
             ☰
           </button>
         </div>
+        <ThemeToggle />
         <button type="button" class="lib__add" @click="fileInput?.click()">
           <span class="lib__add-plus">+</span> Add EPUB
         </button>
-        <div class="lib__avatar" aria-hidden="true">R</div>
+        <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">R</RouterLink>
         <input
           ref="fileInput"
           type="file"
@@ -318,6 +320,7 @@ function onDragLeave(): void {
   justify-content: center;
   font: 700 14px var(--font-display);
   color: var(--on-brass);
+  text-decoration: none;
 }
 
 /* ── Header ── */

@@ -5,12 +5,11 @@ import { useReader } from '@/reader/useReader'
 import { createPositionSync } from '@/reader/sync'
 import { useUnloadFlush } from '@/reader/useUnloadFlush'
 import { putPositionKeepalive } from '@/api/client'
-import { useTheme } from '@/theme'
+import ThemeToggle from '@/components/ThemeToggle.vue'
 import { formatProgress } from '@/api/progress'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
-const { theme, toggle: toggleTheme } = useTheme()
 const bookId = computed(() => Number(props.id))
 
 const container = ref<HTMLElement | null>(null)
@@ -118,14 +117,7 @@ onBeforeUnmount(() => {
             A+
           </button>
         </div>
-        <button
-          type="button"
-          class="circle circle--brass"
-          :aria-label="theme === 'dark' ? 'Switch to light' : 'Switch to dark'"
-          @click="toggleTheme()"
-        >
-          {{ theme === 'dark' ? '☾' : '☀' }}
-        </button>
+        <ThemeToggle />
         <button type="button" class="circle" aria-label="Contents" @click="openToc()">⋯</button>
       </div>
     </header>
@@ -348,11 +340,6 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.circle--brass {
-  border-color: rgba(201, 154, 78, 0.35);
-  background: rgba(201, 154, 78, 0.12);
-  color: var(--brass-bright);
 }
 
 /* ── Reading surface ── a centered reading measure, inset from the chrome. */

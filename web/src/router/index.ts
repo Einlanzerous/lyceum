@@ -13,6 +13,11 @@ const routes: RouteRecordRaw[] = [
     props: true,
     meta: { chromeless: true },
   },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/SettingsView.vue'),
+  },
 ]
 
 export const router = createRouter({
