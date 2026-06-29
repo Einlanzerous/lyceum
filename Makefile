@@ -8,7 +8,7 @@ include .env
 export
 endif
 
-.PHONY: build build-web release run test lint vet tidy
+.PHONY: build build-web release run dev check-env web-deps test lint vet tidy
 
 build:
 	go build -o bin/$(BINARY) ./cmd/lyceum
@@ -24,6 +24,28 @@ release: build-web build
 
 run:
 	go run ./cmd/lyceum
+
+# One-command dev environment: the Go backend (API + auto-migrate on boot, :8080)
+# alongside the Vite dev server (HMR), which proxies API routes to the backend.
+# Open the Vite URL it prints (default http://localhost:5173). Ctrl-C stops both.
+dev: check-env web-deps
+	@echo "==> lyceum backend (:8080) + vite dev server — Ctrl-C stops both"
+	@go run ./cmd/lyceum & back=$$!; \
+		( cd $(WEB_DIR) && npm run dev ) & front=$$!; \
+		trap 'kill $$back $$front 2>/dev/null' INT TERM; \
+		wait
+
+# Guard: the backend needs .env for the Postgres DSN/password (loaded above).
+check-env:
+	@test -f .env || { \
+		echo "No .env found. Create one and set the lyceum_user password:"; \
+		echo "    cp .env.example .env"; \
+		exit 1; \
+	}
+
+# Install web dependencies on first run (skipped once node_modules exists).
+web-deps:
+	@test -d $(WEB_DIR)/node_modules || { echo "==> installing web deps"; cd $(WEB_DIR) && npm install; }
 
 test:
 	go test $(PKG)

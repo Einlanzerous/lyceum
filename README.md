@@ -39,7 +39,16 @@ cp .env.example .env     # then set the lyceum_user password
 | `DATABASE_URL`       | App connection (the `lyceum` database)         |
 | `TEST_DATABASE_URL`  | Store/API tests (the `lyceum_test` database)   |
 
-## Phase 1 quickstart
+## Quickstart
+
+```sh
+cp .env.example .env           # then set the lyceum_user password
+make dev                       # backend (:8080, auto-migrates) + Vite reader (HMR)
+```
+
+`make dev` runs both processes together and proxies the reader's API calls to
+the backend; open the Vite URL it prints (default http://localhost:5173) and
+Ctrl-C stops both. Backend only:
 
 ```sh
 go build ./...                 # compile
