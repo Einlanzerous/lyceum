@@ -25,16 +25,30 @@ release: build-web build
 run:
 	go run ./cmd/lyceum
 
-# One-command dev environment: the Go backend (API + auto-migrate on boot, :8080)
+# One-command dev environment: the Go backend (API + auto-migrate on boot)
 # alongside the Vite dev server (HMR), which proxies API routes to the backend.
 # Vite runs with --host so it's reachable from another machine (this serves from
 # a server, tested from a desktop); the backend stays on localhost since Vite
-# proxies API calls to it server-side. Ctrl-C stops both; see the Network URL
-# Vite prints for the LAN address.
+# proxies API calls to it server-side. Open the Network URL Vite prints; Ctrl-C
+# stops both.
+#
+# Backend port: `make dev PORT=9000` wins, else LYCEUM_ADDR's port (.env), else
+# 8080 — but if that port is already taken (e.g. another service on 8080) we fall
+# back to a free one so the reader never proxies to the wrong service. Both the
+# backend and Vite's proxy are pinned to the same chosen port.
 dev: check-env web-deps
-	@echo "==> lyceum backend (:8080) + vite dev server (--host) — Ctrl-C stops both"
-	@go run ./cmd/lyceum & back=$$!; \
-		( cd $(WEB_DIR) && npm run dev -- --host ) & front=$$!; \
+	@port="$(PORT)"; \
+		[ -n "$$port" ] || port="$${LYCEUM_ADDR##*:}"; \
+		[ -n "$$port" ] || port=8080; \
+		if command -v python3 >/dev/null 2>&1 && \
+		   ! python3 -c "import socket,sys; sys.exit(1 if socket.socket().connect_ex(('127.0.0.1',int('$$port')))==0 else 0)"; then \
+			free=$$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1])"); \
+			echo "==> port $$port is in use; using free backend port $$free instead"; \
+			port=$$free; \
+		fi; \
+		echo "==> lyceum backend (:$$port) + vite dev server (--host) — open Vite's Network URL; Ctrl-C stops both"; \
+		LYCEUM_ADDR=":$$port" go run ./cmd/lyceum & back=$$!; \
+		( cd $(WEB_DIR) && LYCEUM_BACKEND="http://localhost:$$port" npm run dev -- --host ) & front=$$!; \
 		trap 'kill $$back $$front 2>/dev/null' INT TERM; \
 		wait
 
