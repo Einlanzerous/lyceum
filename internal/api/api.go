@@ -28,19 +28,36 @@ type Store interface {
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
 	SaveBlobs(fileHash string, epub, cover []byte) (filePath, coverPath string, err error)
+	ListDeliveriesByBook(ctx context.Context, bookID int64) ([]store.Delivery, error)
 }
 
 // API bundles the dependencies the handlers need.
 type API struct {
-	store   Store
-	dataDir string
+	store    Store
+	dataDir  string
+	auth     *TokenAuth      // bearer-token table for the /eidolon + delivery routes
+	delivery *deliveryConfig // "Send to Kindle" dispatcher + policy (nil when unconfigured)
+}
+
+// Option configures an API at construction time.
+type Option func(*API)
+
+// WithAuth installs the bearer-token table guarding the ecosystem hooks
+// (/eidolon/*) and the send-to-kindle route. Without it those routes are
+// closed (every request 401s); core reader routes are unaffected.
+func WithAuth(auth *TokenAuth) Option {
+	return func(a *API) { a.auth = auth }
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
-func New(s Store, dataDir string) *API {
-	return &API{store: s, dataDir: dataDir}
+func New(s Store, dataDir string, opts ...Option) *API {
+	a := &API{store: s, dataDir: dataDir}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Handler returns a ServeMux wired with the library and blob routes. Callers
@@ -53,6 +70,14 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("GET /sync", a.handleSyncGet)
 	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)
 	mux.HandleFunc("GET /books/{id}/file", a.handleFile)
+
+	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
+	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
+	mux.HandleFunc("GET /books/{id}/deliveries", a.requireScope(ScopeDeliverySend, a.handleListDeliveries))
+
+	// Project Eidolon hooks (LYCM-403/404). Read-only; require eidolon:read.
+	mux.HandleFunc("GET /eidolon/books/{id}/location", a.requireScope(ScopeEidolonRead, a.handleEidolonLocation))
+	mux.HandleFunc("GET /eidolon/books/{id}/chapter", a.requireScope(ScopeEidolonRead, a.handleEidolonChapter))
 	return mux
 }
 

@@ -48,6 +48,25 @@ make run                       # boots HTTP server with /healthz
 curl localhost:8080/healthz
 ```
 
+## Ecosystem & Agent Integration (LYCM-400)
+
+Phase 4 adds two integrations on top of the core, both gated by static bearer
+tokens (`LYCEUM_API_TOKENS`, scopes `eidolon:read` / `delivery:send`). See
+[`.env.example`](.env.example) for every knob.
+
+- **Send to Kindle** (LYCM-401/402) — configure an SMTP relay
+  (`LYCEUM_SMTP_*`) and a `LYCEUM_KINDLE_ADDR`; deliveries run off an in-process
+  async queue.
+  - `POST /books/{id}/send-to-kindle` *(scope `delivery:send`)* — body
+    `{"to_addr": "..."}` optional, falls back to the configured address. Returns
+    `202` with a queued delivery record.
+  - `GET /books/{id}/deliveries` *(scope `delivery:send`)* — delivery history /
+    status (`queued` → `sent` | `failed`).
+  - With `LYCEUM_KINDLE_AUTO_SEND=true`, every uploaded book is auto-delivered.
+- **Project Eidolon hooks** (LYCM-403/404) — read-only reading-location and
+  TTS-ready chapter text under `/eidolon/*` *(scope `eidolon:read`)*. Contract:
+  [`docs/eidolon-api.md`](docs/eidolon-api.md).
+
 ## Roadmap (Switchyard epics)
 
 | Epic     | Phase | Theme                                   |

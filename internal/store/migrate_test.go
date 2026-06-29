@@ -117,13 +117,30 @@ func TestMigrateIdempotent(t *testing.T) {
 		t.Fatalf("second Migrate: %v", err)
 	}
 
+	// Two runs must apply each embedded migration exactly once. Derive the
+	// expected count from the embedded set so adding a migration doesn't make
+	// this assertion stale.
+	want, err := countUpMigrations()
+	if err != nil {
+		t.Fatalf("countUpMigrations: %v", err)
+	}
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("expected 1 applied migration after two runs, got %d", n)
+	if n != want {
+		t.Errorf("expected %d applied migrations after two runs, got %d", want, n)
 	}
+}
+
+// countUpMigrations counts the embedded *.up.sql files, the canonical number of
+// migrations Migrate should apply.
+func countUpMigrations() (int, error) {
+	migs, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	return len(migs), nil
 }
 
 func TestConnectBadDSN(t *testing.T) {

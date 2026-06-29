@@ -86,6 +86,10 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fire-and-forget "Send to Kindle" when auto-send is configured. Done after
+	// the row is persisted and never blocks or fails the upload response.
+	a.maybeAutoDeliver(ctx, saved)
+
 	entry := bookJSON{
 		ID:     saved.ID,
 		Title:  saved.Title,

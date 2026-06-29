@@ -25,20 +25,20 @@ func TestValidateCFI_Valid(t *testing.T) {
 
 func TestValidateCFI_Malformed(t *testing.T) {
 	bad := []string{
-		"",                              // empty
-		"/6/4/2",                        // no wrapper
-		"epubcfi(/6/4",                  // missing close paren
-		"epubcfi()",                     // empty path
-		"epubcfi(6/4)",                  // does not start with '/'
-		"epubcfi(/6//4)",                // empty step (missing number)
-		"epubcfi(/6/4[])",               // empty assertion
-		"epubcfi(/6/4[chap)",            // unterminated assertion
-		"epubcfi(/6/4:)",                // colon with no offset
-		"epubcfi(/6/x)",                 // non-numeric step
-		"epubcfi(/6/4,/2)",              // 2 comma parts (not 1 or 3)
-		"epubcfi(/6/4,,/2)",             // empty range branch
-		"epubcfi(/6/4,/2,/3,/4)",        // 4 comma parts
-		"notepubcfi(/6/4)",              // wrong prefix
+		"",                       // empty
+		"/6/4/2",                 // no wrapper
+		"epubcfi(/6/4",           // missing close paren
+		"epubcfi()",              // empty path
+		"epubcfi(6/4)",           // does not start with '/'
+		"epubcfi(/6//4)",         // empty step (missing number)
+		"epubcfi(/6/4[])",        // empty assertion
+		"epubcfi(/6/4[chap)",     // unterminated assertion
+		"epubcfi(/6/4:)",         // colon with no offset
+		"epubcfi(/6/x)",          // non-numeric step
+		"epubcfi(/6/4,/2)",       // 2 comma parts (not 1 or 3)
+		"epubcfi(/6/4,,/2)",      // empty range branch
+		"epubcfi(/6/4,/2,/3,/4)", // 4 comma parts
+		"notepubcfi(/6/4)",       // wrong prefix
 	}
 	for _, s := range bad {
 		if err := ValidateCFI(s); err == nil {
