@@ -27,11 +27,14 @@ run:
 
 # One-command dev environment: the Go backend (API + auto-migrate on boot, :8080)
 # alongside the Vite dev server (HMR), which proxies API routes to the backend.
-# Open the Vite URL it prints (default http://localhost:5173). Ctrl-C stops both.
+# Vite runs with --host so it's reachable from another machine (this serves from
+# a server, tested from a desktop); the backend stays on localhost since Vite
+# proxies API calls to it server-side. Ctrl-C stops both; see the Network URL
+# Vite prints for the LAN address.
 dev: check-env web-deps
-	@echo "==> lyceum backend (:8080) + vite dev server — Ctrl-C stops both"
+	@echo "==> lyceum backend (:8080) + vite dev server (--host) — Ctrl-C stops both"
 	@go run ./cmd/lyceum & back=$$!; \
-		( cd $(WEB_DIR) && npm run dev ) & front=$$!; \
+		( cd $(WEB_DIR) && npm run dev -- --host ) & front=$$!; \
 		trap 'kill $$back $$front 2>/dev/null' INT TERM; \
 		wait
 
