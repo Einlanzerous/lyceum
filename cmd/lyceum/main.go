@@ -33,6 +33,11 @@ type config struct {
 	databaseURL string // Postgres connection string (pgx DSN)
 	dataDir     string // blob storage (EPUBs + extracted covers)
 
+	// Folder ingest (LYCM-601): watch the acquisition stack's book library and
+	// ingest new EPUBs. Disabled when booksWatchDir is empty.
+	booksWatchDir      string // LYCEUM_BOOKS_WATCH_DIR — e.g. /data/media/books
+	booksWatchInterval int    // LYCEUM_BOOKS_WATCH_INTERVAL — poll seconds
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -45,6 +50,9 @@ func loadConfig() config {
 		addr:        envOr("LYCEUM_ADDR", ":8080"),
 		databaseURL: firstEnv([]string{"LYCEUM_DATABASE_URL", "DATABASE_URL"}, defaultDatabaseURL),
 		dataDir:     envOr("LYCEUM_DATA_DIR", "data/blobs"),
+
+		booksWatchDir:      os.Getenv("LYCEUM_BOOKS_WATCH_DIR"),
+		booksWatchInterval: envOrInt("LYCEUM_BOOKS_WATCH_INTERVAL", 15),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -155,12 +163,24 @@ func main() {
 	// catch-all. Go 1.22's ServeMux prefers the more specific pattern, so API
 	// and asset requests win and only unmatched paths (e.g. /reader/1 deep
 	// links) fall through to index.html for client-side routing.
-	mux := api.New(st, cfg.dataDir, opts...).Handler()
+	apiSrv := api.New(st, cfg.dataDir, opts...)
+	mux := apiSrv.Handler()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok","service":"lyceum"}`))
 	})
 	mux.Handle("/", web.Handler())
+
+	// Folder ingest: poll the acquisition stack's book library and ingest new
+	// EPUBs through the same path as /upload. Its context is cancelled on
+	// shutdown so the poller returns cleanly.
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	if cfg.booksWatchDir != "" {
+		watcher := api.NewWatcher(apiSrv, cfg.booksWatchDir,
+			time.Duration(cfg.booksWatchInterval)*time.Second)
+		go watcher.Run(watchCtx)
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.addr,

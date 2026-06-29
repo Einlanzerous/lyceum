@@ -76,6 +76,34 @@ tokens (`LYCEUM_API_TOKENS`, scopes `eidolon:read` / `delivery:send`). See
   TTS-ready chapter text under `/eidolon/*` *(scope `eidolon:read`)*. Contract:
   [`docs/eidolon-api.md`](docs/eidolon-api.md).
 
+## Acquisition & inventory (LYCM-601)
+
+Lyceum tracks **ownership** of a title separately from having its EPUB. The
+`inventory` table is keyed by canonical ISBN-13 and carries an
+`acquisition_state` (`owned` → `wanted` → `acquiring` → `ingested`) plus a
+nullable link to the ingested `books` row — so a physical book you own can be
+recorded before any digital file exists.
+
+- **Capture** *(feeds LYCM-602 barcode scanning)*
+  - `POST /inventory` — body `{"isbn": "...", "title"?, "author"?, "find_digital"?}`.
+    Accepts any ISBN-10/13 form (hyphenated, `urn:isbn:`, ISBN-10), normalizes to
+    ISBN-13, and records the title as `owned`. With `find_digital: true` it hands
+    the ISBN to the acquisition pipeline and marks it `wanted` (a title already
+    `ingested` is left untouched). Returns the inventory entry.
+  - `GET /inventory` — all entries, most-recently-updated first.
+- **Folder ingest** — set `LYCEUM_BOOKS_WATCH_DIR` to the acquisition stack's
+  book library (`/data/media/books` in
+  [`argosy-acquisition`](../../construct-server/services/argosy-acquisition)).
+  A poller picks up new EPUBs and runs the *same* core as `POST /upload`
+  (validate → SHA-256 dedup → store), then stamps the ISBN from the EPUB's
+  `dc:identifier` onto inventory and flips it to `ingested`. Upload and folder
+  ingest share one code path (`ingestEPUB`), so dedup holds across both.
+- **Acquire** — the `argosy-acquisition` **Bindery** container grabs DRM-free
+  EPUBs for owned titles and imports them to `/data/media/books`, where the
+  watcher ingests them. The `ISBN → request a grab` step is behind an `Acquirer`
+  seam (logging no-op by default); a live Bindery client is wired via
+  `WithAcquirer` once that stack is configured.
+
 ## Roadmap (Switchyard epics)
 
 | Epic     | Phase | Theme                                   |

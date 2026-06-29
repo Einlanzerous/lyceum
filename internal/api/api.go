@@ -29,6 +29,12 @@ type Store interface {
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
 	SaveBlobs(fileHash string, epub, cover []byte) (filePath, coverPath string, err error)
 	ListDeliveriesByBook(ctx context.Context, bookID int64) ([]store.Delivery, error)
+
+	// Inventory (LYCM-601): ownership/acquisition state keyed by ISBN.
+	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
+	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
+	LinkBookToInventory(ctx context.Context, isbn string, bookID int64, title, author string) (store.Inventory, error)
+	ListInventory(ctx context.Context) ([]store.Inventory, error)
 }
 
 // API bundles the dependencies the handlers need.
@@ -37,6 +43,7 @@ type API struct {
 	dataDir  string
 	auth     *TokenAuth      // bearer-token table for the /eidolon + delivery routes
 	delivery *deliveryConfig // "Send to Kindle" dispatcher + policy (nil when unconfigured)
+	acquirer Acquirer        // ISBN -> DRM-free copy requester (logging no-op by default)
 }
 
 // Option configures an API at construction time.
@@ -53,7 +60,7 @@ func WithAuth(auth *TokenAuth) Option {
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
 func New(s Store, dataDir string, opts ...Option) *API {
-	a := &API{store: s, dataDir: dataDir}
+	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -66,6 +73,13 @@ func (a *API) Handler() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /upload", a.handleUpload)
 	mux.HandleFunc("GET /library", a.handleLibrary)
+
+	// Inventory (LYCM-601): the scan/capture surface LYCM-602 feeds. Open like
+	// /upload and /library — the personal read/write core, not the scoped
+	// ecosystem hooks.
+	mux.HandleFunc("POST /inventory", a.handleInventoryCreate)
+	mux.HandleFunc("GET /inventory", a.handleInventoryList)
+
 	mux.HandleFunc("PUT /sync", a.handleSyncPut)
 	mux.HandleFunc("GET /sync", a.handleSyncGet)
 	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)

@@ -59,7 +59,7 @@ func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, erro
 func cleanState(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx, `
-		DROP TABLE IF EXISTS reading_positions, devices, books, schema_migrations CASCADE`)
+		DROP TABLE IF EXISTS reading_positions, devices, inventory, deliveries, books, schema_migrations CASCADE`)
 	if err != nil {
 		t.Fatalf("clean state: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestMigrate(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	for _, tbl := range []string{"books", "devices", "reading_positions", "schema_migrations"} {
+	for _, tbl := range []string{"books", "devices", "reading_positions", "inventory", "schema_migrations"} {
 		if !tableExists(ctx, t, pool, tbl) {
 			t.Errorf("expected table %q to exist after Migrate", tbl)
 		}
