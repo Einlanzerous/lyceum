@@ -1,0 +1,14 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Lyceum",
+  "outputfilename": "Lyceum",
+  "frontend:dir": "frontend",
+  "frontend:install": "npm --prefix ../../../web ci",
+  "frontend:build": "node copy-dist.mjs",
+  "info": {
+    "companyName": "Lyceum",
+    "productName": "Lyceum",
+    "productVersion": "0.1.0",
+    "comments": "DRM-free ebook reader — desktop shell (LYCM-300)"
+  }
+}

@@ -9,8 +9,17 @@ import vue from '@vitejs/plugin-vue'
 const BACKEND = process.env.LYCEUM_BACKEND ?? 'http://localhost:8080'
 const apiRoutes = ['/upload', '/library', '/sync', '/books']
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [vue()],
+  define: {
+    // Build target (LYCM-300), surfaced as import.meta.env.VITE_LYCEUM_TARGET.
+    // The native shells (Wails/Capacitor) build with `npm run build:native`
+    // (`vite build --mode native`); api/base.ts reads this to decide whether
+    // API URLs are same-origin relative (web) or prefixed with the
+    // user-configured remote backend (native). `--mode` keeps it cross-platform
+    // with no extra dependency. Default: web.
+    'import.meta.env.VITE_LYCEUM_TARGET': JSON.stringify(mode === 'native' ? 'native' : 'web'),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -21,4 +30,4 @@ export default defineConfig({
       apiRoutes.map((route) => [route, { target: BACKEND, changeOrigin: true }]),
     ),
   },
-})
+}))

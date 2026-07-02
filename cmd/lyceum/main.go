@@ -38,6 +38,11 @@ type config struct {
 	booksWatchDir      string // LYCEUM_BOOKS_WATCH_DIR — e.g. /data/media/books
 	booksWatchInterval int    // LYCEUM_BOOKS_WATCH_INTERVAL — poll seconds
 
+	// Cross-platform wrappers (LYCM-300): extra CORS origins the native shells
+	// (Wails/Capacitor) call from. The built-in native origins are always
+	// allowed; this extends them (or "*" allows any).
+	corsOrigins string // LYCEUM_CORS_ORIGINS — comma-separated
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -53,6 +58,8 @@ func loadConfig() config {
 
 		booksWatchDir:      os.Getenv("LYCEUM_BOOKS_WATCH_DIR"),
 		booksWatchInterval: envOrInt("LYCEUM_BOOKS_WATCH_INTERVAL", 15),
+
+		corsOrigins: os.Getenv("LYCEUM_CORS_ORIGINS"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -171,6 +178,14 @@ func main() {
 	})
 	mux.Handle("/", web.Handler())
 
+	// Cross-platform wrappers (LYCM-300): the native shells call this server
+	// from a different origin (wails.localhost / capacitor localhost), so wrap
+	// the whole mux with CORS. The web build is same-origin and unaffected (it
+	// sends no Origin). Preflights are answered here before the method-specific
+	// routes can 405 them.
+	corsOrigins := api.ParseCORSOrigins(cfg.corsOrigins)
+	handler := api.CORS(corsOrigins, mux)
+
 	// Folder ingest: poll the acquisition stack's book library and ingest new
 	// EPUBs through the same path as /upload. Its context is cancelled on
 	// shutdown so the poller returns cleanly.
@@ -184,7 +199,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

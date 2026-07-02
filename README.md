@@ -18,6 +18,7 @@ internal/epub/   # EPUB metadata parser + CFI utils (LYCM-104/108)
 internal/api/    # REST handlers: /upload /library /sync (LYCM-105/106/107)
 migrations/      # embedded SQL migrations (LYCM-102)
 web/             # TypeScript + epub.js reader (Phase 2)
+wrappers/        # native shells: Wails (Windows) + Capacitor (Android) (Phase 3)
 docs/            # architecture + eidolon-api contract
 ```
 
@@ -55,6 +56,26 @@ go build ./...                 # compile
 set -a; . ./.env; set +a       # load DATABASE_URL
 make run                       # boots HTTP server with /healthz
 curl localhost:8080/healthz
+```
+
+## Native wrappers (LYCM-300)
+
+Phase 3 packages the *same* web reader as native apps — a Windows `.exe` (Wails)
+and a sideloadable Android `.apk` (Capacitor) — that reach a remote Lyceum
+server and sync just like the browser. See [`wrappers/`](wrappers/) for the full
+picture; the short version:
+
+- The shells embed the SPA built with `npm run build:native`. In that mode the
+  frontend prefixes every API call with a **server URL the user configures on
+  first run** (Settings → Connection) instead of using same-origin relative
+  URLs. The web build is unchanged.
+- The backend allows the shells' cross-origin calls via a CORS allowlist
+  (`internal/api/cors.go`). The built-in native origins work out of the box;
+  `LYCEUM_CORS_ORIGINS` extends them.
+
+```sh
+make wails-windows     # → wrappers/wails/build/bin/Lyceum.exe   (needs the Wails CLI)
+make android-apk       # → app-debug.apk                          (needs JDK 17 + Android SDK)
 ```
 
 ## Ecosystem & Agent Integration (LYCM-400)

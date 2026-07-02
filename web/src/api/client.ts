@@ -1,8 +1,11 @@
-// Typed client over the Phase 1 Go backend. All URLs are same-origin relative:
-// in dev the Vite proxy (LYCM-201) forwards them to :8080; in prod the Go
-// server serves this bundle and the API from the same origin (LYCM-207).
+// Typed client over the Phase 1 Go backend. Every URL is resolved through
+// apiUrl() (./base): in the web build that yields same-origin relative URLs —
+// the Vite proxy forwards them in dev (LYCM-201) and the Go server serves them
+// in prod (LYCM-207); in the native shells (Wails/Capacitor, LYCM-300) it
+// prefixes the user-configured remote backend.
 
 import type { Book, Position, PositionInput } from './types'
+import { apiUrl } from './base'
 
 /**
  * Error thrown for any non-2xx response (except GET /sync 404, which maps to
@@ -29,19 +32,19 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, body)
 }
 
-/** Relative URL of a book's cover image. */
+/** URL of a book's cover image (absolute in native shells, relative on web). */
 export function coverUrl(id: number): string {
-  return `/books/${id}/cover`
+  return apiUrl(`/books/${id}/cover`)
 }
 
-/** Relative URL of a book's EPUB file (Range-supported, served by the backend). */
+/** URL of a book's EPUB file (Range-supported, served by the backend). */
 export function bookFileUrl(id: number): string {
-  return `/books/${id}/file`
+  return apiUrl(`/books/${id}/file`)
 }
 
 /** GET /library — every book in the collection. */
 export async function listLibrary(): Promise<Book[]> {
-  const res = await fetch('/library')
+  const res = await fetch(apiUrl('/library'))
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book[]
 }
@@ -53,7 +56,7 @@ export async function listLibrary(): Promise<Book[]> {
 export async function uploadBook(file: File): Promise<Book> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch('/upload', { method: 'POST', body: form })
+  const res = await fetch(apiUrl('/upload'), { method: 'POST', body: form })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
@@ -65,7 +68,7 @@ export async function uploadBook(file: File): Promise<Book> {
  */
 export async function getPosition(bookId: number, deviceId: string): Promise<Position | null> {
   const params = new URLSearchParams({ book_id: String(bookId), device_id: deviceId })
-  const res = await fetch(`/sync?${params.toString()}`)
+  const res = await fetch(apiUrl(`/sync?${params.toString()}`))
   if (res.status === 404) return null
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Position
@@ -77,7 +80,7 @@ export async function getPosition(bookId: number, deviceId: string): Promise<Pos
  */
 export async function putPosition(pos: PositionInput): Promise<Position> {
   const body: Position = { ...pos, updated_at: pos.updated_at ?? new Date().toISOString() }
-  const res = await fetch('/sync', {
+  const res = await fetch(apiUrl('/sync'), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -93,7 +96,7 @@ export async function putPosition(pos: PositionInput): Promise<Position> {
  */
 export function putPositionKeepalive(pos: PositionInput): void {
   const body: Position = { ...pos, updated_at: pos.updated_at ?? new Date().toISOString() }
-  void fetch('/sync', {
+  void fetch(apiUrl('/sync'), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
