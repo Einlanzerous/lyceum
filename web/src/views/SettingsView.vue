@@ -7,10 +7,22 @@ import { useRouter } from 'vue-router'
 import { useTheme, type Theme } from '@/theme'
 import { useReadingFont } from '@/reader/readingFont'
 import { READING_FONTS, resolveFontFamily } from '@/reader/font'
+import { isNativeShell } from '@/api/base'
+import { useProfile } from '@/profile'
+import ServerSettings from '@/components/ServerSettings.vue'
 
 const router = useRouter()
 const { theme, set } = useTheme()
 const { font, set: setFont } = useReadingFont()
+const { name, initial, defaultName, set: setName } = useProfile()
+
+function onName(event: Event): void {
+  setName((event.target as HTMLInputElement).value)
+}
+
+// Native shells (Wails/Capacitor) talk to a remote backend the user configures;
+// the web build is served by that backend, so the section is hidden there.
+const isNative = isNativeShell()
 
 const themeOptions: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
@@ -33,6 +45,39 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
     <div class="settings__body">
       <div class="settings__eyebrow">Preferences</div>
       <h1 class="settings__title">Settings</h1>
+
+      <!-- Profile -->
+      <div class="group">
+        <div class="group__label">Profile</div>
+        <div class="card">
+          <div class="row">
+            <div class="profile">
+              <div class="profile__avatar" aria-hidden="true">{{ initial }}</div>
+              <input
+                class="profile__name"
+                type="text"
+                :value="name"
+                :placeholder="defaultName"
+                maxlength="40"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Display name"
+                @input="onName"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connection (native shells only) -->
+      <div v-if="isNative" class="group">
+        <div class="group__label">Connection</div>
+        <div class="card">
+          <div class="row row--stack">
+            <ServerSettings />
+          </div>
+        </div>
+      </div>
 
       <!-- Appearance -->
       <div class="group">
@@ -166,6 +211,9 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
 .row + .row {
   border-top: 1px solid var(--border);
 }
+.row--stack {
+  display: block;
+}
 .row__name {
   font: 600 14px var(--font-ui);
   color: var(--text);
@@ -201,5 +249,45 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
   font-size: 18px;
   line-height: 1.5;
   color: var(--reading);
+}
+
+/* Profile */
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.profile__avatar {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brass), #7a5d2c);
+  color: var(--on-brass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 18px var(--font-display);
+}
+.profile__name {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: var(--text);
+  font: 800 20px var(--font-display);
+  padding: 4px 0;
+}
+.profile__name:hover {
+  border-bottom-color: var(--border-strong);
+}
+.profile__name::placeholder {
+  color: var(--dim);
+}
+.profile__name:focus {
+  outline: none;
+  border-bottom-color: var(--brass);
 }
 </style>

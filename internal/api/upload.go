@@ -1,16 +1,9 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
-	"path/filepath"
-	"strings"
-
-	"github.com/magos/lyceum/internal/epub"
-	"github.com/magos/lyceum/internal/store"
 )
 
 // maxUploadBytes caps an uploaded EPUB. It is generous (200 MiB) but bounds
@@ -18,9 +11,9 @@ import (
 const maxUploadBytes = 200 << 20
 
 // handleUpload ingests an EPUB from a multipart/form-data request (field
-// "file"): it validates the bytes are a real EPUB, content-addresses them by
-// SHA-256, rejects duplicates, persists the blob + cover + row, and responds
-// 201 with the created book JSON.
+// "file"). It reads and bounds the body, then hands the bytes to the shared
+// ingestEPUB core, mapping its result to HTTP: 201 with the created book JSON,
+// 400 for a non-EPUB, 409 for a duplicate.
 func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -44,45 +37,16 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate it is a real EPUB by parsing it.
-	md, err := epub.ParseBytes(data)
-	if err != nil {
+	saved, created, err := a.ingestEPUB(ctx, data, header.Filename)
+	switch {
+	case errors.Is(err, errNotEPUB):
 		http.Error(w, "uploaded file is not a valid EPUB", http.StatusBadRequest)
 		return
-	}
-
-	sum := sha256.Sum256(data)
-	hash := hex.EncodeToString(sum[:])
-
-	// Dedup: reject an EPUB whose content we already hold.
-	switch _, err := a.store.GetBookByHash(ctx, hash); {
-	case err == nil:
+	case err != nil:
+		serverError(w, "ingest epub", err)
+		return
+	case !created:
 		http.Error(w, "book already exists", http.StatusConflict)
-		return
-	case errors.Is(err, store.ErrNotFound):
-		// not a duplicate; continue
-	default:
-		serverError(w, "lookup by hash", err)
-		return
-	}
-
-	filePath, coverPath, err := a.store.SaveBlobs(hash, data, md.CoverData)
-	if err != nil {
-		serverError(w, "save blobs", err)
-		return
-	}
-
-	book := store.Book{
-		Title:     uploadTitle(md, header.Filename),
-		Author:    strings.TrimSpace(md.Author),
-		CoverPath: coverPath,
-		FilePath:  filePath,
-		FileHash:  hash,
-		SizeBytes: int64(len(data)),
-	}
-	saved, err := a.store.InsertBook(ctx, book)
-	if err != nil {
-		serverError(w, "insert book", err)
 		return
 	}
 
@@ -95,21 +59,4 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		entry.CoverURL = coverURL(saved.ID)
 	}
 	writeJSON(w, http.StatusCreated, entry)
-}
-
-// uploadTitle prefers the EPUB's declared title, falling back to the uploaded
-// filename (minus extension) so a book never lands with an empty NOT NULL
-// title column.
-func uploadTitle(md *epub.Metadata, filename string) string {
-	if t := strings.TrimSpace(md.Title); t != "" {
-		return t
-	}
-	base := filepath.Base(filename)
-	if ext := filepath.Ext(base); ext != "" {
-		base = strings.TrimSuffix(base, ext)
-	}
-	if base = strings.TrimSpace(base); base != "" && base != "." && base != "/" {
-		return base
-	}
-	return "Untitled"
 }

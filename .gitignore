@@ -14,9 +14,18 @@
 # Web (see web/.gitignore for node_modules / dist / test artifacts; the
 # placeholder web/dist/.gitkeep is kept so //go:embed in web/embed.go compiles)
 
-# Native build artifacts
+# Native wrappers (LYCM-300)
+node_modules/
+# Wails: built .exe and the SPA bundle copied in from web/dist (keep .gitkeep).
 build/bin/
-android/
+wrappers/wails/frontend/dist/*
+!wrappers/wails/frontend/dist/.gitkeep
+# Capacitor: generated android/ project and the SPA bundle copied into www/.
+# (Scoped to the Capacitor wrapper — the Flutter app's mobile/lyceum/android/ is
+# hand-configured and IS tracked.)
+wrappers/capacitor/android/
+wrappers/capacitor/www/*
+!wrappers/capacitor/www/.gitkeep
 
 # Env
 .env

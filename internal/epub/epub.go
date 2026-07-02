@@ -63,6 +63,11 @@ type opfPackage struct {
 	Manifest struct {
 		Items []manifestItem `xml:"item"`
 	} `xml:"manifest"`
+	Spine struct {
+		Items []struct {
+			IDRef string `xml:"idref,attr"`
+		} `xml:"itemref"`
+	} `xml:"spine"`
 }
 
 type manifestItem struct {

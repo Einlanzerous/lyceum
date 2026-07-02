@@ -1,0 +1,72 @@
+name: wrappers
+
+# Native shell builds (LYCM-300). Scoped to the wrapper + frontend sources so
+# backend-only changes don't pay for it (mirrors argosy's per-area job split in
+# mobile.yml). Each job builds a debug artifact and uploads it; signing/release
+# is a separate concern.
+on:
+  pull_request:
+    paths: ["wrappers/**", "web/**", ".github/workflows/wrappers.yml"]
+  push:
+    branches: [main]
+    paths: ["wrappers/**", "web/**", ".github/workflows/wrappers.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install deps
+        run: |
+          npm --prefix web ci
+          npm --prefix wrappers/capacitor install
+      # Build the SPA into www BEFORE `cap add` — Capacitor's add step copies
+      # www into the native project and errors if it has no index.html.
+      - name: Build web bundle into www, then generate android project
+        run: |
+          npm --prefix wrappers/capacitor run copy-web
+          npm --prefix wrappers/capacitor run add:android
+      - name: Build debug APK
+        run: npm --prefix wrappers/capacitor run build:apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lyceum-android-debug
+          path: wrappers/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
+      # install web deps explicitly so it's present regardless of whether wails
+      # runs frontend:install.
+      - name: Install web deps (for the Wails frontend build)
+        run: npm --prefix web ci
+      # frontend:build builds web/ in native mode and copies the bundle in.
+      # -skipbindings: the app binds no Go methods (see app.go).
+      - name: Build Windows .exe
+        working-directory: wrappers/wails
+        run: wails build -platform windows/amd64 -skipbindings
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lyceum-windows
+          path: wrappers/wails/build/bin/Lyceum.exe

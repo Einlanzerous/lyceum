@@ -2,105 +2,45 @@
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import BookCard from '@/components/BookCard.vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
 import { useLibraryStore } from '@/stores/library'
 import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
-
-type Toast = { kind: 'success' | 'error'; title: string; subtitle: string }
+import { isNativeShell } from '@/api/base'
+import { useServer } from '@/api/useServer'
+import { useProfile } from '@/profile'
+import ServerSettings from '@/components/ServerSettings.vue'
 
 const store = useLibraryStore()
+const { initial } = useProfile()
 const { books, loading, error } = storeToRefs(store)
 
-const fileInput = ref<HTMLInputElement | null>(null)
-const dragging = ref(false)
+// In the native shells the library can't load until a backend is configured
+// (LYCM-300). Show a connect prompt instead of a failed fetch on first run.
+const { server } = useServer()
+const needsServer = computed(() => isNativeShell() && !server.value)
+
 const view = ref<'grid' | 'list'>('grid')
-const toast = ref<Toast | null>(null)
-let toastTimer: ReturnType<typeof setTimeout> | undefined
-let dragDepth = 0
 
 const count = computed(() => books.value.length)
 const countLabel = computed(() => `${count.value} on the shelf`)
 
-onMounted(() => store.load())
+// The grid/list toggle only makes sense once a populated shelf is showing.
+const showToggle = computed(
+  () => !needsServer.value && !loading.value && !error.value && count.value > 0,
+)
 
-function showToast(t: Toast): void {
-  toast.value = t
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => (toast.value = null), 4000)
-}
+onMounted(() => {
+  if (!needsServer.value) store.load()
+})
 
-function isEpub(f: File): boolean {
-  return f.type === 'application/epub+zip' || f.name.toLowerCase().endsWith('.epub')
-}
-
-/** Upload the EPUBs and summarise the outcome — including non-EPUBs skipped. */
-async function ingest(all: File[]): Promise<void> {
-  if (all.length === 0) return
-  const epubs = all.filter(isEpub)
-  const skipped = all.filter((f) => !isEpub(f))
-
-  const results = epubs.length ? await store.uploadMany(epubs) : []
-  const added = results.filter((r) => r.kind === 'added').length
-  const duplicates = results.filter((r) => r.kind === 'duplicate').length
-  const failed = results.filter((r) => r.kind === 'error').length
-
-  if (added > 0) {
-    const extra: string[] = []
-    if (duplicates) extra.push(`${duplicates} already on the shelf`)
-    if (skipped.length) extra.push(`${skipped.length} not an EPUB`)
-    if (failed) extra.push(`${failed} failed`)
-    showToast({
-      kind: 'success',
-      title: `${added} added to your library`,
-      subtitle: extra.length ? extra.join(' · ') + ' · skipped' : 'Your shelf just grew',
-    })
-    return
-  }
-
-  // Nothing added — explain why.
-  if (failed > 0) {
-    showToast({ kind: 'error', title: 'Upload failed', subtitle: 'The server rejected the file' })
-  } else if (skipped.length > 0) {
-    const title =
-      skipped.length === 1 ? `"${skipped[0]!.name}" isn't an EPUB` : `${skipped.length} files aren't EPUBs`
-    showToast({ kind: 'error', title, subtitle: 'Nothing was added' })
-  } else if (duplicates > 0) {
-    showToast({ kind: 'success', title: 'Already on your shelf', subtitle: 'Nothing new to add' })
-  }
-}
-
-function onPick(event: Event): void {
-  const input = event.target as HTMLInputElement
-  void ingest(Array.from(input.files ?? []))
-  input.value = ''
-}
-
-function onDrop(event: DragEvent): void {
-  dragDepth = 0
-  dragging.value = false
-  void ingest(Array.from(event.dataTransfer?.files ?? []))
-}
-
-// Depth-counted so child elements don't flicker the overlay off on dragleave.
-function onDragEnter(): void {
-  dragDepth++
-  dragging.value = true
-}
-function onDragLeave(): void {
-  dragDepth = Math.max(0, dragDepth - 1)
-  if (dragDepth === 0) dragging.value = false
+// Once the user saves a server, load the shelf from it.
+function onServerSaved(): void {
+  void store.load()
 }
 </script>
 
 <template>
-  <section
-    class="lib"
-    @dragenter.prevent="onDragEnter"
-    @dragover.prevent
-    @dragleave.prevent="onDragLeave"
-    @drop.prevent="onDrop"
-  >
+  <section class="lib">
     <!-- Floating top bar -->
     <header class="lib__bar">
       <div class="lib__brand">
@@ -109,7 +49,21 @@ function onDragLeave(): void {
       </div>
 
       <div class="lib__actions">
-        <div class="lib__toggle" role="group" aria-label="View">
+        <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">{{
+          initial
+        }}</RouterLink>
+      </div>
+    </header>
+
+    <!-- Header -->
+    <div class="lib__head">
+      <div class="lib__eyebrow">Your library</div>
+      <div class="lib__title-row">
+        <div class="lib__title-group">
+          <h1 class="lib__title">All Books</h1>
+          <span v-if="!loading && !error" class="lib__count">{{ countLabel }}</span>
+        </div>
+        <div v-if="showToggle" class="lib__toggle" role="group" aria-label="View">
           <button
             type="button"
             class="lib__toggle-btn"
@@ -129,35 +83,30 @@ function onDragLeave(): void {
             ☰
           </button>
         </div>
-        <ThemeToggle />
-        <button type="button" class="lib__add" @click="fileInput?.click()">
-          <span class="lib__add-plus">+</span> Add EPUB
-        </button>
-        <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">R</RouterLink>
-        <input
-          ref="fileInput"
-          type="file"
-          accept="application/epub+zip,.epub"
-          multiple
-          hidden
-          @change="onPick"
-        />
       </div>
-    </header>
+    </div>
 
-    <!-- Header -->
-    <div class="lib__head">
-      <div class="lib__eyebrow">Your library</div>
-      <div class="lib__title-row">
-        <h1 class="lib__title">All Books</h1>
-        <span v-if="!loading && !error" class="lib__count">{{ countLabel }}</span>
+    <!-- Connect prompt (native shells, first run) -->
+    <div v-if="needsServer" class="lib__state lib__state--center">
+      <div class="lib__empty-icon"><span>⇄</span></div>
+      <div class="lib__state-title">Connect to your library</div>
+      <p class="lib__state-text">
+        Enter the address of your Lyceum server to load your books and sync your place.
+      </p>
+      <div class="lib__connect">
+        <ServerSettings @saved="onServerSaved" />
       </div>
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="lib__state">
+    <div v-else-if="loading" class="lib__state">
       <div class="lib__skeletons">
-        <div v-for="n in 6" :key="n" class="lib__skeleton" :style="{ animationDelay: n * 0.12 + 's' }" />
+        <div
+          v-for="n in 6"
+          :key="n"
+          class="lib__skeleton"
+          :style="{ animationDelay: n * 0.12 + 's' }"
+        />
       </div>
       <div class="lib__loading-label"><span class="lib__dot" /> Reading your shelf…</div>
     </div>
@@ -174,8 +123,7 @@ function onDragLeave(): void {
     <div v-else-if="count === 0" class="lib__state lib__state--center">
       <div class="lib__empty-icon"><span>+</span></div>
       <div class="lib__state-title">No books yet</div>
-      <p class="lib__state-text">Drop an EPUB anywhere, or use Add EPUB to begin your shelf.</p>
-      <button type="button" class="btn btn--brass" @click="fileInput?.click()">+ Add EPUB</button>
+      <p class="lib__state-text">Books appear here once your server ingests them.</p>
     </div>
 
     <!-- Grid -->
@@ -199,26 +147,6 @@ function onDragLeave(): void {
         </div>
       </RouterLink>
     </div>
-
-    <!-- Full-page drag-over affordance -->
-    <div v-if="dragging" class="drop" aria-hidden="true">
-      <div class="drop__panel">
-        <div class="drop__icon" />
-        <div class="drop__title">Drop to add to your library</div>
-        <div class="drop__sub">EPUB files only · release anywhere on the page</div>
-      </div>
-    </div>
-
-    <!-- Toast -->
-    <Transition name="toast">
-      <output v-if="toast" class="toast" :class="`toast--${toast.kind}`">
-        <span class="toast__icon">{{ toast.kind === 'success' ? '✓' : '!' }}</span>
-        <span class="toast__body">
-          <span class="toast__title">{{ toast.title }}</span>
-          <span class="toast__sub">{{ toast.subtitle }}</span>
-        </span>
-      </output>
-    </Transition>
   </section>
 </template>
 
@@ -268,47 +196,6 @@ function onDragLeave(): void {
   align-items: center;
   gap: 10px;
 }
-.lib__toggle {
-  display: flex;
-  align-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--glass);
-  backdrop-filter: blur(8px);
-  overflow: hidden;
-}
-.lib__toggle-btn {
-  padding: 8px 13px;
-  border: none;
-  background: transparent;
-  color: var(--dim);
-  font: 700 13px var(--font-ui);
-  cursor: pointer;
-}
-.lib__toggle-btn.is-active {
-  background: var(--brass);
-  color: var(--on-brass);
-}
-.lib__add {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 18px;
-  border-radius: 999px;
-  border: none;
-  background: var(--brass);
-  color: var(--on-brass);
-  font: 700 13.5px var(--font-ui);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.lib__add:hover {
-  background: var(--brass-bright);
-}
-.lib__add-plus {
-  font-size: 16px;
-  line-height: 1;
-}
 .lib__avatar {
   width: 40px;
   height: 40px;
@@ -335,9 +222,16 @@ function onDragLeave(): void {
 }
 .lib__title-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
   margin-top: 8px;
+}
+.lib__title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  min-width: 0;
 }
 .lib__title {
   margin: 0;
@@ -348,6 +242,30 @@ function onDragLeave(): void {
 .lib__count {
   font: 400 14px var(--font-ui);
   color: var(--dim);
+}
+
+/* View toggle — lives across from the title now to keep the top bar clean. */
+.lib__toggle {
+  display: flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  flex: none;
+}
+.lib__toggle-btn {
+  padding: 8px 13px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font: 700 13px var(--font-ui);
+  cursor: pointer;
+}
+.lib__toggle-btn.is-active {
+  background: var(--brass);
+  color: var(--on-brass);
 }
 
 /* ── Grid ── */
@@ -491,17 +409,18 @@ function onDragLeave(): void {
   color: var(--brass);
   line-height: 1;
 }
+.lib__connect {
+  width: 100%;
+  max-width: 440px;
+  margin-top: 22px;
+  text-align: left;
+}
 .btn {
   margin-top: 18px;
   padding: 9px 18px;
   border-radius: 999px;
   font: 700 12.5px var(--font-ui);
   cursor: pointer;
-}
-.btn--brass {
-  border: none;
-  background: var(--brass);
-  color: var(--on-brass);
 }
 .btn--ghost {
   border: 1px solid var(--border-strong);
@@ -528,7 +447,12 @@ function onDragLeave(): void {
 .lib__skeleton {
   aspect-ratio: 2 / 3;
   border-radius: 7px;
-  background: linear-gradient(100deg, var(--surface) 30%, var(--surface-raised) 50%, var(--surface) 70%);
+  background: linear-gradient(
+    100deg,
+    var(--surface) 30%,
+    var(--surface-raised) 50%,
+    var(--surface) 70%
+  );
   background-size: 200% 100%;
   animation: lycShimmer 1.4s linear infinite;
 }
@@ -547,106 +471,5 @@ function onDragLeave(): void {
   border-radius: 50%;
   background: var(--brass);
   animation: lycPulse 1.1s ease-in-out infinite;
-}
-
-/* ── Drag overlay ── */
-.drop {
-  position: fixed;
-  inset: 14px;
-  z-index: 30;
-  border-radius: 14px;
-  pointer-events: none;
-}
-.drop__panel {
-  position: absolute;
-  inset: 0;
-  border-radius: 14px;
-  border: 2px dashed rgba(201, 154, 78, 0.7);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter: blur(3px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-.drop__icon {
-  width: 54px;
-  height: 64px;
-  border-radius: 6px;
-  border: 2px solid var(--brass);
-  margin-bottom: 18px;
-}
-.drop__title {
-  font: 800 24px var(--font-display);
-  color: var(--text);
-}
-.drop__sub {
-  font: 400 13.5px var(--font-ui);
-  color: var(--brass);
-  margin-top: 8px;
-}
-
-/* ── Toast ── */
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-pop);
-  max-width: 92vw;
-}
-.toast--success {
-  border: 1px solid rgba(201, 154, 78, 0.28);
-}
-.toast--error {
-  border: 1px solid rgba(224, 138, 110, 0.28);
-}
-.toast__icon {
-  width: 30px;
-  height: 30px;
-  flex: none;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font: 700 15px var(--font-ui);
-}
-.toast--success .toast__icon {
-  background: rgba(90, 168, 106, 0.16);
-  color: var(--success);
-}
-.toast--error .toast__icon {
-  background: rgba(224, 138, 110, 0.16);
-  color: var(--error);
-}
-.toast__body {
-  display: flex;
-  flex-direction: column;
-}
-.toast__title {
-  font: 700 13.5px var(--font-ui);
-  color: var(--text);
-}
-.toast__sub {
-  font: 400 12px var(--font-ui);
-  color: var(--muted);
-  margin-top: 1px;
-}
-.toast-enter-active {
-  animation: lycRise 0.2s ease both;
-}
-.toast-leave-active {
-  transition: opacity 0.2s ease;
-}
-.toast-leave-to {
-  opacity: 0;
 }
 </style>

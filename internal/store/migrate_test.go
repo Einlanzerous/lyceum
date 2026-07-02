@@ -59,7 +59,7 @@ func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, erro
 func cleanState(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx, `
-		DROP TABLE IF EXISTS reading_positions, devices, books, schema_migrations CASCADE`)
+		DROP TABLE IF EXISTS reading_positions, devices, inventory, deliveries, books, schema_migrations CASCADE`)
 	if err != nil {
 		t.Fatalf("clean state: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestMigrate(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	for _, tbl := range []string{"books", "devices", "reading_positions", "schema_migrations"} {
+	for _, tbl := range []string{"books", "devices", "reading_positions", "inventory", "schema_migrations"} {
 		if !tableExists(ctx, t, pool, tbl) {
 			t.Errorf("expected table %q to exist after Migrate", tbl)
 		}
@@ -117,13 +117,30 @@ func TestMigrateIdempotent(t *testing.T) {
 		t.Fatalf("second Migrate: %v", err)
 	}
 
+	// Two runs must apply each embedded migration exactly once. Derive the
+	// expected count from the embedded set so adding a migration doesn't make
+	// this assertion stale.
+	want, err := countUpMigrations()
+	if err != nil {
+		t.Fatalf("countUpMigrations: %v", err)
+	}
 	var n int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("count schema_migrations: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("expected 1 applied migration after two runs, got %d", n)
+	if n != want {
+		t.Errorf("expected %d applied migrations after two runs, got %d", want, n)
 	}
+}
+
+// countUpMigrations counts the embedded *.up.sql files, the canonical number of
+// migrations Migrate should apply.
+func countUpMigrations() (int, error) {
+	migs, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	return len(migs), nil
 }
 
 func TestConnectBadDSN(t *testing.T) {

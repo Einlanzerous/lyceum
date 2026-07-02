@@ -27,7 +27,7 @@ func newStore(t *testing.T) *Store {
 func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx,
-		`TRUNCATE reading_positions, devices, books RESTART IDENTITY CASCADE`)
+		`TRUNCATE reading_positions, devices, inventory, books RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

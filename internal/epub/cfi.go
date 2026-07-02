@@ -37,6 +37,10 @@ type CFIStep struct {
 	Index     int
 	Offset    int // character offset from ":N"; -1 if none
 	Assertion string
+	// Indirection is true when this step immediately follows a "!" jump into a
+	// referenced document (e.g. the spine itemref's content document). It marks
+	// the boundary between the package-level path and the in-document path.
+	Indirection bool
 }
 
 // CFI is a parsed EPUB CFI. For a non-range CFI, Start holds the steps and End
@@ -162,15 +166,18 @@ func parsePath(s string) ([]CFIStep, error) {
 
 	var steps []CFIStep
 	i := 0
+	indirect := false
 	for i < len(s) {
 		// An indirection step "!" (a jump into a referenced document, e.g. the
 		// content document referenced by a spine itemref) precedes the next
-		// "/N" step. We record it structurally only as a normal step boundary.
+		// "/N" step. We flag that next step so callers can locate the
+		// package/in-document boundary (see CFI.SpineIndex).
 		if s[i] == '!' {
 			i++
 			if i >= len(s) || s[i] != '/' {
 				return nil, fmt.Errorf("cfi: '!' indirection must be followed by a step in %q", s)
 			}
+			indirect = true
 		}
 		if s[i] != '/' {
 			return nil, fmt.Errorf("cfi: expected '/' at position %d in %q", i, s)
@@ -190,7 +197,8 @@ func parsePath(s string) ([]CFIStep, error) {
 			return nil, fmt.Errorf("cfi: bad step number in %q: %w", s, err)
 		}
 
-		step := CFIStep{Index: idx, Offset: -1}
+		step := CFIStep{Index: idx, Offset: -1, Indirection: indirect}
+		indirect = false
 
 		// Optional id assertion "[...]".
 		if i < len(s) && s[i] == '[' {
@@ -293,6 +301,40 @@ func Compare(a, b *CFI) int {
 // Less reports whether a precedes b in reading order.
 func Less(a, b *CFI) bool {
 	return Compare(a, b) < 0
+}
+
+// SpineIndex returns the 0-based spine index the CFI points into, derived from
+// the spine itemref step. In EPUB CFIs the package's spine element is the first
+// step (conventionally /6) and the itemref is the next step, an even integer
+// whose value is 2*(index+1); so itemref /2 maps to spine index 0, /4 to 1, and
+// so on. The itemref is the step immediately before the first "!" indirection
+// (the jump into the chapter's content document); absent an indirection it
+// falls back to the second step. ok is false when the path is too short or the
+// itemref step is not a valid even index.
+func (c *CFI) SpineIndex() (index int, ok bool) {
+	steps := c.Start
+	boundary := -1
+	for i, s := range steps {
+		if s.Indirection {
+			boundary = i
+			break
+		}
+	}
+
+	var itemref CFIStep
+	switch {
+	case boundary >= 1:
+		itemref = steps[boundary-1]
+	case len(steps) >= 2:
+		itemref = steps[1]
+	default:
+		return 0, false
+	}
+
+	if itemref.Index < 2 || itemref.Index%2 != 0 {
+		return 0, false
+	}
+	return itemref.Index/2 - 1, true
 }
 
 func comparePath(a, b []CFIStep) int {

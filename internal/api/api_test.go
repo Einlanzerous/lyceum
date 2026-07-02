@@ -65,7 +65,7 @@ func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, erro
 func truncate(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(ctx,
-		`TRUNCATE reading_positions, devices, books RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE reading_positions, devices, inventory, books RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
