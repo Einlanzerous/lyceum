@@ -31,8 +31,12 @@ jobs:
         run: |
           npm --prefix web ci
           npm --prefix wrappers/capacitor install
-      - name: Generate android project (applies cleartext override)
-        run: npm --prefix wrappers/capacitor run add:android
+      # Build the SPA into www BEFORE `cap add` — Capacitor's add step copies
+      # www into the native project and errors if it has no index.html.
+      - name: Build web bundle into www, then generate android project
+        run: |
+          npm --prefix wrappers/capacitor run copy-web
+          npm --prefix wrappers/capacitor run add:android
       - name: Build debug APK
         run: npm --prefix wrappers/capacitor run build:apk
       - uses: actions/upload-artifact@v4
@@ -52,9 +56,13 @@ jobs:
           go-version: stable
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
-      # The wails frontend:build step builds web/ in native mode and copies the
-      # bundle in; frontend:install runs `npm ci` in web/ first. -skipbindings:
-      # the app binds no Go methods (see app.go).
+      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
+      # install web deps explicitly so it's present regardless of whether wails
+      # runs frontend:install.
+      - name: Install web deps (for the Wails frontend build)
+        run: npm --prefix web ci
+      # frontend:build builds web/ in native mode and copies the bundle in.
+      # -skipbindings: the app binds no Go methods (see app.go).
       - name: Build Windows .exe
         working-directory: wrappers/wails
         run: wails build -platform windows/amd64 -skipbindings
