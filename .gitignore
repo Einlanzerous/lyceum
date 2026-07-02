@@ -21,7 +21,9 @@ build/bin/
 wrappers/wails/frontend/dist/*
 !wrappers/wails/frontend/dist/.gitkeep
 # Capacitor: generated android/ project and the SPA bundle copied into www/.
-android/
+# (Scoped to the Capacitor wrapper — the Flutter app's mobile/lyceum/android/ is
+# hand-configured and IS tracked.)
+wrappers/capacitor/android/
 wrappers/capacitor/www/*
 !wrappers/capacitor/www/.gitkeep
 

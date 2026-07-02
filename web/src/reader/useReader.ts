@@ -9,7 +9,7 @@
 
 import { onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import ePub, { type Book, type Rendition } from 'epubjs'
-import type { Location } from 'epubjs'
+import type { Contents, Location } from 'epubjs'
 import type { NavItem } from 'epubjs'
 import { bookFileUrl } from '@/api/client'
 import { clampProgress } from '@/api/progress'
@@ -187,6 +187,37 @@ export function useReader(
         allowScriptedContent: false,
       })
       rendition.value = r
+
+      // Swipe-to-turn. The book text is rendered inside epub.js's own iframe,
+      // so touches there never bubble to the outer reader surface. Register a
+      // content hook to attach the swipe listener to each content document as
+      // it's rendered (covers desktop/tablet touch; on phones the tap-zone
+      // overlay handles it — see ReaderView).
+      r.hooks.content.register((contents: Contents) => {
+        const doc = contents.document
+        let sx = 0
+        let sy = 0
+        doc.addEventListener(
+          'touchstart',
+          (e: TouchEvent) => {
+            sx = e.changedTouches[0]?.clientX ?? 0
+            sy = e.changedTouches[0]?.clientY ?? 0
+          },
+          { passive: true },
+        )
+        doc.addEventListener(
+          'touchend',
+          (e: TouchEvent) => {
+            const dx = (e.changedTouches[0]?.clientX ?? 0) - sx
+            const dy = (e.changedTouches[0]?.clientY ?? 0) - sy
+            if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+              if (dx < 0) void r.next()
+              else void r.prev()
+            }
+          },
+          { passive: true },
+        )
+      })
 
       applyTheme()
       applyFontSize()

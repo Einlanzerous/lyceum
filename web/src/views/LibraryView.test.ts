@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, RouterLinkStub } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import LibraryView from './LibraryView.vue'
 import { useLibraryStore } from '@/stores/library'
+import { __resetServerCache, __setNativeShell } from '@/api/base'
+import { useServer } from '@/api/useServer'
 import type { Book } from '@/api/types'
 
 const books: Book[] = [
@@ -22,6 +24,14 @@ function mountView() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  // Reset the shared server ref + native override so tests don't leak state.
+  useServer().save('')
+  __setNativeShell(null)
+  __resetServerCache()
+  localStorage.clear()
 })
 
 describe('LibraryView', () => {
@@ -59,40 +69,27 @@ describe('LibraryView', () => {
     expect(wrapper.text()).toContain('No books yet')
   })
 
-  it('ingests picked EPUBs and toasts a summary', async () => {
+  it('native shell: prompts to connect and skips load until a server is set', async () => {
+    __setNativeShell(true)
     const wrapper = mountView()
     const store = useLibraryStore()
-    store.loading = false
-    vi.mocked(store.uploadMany).mockResolvedValue([
-      { kind: 'added', book: books[0]! },
-      { kind: 'duplicate' },
-    ])
-    await flushPromises()
-
-    const input = wrapper.find('input[type="file"]')
-    const file = new File(['x'], 'a.epub', { type: 'application/epub+zip' })
-    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
-    await input.trigger('change')
-    await flushPromises()
-
-    expect(store.uploadMany).toHaveBeenCalledOnce()
-    expect(wrapper.text()).toContain('1 added to your library')
-    expect(wrapper.text()).toContain('1 already on the shelf')
+    // No backend yet → don't fetch the library, show the connect prompt.
+    expect(store.load).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Connect to your library')
+    wrapper.unmount()
   })
 
-  it('reports a dropped non-EPUB instead of silently dropping it', async () => {
+  it('native shell: saving a server hides the prompt and loads the library', async () => {
+    __setNativeShell(true)
     const wrapper = mountView()
     const store = useLibraryStore()
-    store.loading = false
+
+    await wrapper.find('#server-url').setValue('http://home.lan:8080')
+    await wrapper.find('.conn__btn--brass').trigger('click')
     await flushPromises()
 
-    const input = wrapper.find('input[type="file"]')
-    const pdf = new File(['x'], 'rules.pdf', { type: 'application/pdf' })
-    Object.defineProperty(input.element, 'files', { value: [pdf], configurable: true })
-    await input.trigger('change')
-    await flushPromises()
-
-    expect(store.uploadMany).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain("isn't an EPUB")
+    expect(store.load).toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Connect to your library')
+    wrapper.unmount()
   })
 })

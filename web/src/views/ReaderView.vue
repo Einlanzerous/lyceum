@@ -70,16 +70,39 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-// Horizontal swipe → page turn.
+// Horizontal swipe → page turn. Tracks Y too so vertical scrolls/drags don't
+// count as page turns.
 let touchStartX = 0
+let touchStartY = 0
 function onTouchStart(event: TouchEvent): void {
   touchStartX = event.changedTouches[0]?.clientX ?? 0
+  touchStartY = event.changedTouches[0]?.clientY ?? 0
 }
 function onTouchEnd(event: TouchEvent): void {
   const dx = (event.changedTouches[0]?.clientX ?? 0) - touchStartX
-  if (Math.abs(dx) < 40) return
+  const dy = (event.changedTouches[0]?.clientY ?? 0) - touchStartY
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return
   if (dx < 0) reader.next()
   else reader.prev()
+}
+
+// The mobile tap zones overlay the epub.js iframe, so a swipe there never
+// reaches the reading surface. Handle both here: a horizontal swipe turns the
+// page; a tap acts by horizontal zone (prev / toggle chrome / next).
+function onZoneTouchEnd(event: TouchEvent): void {
+  const dx = (event.changedTouches[0]?.clientX ?? 0) - touchStartX
+  const dy = (event.changedTouches[0]?.clientY ?? 0) - touchStartY
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+    if (dx < 0) reader.next()
+    else reader.prev()
+    return
+  }
+  if (Math.abs(dx) > 12 || Math.abs(dy) > 12) return // a drag, not a tap
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const frac = (touchStartX - rect.left) / rect.width
+  if (frac < 0.32) reader.prev()
+  else if (frac > 0.68) reader.next()
+  else chromeHidden.value = !chromeHidden.value
 }
 
 function openToc(): void {
@@ -235,15 +258,17 @@ onBeforeUnmount(() => {
       ›
     </button>
 
-    <!-- Mobile tap zones -->
-    <div class="tapzones" aria-hidden="true">
-      <button type="button" class="tapzones__z tapzones__z--prev" @click="reader.prev()" />
-      <button
-        type="button"
-        class="tapzones__z tapzones__z--mid"
-        @click="chromeHidden = !chromeHidden"
-      />
-      <button type="button" class="tapzones__z tapzones__z--next" @click="reader.next()" />
+    <!-- Mobile tap zones. Touch is handled on the container so a swipe turns
+         the page and a tap acts by zone (prev / toggle chrome / next). -->
+    <div
+      class="tapzones"
+      aria-hidden="true"
+      @touchstart.passive="onTouchStart"
+      @touchend.passive="onZoneTouchEnd"
+    >
+      <span class="tapzones__z tapzones__z--prev" />
+      <span class="tapzones__z tapzones__z--mid" />
+      <span class="tapzones__z tapzones__z--next" />
     </div>
 
     <!-- Bottom progress -->
