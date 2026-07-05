@@ -1,0 +1,123 @@
+name: Release Please
+
+# Automated releases (LYCM-300). Release Please watches conventional commits on
+# main and maintains a release PR (version bump + CHANGELOG). Merging that PR
+# creates the tag + GitHub Release; the windows-installer job then builds the
+# NSIS installer and attaches it. No hand-cut tags.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # Mint a short-lived installation token from our GitHub App so the release
+      # PR/tag is created by the App identity rather than the default
+      # GITHUB_TOKEN. Events from GITHUB_TOKEN don't trigger other workflows
+      # (GitHub's anti-recursion safeguard), so an App-minted token is what makes
+      # the release PR's required checks run and lets the tag reach downstream
+      # jobs. Uses the org's RELEASE_BOT_APP_ID + RELEASE_BOT_PRIVATE_KEY secrets
+      # (the release bot is installed org-wide with Contents + Pull requests:
+      # write), matching the switchyard/aperture setup.
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # When a release is cut, build the Wails Windows installer and attach it to the
+  # GitHub Release. NSIS ships preinstalled on the windows-latest runner, so
+  # `wails build -nsis` finds makensis. This is the GENERIC installer — no baked
+  # server URL — so a public artifact never carries a private address; the
+  # zero-config "my library" flavor stays a local VITE_LYCEUM_DEFAULT_SERVER
+  # build (see wrappers/wails/README.md).
+  windows-installer:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: windows-latest
+    # Code signing is opt-in: these are '' until the repo has the secrets, which
+    # keeps the sign step below skipped. See wrappers/wails/README.md to enable.
+    env:
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+
+      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
+      # install web deps explicitly so it's present regardless of frontend:install.
+      - name: Install web deps
+        run: npm --prefix web ci
+
+      # The installer version (Add/Remove Programs + file properties) comes from
+      # wails.json info.productVersion. Stamp it from the release version so it
+      # matches the tag without an in-repo bump.
+      - name: Stamp installer version
+        shell: bash
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          echo "Building installer version $VERSION"
+          node -e "const fs=require('fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+
+      # frontend:build builds web/ in native mode and copies the bundle in; -nsis
+      # then runs makensis on build/windows/installer/project.nsi to wrap the exe
+      # (which also bundles the WebView2 bootstrapper). -skipbindings: the app
+      # binds no Go methods (see app.go), lossless on Windows too.
+      - name: Build installer
+        working-directory: wrappers/wails
+        run: wails build -platform windows/amd64 -skipbindings -nsis
+
+      # Optional Authenticode signing of the installer. Skipped unless the repo
+      # has WINDOWS_PFX_BASE64 (base64 of a .pfx) + WINDOWS_PFX_PASSWORD. To also
+      # sign the inner Lyceum.exe, split the build (build exe -> sign -> makensis)
+      # or use the !finalize hook in project.nsi.
+      - name: Sign installer
+        if: env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+          $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          & $signtool sign /f $pfx /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            'wrappers\wails\build\bin\Lyceum-amd64-installer.exe'
+          Remove-Item $pfx
+
+      - name: Attach installer to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: |
+            wrappers/wails/build/bin/Lyceum.exe
+            wrappers/wails/build/bin/Lyceum-amd64-installer.exe
+          fail_on_unmatched_files: true

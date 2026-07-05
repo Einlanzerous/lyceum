@@ -67,6 +67,43 @@ Live development against a running backend:
 wails dev
 ```
 
+## Installer & releases
+
+`make wails-windows` produces the bare `Lyceum.exe`. For distribution, build an
+**NSIS installer** instead — it installs to Program Files, creates Start-menu and
+desktop shortcuts, registers an uninstaller, and bootstraps the WebView2 runtime:
+
+```sh
+wails build -platform windows/amd64 -skipbindings -nsis   # needs makensis (NSIS)
+# → build/bin/Lyceum-amd64-installer.exe
+```
+
+The installer is defined by [`build/windows/installer/project.nsi`](build/windows/installer/project.nsi)
+(tracked, customizable); `wails_tools.nsh` next to it is regenerated on every
+build and git-ignored. The version shown in Add/Remove Programs comes from
+`wails.json` → `info.productVersion`.
+
+CI does this automatically via **Release Please**
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)): merges
+to `main` build up a release PR (version bump + `CHANGELOG.md` from the
+conventional commits); merging that PR creates the tag + GitHub Release, and the
+`windows-installer` job then stamps the version, builds the installer on a
+Windows runner (NSIS preinstalled), and attaches it + the portable `.exe` to the
+Release. No hand-cut tags — cutting a release is just merging the bot's PR.
+
+### Code signing (opt-in)
+
+Unsigned installers trip SmartScreen, which non-technical users won't click
+through — sign before sharing beyond yourself. The release workflow signs the
+installer automatically **when** the repo has these secrets (skipped otherwise):
+
+- `WINDOWS_PFX_BASE64` — base64 of your code-signing `.pfx`
+- `WINDOWS_PFX_PASSWORD` — its password
+
+To also sign the inner `Lyceum.exe`, split the build (build the `.exe` → sign it
+→ run `makensis` on `project.nsi`), or wire the commented `!finalize` /
+`!uninstfinalize` `signtool` hooks in `project.nsi`.
+
 ## Notes
 
 - This is a separate Go module (`github.com/magos/lyceum/wrappers/wails`) so the
