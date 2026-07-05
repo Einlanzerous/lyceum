@@ -1,27 +1,57 @@
-name: release
+name: Release Please
 
-# Build the Wails Windows installer (LYCM-300) and publish it to a GitHub
-# Release. Fires on a version tag (e.g. v0.1.0) or manual dispatch. NSIS ships
-# preinstalled on the windows-latest runner image, so `wails build -nsis` finds
-# makensis with no extra install.
-#
-# This builds the GENERIC installer — no baked server URL — so a public artifact
-# never carries a private address. The zero-config "my library" flavor is built
-# locally with VITE_LYCEUM_DEFAULT_SERVER (see wrappers/wails/README.md).
+# Automated releases (LYCM-300). Release Please watches conventional commits on
+# main and maintains a release PR (version bump + CHANGELOG). Merging that PR
+# creates the tag + GitHub Release; the windows-installer job then builds the
+# NSIS installer and attaches it. No hand-cut tags.
 on:
   push:
-    tags: ["v*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version for the installer (e.g. 0.1.0). Defaults to the tag; used for a dry-run artifact when dispatched off a branch."
-        required: false
+    branches:
+      - main
 
 permissions:
-  contents: write # create/update the GitHub Release
+  contents: write
+  pull-requests: write
 
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # Mint a short-lived installation token from our GitHub App so the release
+      # PR/tag is created by the App identity rather than the default
+      # GITHUB_TOKEN. Events from GITHUB_TOKEN don't trigger other workflows
+      # (GitHub's anti-recursion safeguard), so an App-minted token is what makes
+      # the release PR's required checks run and lets the tag reach downstream
+      # jobs. Uses the org's RELEASE_BOT_APP_ID + RELEASE_BOT_PRIVATE_KEY secrets
+      # (the release bot is installed org-wide with Contents + Pull requests:
+      # write), matching the switchyard/aperture setup.
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # When a release is cut, build the Wails Windows installer and attach it to the
+  # GitHub Release. NSIS ships preinstalled on the windows-latest runner, so
+  # `wails build -nsis` finds makensis. This is the GENERIC installer — no baked
+  # server URL — so a public artifact never carries a private address; the
+  # zero-config "my library" flavor stays a local VITE_LYCEUM_DEFAULT_SERVER
+  # build (see wrappers/wails/README.md).
   windows-installer:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
     runs-on: windows-latest
     # Code signing is opt-in: these are '' until the repo has the secrets, which
     # keeps the sign step below skipped. See wrappers/wails/README.md to enable.
@@ -48,16 +78,14 @@ jobs:
         run: npm --prefix web ci
 
       # The installer version (Add/Remove Programs + file properties) comes from
-      # wails.json info.productVersion. Stamp it from the tag so each release is
-      # versioned without a source bump; fall back to 0.0.0 for branch dispatches.
+      # wails.json info.productVersion. Stamp it from the release version so it
+      # matches the tag without an in-repo bump.
       - name: Stamp installer version
         shell: bash
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
         run: |
-          RAW="${{ github.event.inputs.version || github.ref_name }}"
-          VERSION="${RAW#v}"
-          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)* ]] || VERSION="0.0.0"
           echo "Building installer version $VERSION"
-          export VERSION
           node -e "const fs=require('fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 
       # frontend:build builds web/ in native mode and copies the bundle in; -nsis
@@ -85,21 +113,11 @@ jobs:
             'wrappers\wails\build\bin\Lyceum-amd64-installer.exe'
           Remove-Item $pfx
 
-      # Tag builds publish a Release; branch/manual dispatches just upload the
-      # installer as a run artifact for a dry run.
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Attach installer to the release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
           files: |
             wrappers/wails/build/bin/Lyceum.exe
             wrappers/wails/build/bin/Lyceum-amd64-installer.exe
-          generate_release_notes: true
           fail_on_unmatched_files: true
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lyceum-windows-installer
-          path: wrappers/wails/build/bin/Lyceum-amd64-installer.exe
-          if-no-files-found: error

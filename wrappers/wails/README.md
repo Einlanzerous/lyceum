@@ -83,12 +83,13 @@ The installer is defined by [`build/windows/installer/project.nsi`](build/window
 build and git-ignored. The version shown in Add/Remove Programs comes from
 `wails.json` → `info.productVersion`.
 
-CI does this automatically: pushing a **`v*` tag** runs
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml), which
-stamps the version from the tag, builds the installer on a Windows runner
-(NSIS is preinstalled), and publishes it + the portable `.exe` to a GitHub
-Release. A manual `workflow_dispatch` uploads the installer as a run artifact
-without publishing.
+CI does this automatically via **Release Please**
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)): merges
+to `main` build up a release PR (version bump + `CHANGELOG.md` from the
+conventional commits); merging that PR creates the tag + GitHub Release, and the
+`windows-installer` job then stamps the version, builds the installer on a
+Windows runner (NSIS preinstalled), and attaches it + the portable `.exe` to the
+Release. No hand-cut tags — cutting a release is just merging the bot's PR.
 
 ### Code signing (opt-in)
 
