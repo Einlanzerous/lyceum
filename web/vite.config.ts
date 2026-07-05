@@ -19,6 +19,14 @@ export default defineConfig(({ mode }) => ({
     // user-configured remote backend (native). `--mode` keeps it cross-platform
     // with no extra dependency. Default: web.
     'import.meta.env.VITE_LYCEUM_TARGET': JSON.stringify(mode === 'native' ? 'native' : 'web'),
+    // Optional build-time default backend URL (LYCM-300). A "my library" native
+    // build for friends & family bakes the home server here so first run is
+    // zero-config; base.ts falls back to it when no URL is saved. Read from the
+    // build env so CI/local builds can set it without a source edit; '' (the
+    // generic self-hoster build and the web build) means "prompt on first run".
+    'import.meta.env.VITE_LYCEUM_DEFAULT_SERVER': JSON.stringify(
+      process.env.VITE_LYCEUM_DEFAULT_SERVER ?? '',
+    ),
   },
   resolve: {
     alias: {

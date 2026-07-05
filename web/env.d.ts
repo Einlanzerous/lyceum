@@ -5,6 +5,9 @@
 // Vite's own ImportMetaEnv.
 interface ImportMetaEnv {
   readonly VITE_LYCEUM_TARGET?: string
+  // Optional default backend URL baked into a native build (LYCM-300); base.ts
+  // uses it when no server URL has been saved. Absent/'' → prompt on first run.
+  readonly VITE_LYCEUM_DEFAULT_SERVER?: string
 }
 
 declare module '*.vue' {
