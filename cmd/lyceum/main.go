@@ -38,9 +38,9 @@ type config struct {
 	booksWatchDir      string // LYCEUM_BOOKS_WATCH_DIR — e.g. /data/media/books
 	booksWatchInterval int    // LYCEUM_BOOKS_WATCH_INTERVAL — poll seconds
 
-	// Cross-platform wrappers (LYCM-300): extra CORS origins the native shells
-	// (Wails/Capacitor) call from. The built-in native origins are always
-	// allowed; this extends them (or "*" allows any).
+	// Cross-platform wrappers (LYCM-300): extra CORS origins the Wails desktop
+	// shell calls from. The built-in native origins are always allowed; this
+	// extends them (or "*" allows any).
 	corsOrigins string // LYCEUM_CORS_ORIGINS — comma-separated
 
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
@@ -178,11 +178,11 @@ func main() {
 	})
 	mux.Handle("/", web.Handler())
 
-	// Cross-platform wrappers (LYCM-300): the native shells call this server
-	// from a different origin (wails.localhost / capacitor localhost), so wrap
-	// the whole mux with CORS. The web build is same-origin and unaffected (it
-	// sends no Origin). Preflights are answered here before the method-specific
-	// routes can 405 them.
+	// Cross-platform wrappers (LYCM-300): the Wails desktop shell calls this
+	// server from a different origin (wails.localhost), so wrap the whole mux
+	// with CORS. The web build is same-origin and unaffected (it sends no
+	// Origin). Preflights are answered here before the method-specific routes
+	// can 405 them.
 	corsOrigins := api.ParseCORSOrigins(cfg.corsOrigins)
 	handler := api.CORS(corsOrigins, mux)
 

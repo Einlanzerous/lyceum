@@ -8,7 +8,7 @@ include .env
 export
 endif
 
-.PHONY: build build-web build-web-native release run dev check-env web-deps test lint vet tidy wails-windows android-apk
+.PHONY: build build-web build-web-native release run dev check-env web-deps test lint vet tidy wails-windows
 
 build:
 	go build -o bin/$(BINARY) ./cmd/lyceum
@@ -20,7 +20,7 @@ build-web:
 	cd $(WEB_DIR) && npm ci && npm run build
 
 # Build the SPA in *native* mode (API calls target a configured remote backend
-# instead of same-origin). Consumed by the Wails/Capacitor wrappers (LYCM-300).
+# instead of same-origin). Consumed by the Wails desktop wrapper (LYCM-300).
 build-web-native:
 	cd $(WEB_DIR) && npm ci && npm run build:native
 
@@ -82,9 +82,10 @@ tidy:
 	go mod tidy
 
 # --- Cross-platform wrappers (LYCM-300) ---
-# These need their own toolchains (Wails CLI / Android SDK); see
-# wrappers/*/README.md. Each rebuilds the SPA in native mode as part of its
-# build, so a stale web/dist won't leak in.
+# The Wails desktop shell needs its own toolchain (the Wails CLI); see
+# wrappers/wails/README.md. It rebuilds the SPA in native mode as part of its
+# build, so a stale web/dist won't leak in. (The Android app is a native Flutter
+# project under mobile/ — see mobile/lyceum/README.md — not a make target here.)
 
 # Windows .exe via Wails → wrappers/wails/build/bin/Lyceum.exe. Requires the
 # Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1`).
@@ -93,8 +94,3 @@ tidy:
 # Windows target from Linux. Safe to skip here and on a Windows host alike.
 wails-windows:
 	cd wrappers/wails && wails build -platform windows/amd64 -skipbindings
-
-# Sideloadable Android debug .apk via Capacitor. Requires JDK 17 + Android SDK.
-# Run `npm run add:android` once first (generates wrappers/capacitor/android/).
-android-apk:
-	cd wrappers/capacitor && npm install && npm run build:apk

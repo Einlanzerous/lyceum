@@ -89,8 +89,9 @@ cd web && LYCEUM_BACKEND=http://localhost:8099 npm run dev -- --host --port 5180
 
 ## Beyond LYCM-500
 
-Untouched epics: **LYCM-300** (Cross-Platform Wrappers — Wails desktop,
-Capacitor Android) and **LYCM-400** (Ecosystem & Agent Integration — Send-to-
+Untouched epics: **LYCM-300** (Cross-Platform Wrappers — Wails desktop; the
+Android app is the native Flutter project under `mobile/`, LYCM-700) and
+**LYCM-400** (Ecosystem & Agent Integration — Send-to-
 Kindle, Eidolon TTS hooks per `docs/eidolon-api.md`, auth/token scheme). The
 design project also sketches a scroll-mode reader (frame 8) and a TTS widget
 (frame 11, EIDO) not yet built. Design source: the Claude Design project
