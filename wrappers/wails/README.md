@@ -91,6 +91,17 @@ conventional commits); merging that PR creates the tag + GitHub Release, and the
 Windows runner (NSIS preinstalled), and attaches it + the portable `.exe` to the
 Release. No hand-cut tags — cutting a release is just merging the bot's PR.
 
+### In-app update check
+
+The native shell checks GitHub for a newer release on startup and shows a
+dismissible "Lyceum X.Y.Z is available — Download" banner linking to the release
+([`web/src/update/useUpdate.ts`](../../web/src/update/useUpdate.ts) +
+`UpdateBanner.vue`). It's a notify-and-open nudge, not a silent background
+updater — that wants signed packages first. The check compares the release
+against the version baked in at build time (`VITE_APP_VERSION`, set from the
+release version by the CI installer job); dev/unversioned builds skip it. The
+web build never shows it.
+
 ### Code signing (opt-in)
 
 Unsigned installers trip SmartScreen, which non-technical users won't click
