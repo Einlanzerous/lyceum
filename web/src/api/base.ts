@@ -1,17 +1,20 @@
 // Resolves the base URL the API client talks to. This is the seam that lets the
-// *same* TypeScript reader run in three shells (LYCM-300):
+// *same* TypeScript reader run in two shells (LYCM-300):
 //
 //   - Web (default): the Go server serves this bundle and the JSON API from one
 //     origin (LYCM-207), so every API URL is same-origin *relative* ('' base).
 //   - Wails (Windows .exe): the SPA is served by Wails from `http://wails.localhost`
 //     and the backend lives on a remote home server — a different origin.
-//   - Capacitor (Android .apk): the SPA is served from `https://localhost` and,
-//     again, the backend is remote.
 //
-// In the two native shells there is no same-origin backend, so the user points
-// the app at their server's URL once; we persist it and prefix every API call
-// with it. The backend grows a CORS allowlist (internal/api.CORS) covering the
-// fixed native origins so these cross-origin calls succeed.
+// In the native shell there is no same-origin backend, so the app must be told
+// the server's URL. That resolves from one of two places: a build-time default
+// baked in via VITE_LYCEUM_DEFAULT_SERVER (so a "my library" build for friends &
+// family ships pre-pointed, zero-config), which whatever the user saves at
+// runtime (localStorage) overrides. We prefix every API call with the result.
+// The backend grows a CORS allowlist (internal/api.CORS) covering the Wails
+// origin so these cross-origin calls succeed.
+//
+// (The Android app is a separate native Flutter project, not this SPA.)
 
 const SERVER_KEY = 'lyceum.server_url'
 
@@ -28,16 +31,37 @@ const SERVER_KEY = 'lyceum.server_url'
 // (no define) → 'web', the safe default.
 const BUILD_TARGET: string = import.meta.env.VITE_LYCEUM_TARGET ?? 'web'
 
+// Build-time default backend URL (VITE_LYCEUM_DEFAULT_SERVER), replaced by Vite's
+// `define` (vite.config.ts) exactly like BUILD_TARGET above — hence the bare
+// member expression. A "my library" native build bakes the home server here so
+// first run is zero-config; the generic self-hoster build and the web build
+// leave it '' and prompt instead. Normalized once (trimmed, no trailing slash).
+const BUILD_DEFAULT_SERVER: string = normalizeServerUrl(
+  import.meta.env.VITE_LYCEUM_DEFAULT_SERVER ?? '',
+)
+
 // Test seam: when non-null, overrides the build-target check so unit tests can
 // exercise both shells without rebuilding. Production code never sets this.
 let nativeOverride: boolean | null = null
+
+// Test seam: overrides the baked default server URL. null = use the build value.
+let defaultOverride: string | null = null
+
+/**
+ * The baked default backend URL ('' when unset), honoring the test override.
+ * Normalized so a test override behaves exactly like the load-normalized
+ * BUILD_DEFAULT_SERVER (normalize is idempotent, so re-running it is harmless).
+ */
+function defaultServer(): string {
+  return normalizeServerUrl(defaultOverride ?? BUILD_DEFAULT_SERVER)
+}
 
 // undefined = not yet read from storage; null = read, none set.
 let serverCache: string | null | undefined
 
 /**
- * True when running as a native shell (Wails/Capacitor) that must be pointed at
- * a remote backend. False for the web build served same-origin by the Go server.
+ * True when running as a native shell (Wails) that must be pointed at a remote
+ * backend. False for the web build served same-origin by the Go server.
  */
 export function isNativeShell(): boolean {
   if (nativeOverride !== null) return nativeOverride
@@ -50,17 +74,18 @@ export function normalizeServerUrl(url: string): string {
 }
 
 /**
- * The configured backend URL for native shells, or '' when none is set (web
- * mode never reads this). Cached after first read.
+ * The backend URL for native shells: the URL the user saved, else the build-time
+ * default (BUILD_DEFAULT_SERVER), else '' when neither is set. Cached after first
+ * read. Clearing a saved URL therefore reverts to the baked default, not to ''.
  */
 export function getServerUrl(): string {
-  if (serverCache !== undefined) return serverCache ?? ''
+  if (serverCache !== undefined) return serverCache ?? defaultServer()
   try {
     serverCache = localStorage.getItem(SERVER_KEY)
   } catch {
     serverCache = null
   }
-  return serverCache ?? ''
+  return serverCache ?? defaultServer()
 }
 
 /**
@@ -107,6 +132,11 @@ export function apiUrl(path: string): string {
 /** Test seam: force/clear native-shell mode. Pass null to restore the build flag. */
 export function __setNativeShell(value: boolean | null): void {
   nativeOverride = value
+}
+
+/** Test seam: set/clear the baked default server URL. Pass null for the build value. */
+export function __setDefaultServer(value: string | null): void {
+  defaultOverride = value
 }
 
 /** Test seam: drop the cached server URL so the next read hits storage again. */

@@ -43,6 +43,24 @@ The first build runs `go mod tidy` for this module (resolving Wails) and the
 `frontend:build` step in `wails.json` (web build + `copy-dist.mjs`). The output
 `.exe` lands in `build/bin/Lyceum.exe`.
 
+### Two flavors: generic vs. "my library"
+
+By default the `.exe` prompts for a server URL on first run — the right build for
+other self-hosters, who point it at their own server. To ship a **zero-config**
+build for friends & family pointed at *your* server, bake the URL in via
+`VITE_LYCEUM_DEFAULT_SERVER` (the build env flows through `copy-dist.mjs` →
+`npm run build:native`):
+
+```sh
+VITE_LYCEUM_DEFAULT_SERVER=http://your-server:5174 make wails-windows
+```
+
+That build skips the first-run prompt and loads the library immediately; the
+address is still editable in Settings → Connection. An unset value (the plain
+`make wails-windows` above) leaves the prompt in place. See
+[`web/src/api/base.ts`](../../web/src/api/base.ts) for the resolution order
+(saved URL → baked default → prompt).
+
 Live development against a running backend:
 
 ```sh
