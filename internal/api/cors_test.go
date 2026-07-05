@@ -59,7 +59,7 @@ func TestCORS_PreflightShortCircuits(t *testing.T) {
 	h := CORS(DefaultCORSOrigins, okHandler(&ran))
 
 	req := httptest.NewRequest(http.MethodOptions, "/sync", nil)
-	req.Header.Set("Origin", "https://localhost")
+	req.Header.Set("Origin", "http://wails.localhost")
 	req.Header.Set("Access-Control-Request-Method", "PUT")
 	req.Header.Set("Access-Control-Request-Headers", "content-type")
 	rec := httptest.NewRecorder()

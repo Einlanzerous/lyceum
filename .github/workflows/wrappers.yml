@@ -1,9 +1,9 @@
 name: wrappers
 
-# Native shell builds (LYCM-300). Scoped to the wrapper + frontend sources so
-# backend-only changes don't pay for it (mirrors argosy's per-area job split in
-# mobile.yml). Each job builds a debug artifact and uploads it; signing/release
-# is a separate concern.
+# Wails desktop shell build (LYCM-300). Scoped to the wrapper + frontend sources
+# so backend-only changes don't pay for it (mirrors argosy's per-area job split
+# in mobile.yml). Builds the debug .exe and uploads it; signing/release is a
+# separate concern. (The Android app is native Flutter, built by mobile.yml.)
 on:
   pull_request:
     paths: ["wrappers/**", "web/**", ".github/workflows/wrappers.yml"]
@@ -15,35 +15,6 @@ permissions:
   contents: read
 
 jobs:
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - name: Install deps
-        run: |
-          npm --prefix web ci
-          npm --prefix wrappers/capacitor install
-      # Build the SPA into www BEFORE `cap add` — Capacitor's add step copies
-      # www into the native project and errors if it has no index.html.
-      - name: Build web bundle into www, then generate android project
-        run: |
-          npm --prefix wrappers/capacitor run copy-web
-          npm --prefix wrappers/capacitor run add:android
-      - name: Build debug APK
-        run: npm --prefix wrappers/capacitor run build:apk
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lyceum-android-debug
-          path: wrappers/capacitor/android/app/build/outputs/apk/debug/app-debug.apk
-
   windows:
     runs-on: windows-latest
     steps:

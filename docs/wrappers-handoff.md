@@ -1,5 +1,11 @@
 # Handoff: cross-platform wrappers (LYCM-300)
 
+> **Superseded (Android):** the Capacitor web-shell described below was replaced
+> by a native **Flutter** Android app (`mobile/lyceum`, LYCM-700) and has been
+> removed from the tree. The Wails desktop shell is the live wrapper; the
+> Capacitor sections here are retained only as a record of what was built. See
+> [`wrappers/README.md`](../wrappers/README.md) for the current state.
+
 Phase 3 packages the Lyceum web reader as native apps **reusing the same
 TypeScript frontend**: a Windows `.exe` (Wails) and a sideloadable Android
 `.apk` (Capacitor). Both are thin clients that reach a remote Lyceum server and

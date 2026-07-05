@@ -5,16 +5,14 @@ import (
 	"strings"
 )
 
-// DefaultCORSOrigins are the fixed origins the LYCM-300 native shells load from.
-// The web build is served same-origin by this server and sends no Origin on its
-// API calls, so it needs no entry here; these cover the Wails (Windows) and
-// Capacitor (Android) shells, whose SPA origin differs from the backend. They
-// are allowed out of the box so a freshly built .exe/.apk reaches the server
+// DefaultCORSOrigins are the fixed origins the LYCM-300 Wails desktop shell
+// loads from. The web build is served same-origin by this server and sends no
+// Origin on its API calls, so it needs no entry here; the native Android app
+// (mobile/, Flutter) makes plain Dart HTTP requests with no browser Origin, so
+// it needs none either. Only the Wails WebView2 shell has a distinct SPA origin.
+// These are allowed out of the box so a freshly built .exe reaches the server
 // with no extra config. LYCEUM_CORS_ORIGINS adds more (or, set to "*", allows any).
 var DefaultCORSOrigins = []string{
-	"https://localhost",      // Capacitor Android (androidScheme: https — the default)
-	"http://localhost",       // Capacitor Android (androidScheme: http)
-	"capacitor://localhost",  // Capacitor iOS custom scheme (future)
 	"http://wails.localhost", // Wails v2 WebView2 asset origin (Windows)
 	"https://wails.localhost",
 }

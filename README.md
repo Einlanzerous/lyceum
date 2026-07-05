@@ -4,7 +4,8 @@ A cross-platform, DRM-free ebook reader and syncing ecosystem.
 
 - **Backend** — Go + Postgres. EPUB ingestion/parsing, library management, reading-position sync via EPUB CFI.
 - **Web reader** — TypeScript + [`epub.js`](https://github.com/futurepress/epub.js), bidirectional sync with the backend.
-- **Wrappers** — Wails (Windows native), Capacitor (Android APK).
+- **Wrappers** — Wails (Windows native desktop).
+- **Mobile** — native Flutter Android app (`mobile/`).
 - **Ecosystem** — "Send to Kindle" SMTP delivery; API hooks for **Project Eidolon** (reading location + raw chapter text for local TTS streaming).
 
 Tracked in Switchyard under project key **`LYCM`**.
@@ -18,7 +19,8 @@ internal/epub/   # EPUB metadata parser + CFI utils (LYCM-104/108)
 internal/api/    # REST handlers: /upload /library /sync (LYCM-105/106/107)
 migrations/      # embedded SQL migrations (LYCM-102)
 web/             # TypeScript + epub.js reader (Phase 2)
-wrappers/        # native shells: Wails (Windows) + Capacitor (Android) (Phase 3)
+wrappers/        # native desktop shell: Wails (Windows) (Phase 3)
+mobile/          # native Flutter Android app (LYCM-700)
 docs/            # architecture + eidolon-api contract
 ```
 
@@ -58,25 +60,26 @@ make run                       # boots HTTP server with /healthz
 curl localhost:8080/healthz
 ```
 
-## Native wrappers (LYCM-300)
+## Native desktop wrapper (LYCM-300)
 
-Phase 3 packages the *same* web reader as native apps — a Windows `.exe` (Wails)
-and a sideloadable Android `.apk` (Capacitor) — that reach a remote Lyceum
-server and sync just like the browser. See [`wrappers/`](wrappers/) for the full
-picture; the short version:
+Phase 3 packages the *same* web reader as a native Windows `.exe` (Wails) that
+reaches a remote Lyceum server and syncs just like the browser. See
+[`wrappers/`](wrappers/) for the full picture; the short version:
 
-- The shells embed the SPA built with `npm run build:native`. In that mode the
+- The shell embeds the SPA built with `npm run build:native`. In that mode the
   frontend prefixes every API call with a **server URL the user configures on
   first run** (Settings → Connection) instead of using same-origin relative
   URLs. The web build is unchanged.
-- The backend allows the shells' cross-origin calls via a CORS allowlist
-  (`internal/api/cors.go`). The built-in native origins work out of the box;
-  `LYCEUM_CORS_ORIGINS` extends them.
+- The backend allows the shell's cross-origin calls via a CORS allowlist
+  (`internal/api/cors.go`). The built-in Wails origin works out of the box;
+  `LYCEUM_CORS_ORIGINS` extends it.
 
 ```sh
 make wails-windows     # → wrappers/wails/build/bin/Lyceum.exe   (needs the Wails CLI)
-make android-apk       # → app-debug.apk                          (needs JDK 17 + Android SDK)
 ```
+
+Android is a separate native Flutter app under [`mobile/`](mobile/lyceum)
+(LYCM-700), not a web-shell wrapper.
 
 ## Ecosystem & Agent Integration (LYCM-400)
 
@@ -131,5 +134,5 @@ recorded before any digital file exists.
 |----------|-------|-----------------------------------------|
 | LYCM-100 | 1     | Core foundation (Go & storage)          |
 | LYCM-200 | 2     | Web reader (TypeScript & epub.js)       |
-| LYCM-300 | 3     | Cross-platform wrappers (Wails/Capacitor)|
+| LYCM-300 | 3     | Cross-platform wrappers (Wails desktop)  |
 | LYCM-400 | 4     | Ecosystem & agent integration           |
