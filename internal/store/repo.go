@@ -284,6 +284,44 @@ func (s *Store) SaveBlobs(fileHash string, epub, cover []byte) (filePath, coverP
 	return filePath, coverPath, nil
 }
 
+// SaveCoverAt writes (or overwrites) cover bytes at an exact path, creating the
+// parent directory if needed. Unlike SaveBlobs it leaves the EPUB blob untouched
+// and does not derive the path from a content hash: it exists for the cover
+// backfill, which must write to a book's actual served cover location (its
+// stored cover_path or the directory its EPUB lives in) rather than a
+// hash-derived path, since a book's recorded file_hash may not match its blob
+// directory.
+func (s *Store) SaveCoverAt(coverPath string, cover []byte) error {
+	if coverPath == "" {
+		return errors.New("store: SaveCoverAt requires a non-empty path")
+	}
+	if len(cover) == 0 {
+		return errors.New("store: SaveCoverAt requires non-empty cover bytes")
+	}
+	if err := os.MkdirAll(filepath.Dir(coverPath), 0o755); err != nil {
+		return fmt.Errorf("store: mkdir cover dir: %w", err)
+	}
+	if err := os.WriteFile(coverPath, cover, 0o644); err != nil {
+		return fmt.Errorf("store: write cover: %w", err)
+	}
+	return nil
+}
+
+// SetCoverPath updates a book's cover_path column. It is used by the backfill to
+// record a newly-fetched cover for a book that previously had none. Returns
+// ErrNotFound if no row has the given id.
+func (s *Store) SetCoverPath(ctx context.Context, bookID int64, coverPath string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE books SET cover_path = $2 WHERE id = $1`, bookID, nullString(coverPath))
+	if err != nil {
+		return fmt.Errorf("store: set cover path: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // nullString maps "" to a SQL NULL so empty optional text columns stay NULL
 // rather than storing empty strings.
 func nullString(s string) any {

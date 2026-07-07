@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/magos/lyceum/internal/api"
+	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/delivery"
 	"github.com/magos/lyceum/internal/store"
 	"github.com/magos/lyceum/web"
@@ -43,6 +44,11 @@ type config struct {
 	// allowed; this extends them (or "*" allows any).
 	corsOrigins string // LYCEUM_CORS_ORIGINS — comma-separated
 
+	// Cover art (LYCM-56): at ingest, prefer canonical cover art fetched by ISBN
+	// over the EPUB's embedded cover, which is often poor or a title page.
+	coverFetch   bool   // LYCEUM_COVER_FETCH — enable external cover fetching (default true)
+	coverBaseURL string // LYCEUM_COVER_BASE_URL — override the Open Library base (testing/self-host)
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -60,6 +66,9 @@ func loadConfig() config {
 		booksWatchInterval: envOrInt("LYCEUM_BOOKS_WATCH_INTERVAL", 15),
 
 		corsOrigins: os.Getenv("LYCEUM_CORS_ORIGINS"),
+
+		coverFetch:   envBool("LYCEUM_COVER_FETCH", true),
+		coverBaseURL: os.Getenv("LYCEUM_COVER_BASE_URL"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -129,6 +138,11 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	}
 	opts := []api.Option{api.WithAuth(auth)}
 
+	if cfg.coverFetch {
+		opts = append(opts, api.WithCoverFetcher(newCoverFetcher(cfg)))
+		log.Printf("cover fetch enabled at ingest (source=%s)", coverSource(cfg))
+	}
+
 	if cfg.smtp.Host == "" || cfg.smtp.From == "" {
 		if cfg.kindleAutoSend || cfg.kindleAddr != "" {
 			log.Printf("config: Kindle delivery requested but LYCEUM_SMTP_HOST/FROM unset; send-to-kindle disabled")
@@ -147,7 +161,32 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	return opts, cleanup
 }
 
+// newCoverFetcher builds the cover fetcher. Apple Books (the iTunes Search API)
+// is the source: keyless, matches by title+author so it covers ISBN-less EPUBs,
+// and returns clean high-resolution covers. An optional base-URL override
+// (LYCEUM_COVER_BASE_URL) points it at a mirror or test server.
+func newCoverFetcher(cfg config) coverart.Fetcher {
+	f := coverart.NewAppleBooks()
+	if cfg.coverBaseURL != "" {
+		f.SearchBaseURL = cfg.coverBaseURL
+	}
+	return f
+}
+
+func coverSource(cfg config) string {
+	if cfg.coverBaseURL != "" {
+		return cfg.coverBaseURL
+	}
+	return "applebooks"
+}
+
 func main() {
+	// Subcommands run to completion and exit; the bare command runs the server.
+	if len(os.Args) > 1 && os.Args[1] == "backfill-covers" {
+		runBackfillCovers(os.Args[2:])
+		return
+	}
+
 	cfg := loadConfig()
 
 	ctx := context.Background()

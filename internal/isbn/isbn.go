@@ -52,6 +52,40 @@ func FromIdentifier(id string) (code string, ok bool) {
 	return code, true
 }
 
+// FirstFrom returns the first identifier in ids that parses as a valid ISBN,
+// normalized to ISBN-13. EPUBs commonly carry several dc:identifier values (a
+// UUID alongside one or more ISBNs) in no guaranteed order, so callers pass the
+// whole set and let this pick the usable ISBN. ok is false when none qualify.
+func FirstFrom(ids []string) (code string, ok bool) {
+	for _, id := range ids {
+		if code, ok := FromIdentifier(id); ok {
+			return code, true
+		}
+	}
+	return "", false
+}
+
+// AllFrom returns every identifier in ids that parses as a valid ISBN,
+// normalized to ISBN-13 and de-duplicated, preserving first-seen order. Useful
+// when a caller wants to try each ISBN (e.g. against a cover source) rather than
+// just the first.
+func AllFrom(ids []string) []string {
+	var out []string
+	seen := make(map[string]struct{})
+	for _, id := range ids {
+		code, ok := FromIdentifier(id)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[code]; dup {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	return out
+}
+
 // clean keeps only ISBN-significant characters: digits, and an 'X'/'x' check
 // digit (uppercased). Everything else — hyphens, spaces, "urn:isbn:" — is
 // dropped. A non-ISBN identifier rarely cleans to a 10/13-length string that
