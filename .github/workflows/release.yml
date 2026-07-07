@@ -94,6 +94,10 @@ jobs:
       # binds no Go methods (see app.go), lossless on Windows too.
       - name: Build installer
         working-directory: wrappers/wails
+        # VITE_APP_VERSION bakes the release version into the SPA so the in-app
+        # update check (update/useUpdate.ts) knows what it's running.
+        env:
+          VITE_APP_VERSION: ${{ needs.release-please.outputs.version }}
         run: wails build -platform windows/amd64 -skipbindings -nsis
 
       # Optional Authenticode signing of the installer. Skipped unless the repo

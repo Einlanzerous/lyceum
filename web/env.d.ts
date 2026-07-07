@@ -8,6 +8,10 @@ interface ImportMetaEnv {
   // Optional default backend URL baked into a native build (LYCM-300); base.ts
   // uses it when no server URL has been saved. Absent/'' → prompt on first run.
   readonly VITE_LYCEUM_DEFAULT_SERVER?: string
+  // The app's own version, baked from the release version in CI (LYCM-300);
+  // update/useUpdate.ts compares it against the latest GitHub release. Absent for
+  // dev/unversioned builds, which disables the update check.
+  readonly VITE_APP_VERSION?: string
 }
 
 declare module '*.vue' {

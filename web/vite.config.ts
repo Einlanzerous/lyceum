@@ -13,12 +13,16 @@ export default defineConfig(({ mode }) => ({
   plugins: [vue()],
   define: {
     // Build target (LYCM-300), surfaced as import.meta.env.VITE_LYCEUM_TARGET.
-    // The native shells (Wails/Capacitor) build with `npm run build:native`
+    // The native (Wails) shell builds with `npm run build:native`
     // (`vite build --mode native`); api/base.ts reads this to decide whether
     // API URLs are same-origin relative (web) or prefixed with the
     // user-configured remote backend (native). `--mode` keeps it cross-platform
     // with no extra dependency. Default: web.
     'import.meta.env.VITE_LYCEUM_TARGET': JSON.stringify(mode === 'native' ? 'native' : 'web'),
+    // The app's own version (LYCM-300), baked from the release version in CI;
+    // update/useUpdate.ts compares it against the latest GitHub release to show
+    // the update banner. '' for dev/unversioned builds → update check disabled.
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(process.env.VITE_APP_VERSION ?? ''),
     // Optional build-time default backend URL (LYCM-300). A "my library" native
     // build for friends & family bakes the home server here so first run is
     // zero-config; base.ts falls back to it when no URL is saved. Read from the
