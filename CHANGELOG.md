@@ -1,0 +1,34 @@
+# Changelog
+
+## 1.0.0 (2026-07-07)
+
+
+### Features
+
+* **backend:** LYCM-400 — ecosystem & agent integration (Phase 4) ([0899950](https://github.com/Einlanzerous/lyceum/commit/089995064e4e68383bd41a8cc1820f87edd7a176))
+* **backend:** LYCM-601 — ISBN inventory + folder-ingest acquisition pipeline ([931b7d2](https://github.com/Einlanzerous/lyceum/commit/931b7d236998e8d8958bae19a3c322d0f2d035a3))
+* **covers:** LYCM-56 fetch canonical cover art (Apple Books) + backfill tool ([0fa8d22](https://github.com/Einlanzerous/lyceum/commit/0fa8d226d82b7248f1c177d4d21a24019747bd11))
+* **mobile:** LYCM-700 native Flutter Android app + shared reader/UX refinements ([e4eba11](https://github.com/Einlanzerous/lyceum/commit/e4eba11680101204337547a27ee0dbde05e5dda0))
+* **mobile:** LYCM-700 signed Android release pipeline ([#9](https://github.com/Einlanzerous/lyceum/issues/9)) ([5128a47](https://github.com/Einlanzerous/lyceum/commit/5128a4750da72b7fd0a9c8b6385fe07a993d380c))
+* **wails:** Lyceum brand-mark app icon ([1a82425](https://github.com/Einlanzerous/lyceum/commit/1a82425129c0c302f2eebe24b22c346a22af61d7))
+* **web:** add favicon from the Lyceum brand mark ([6f3c21c](https://github.com/Einlanzerous/lyceum/commit/6f3c21c55b6284e9b2b737c8ed4fafe95b057dbd))
+* **web:** default-server seam for a zero-config native build ([7d7aa1d](https://github.com/Einlanzerous/lyceum/commit/7d7aa1d048f0f16f9b7925d6409a0ee0e08c63c6))
+* **web:** implement the Lyceum design system (dark/light, brass-on-charcoal) ([bf073b7](https://github.com/Einlanzerous/lyceum/commit/bf073b7386555984adfa199fb3eebc8d1962f799))
+* **web:** in-app update check for the native shell ([430a90d](https://github.com/Einlanzerous/lyceum/commit/430a90d711c6334be232bcddc8edb117e495d5f7))
+* **web:** in-reader quick-settings panel + clearer Contents icon ([377f9b1](https://github.com/Einlanzerous/lyceum/commit/377f9b1b9bc37825227765240b23ac8d9c4267bf))
+* **web:** LYCM-501 — library theme toggle + Settings page scaffold ([ec65f43](https://github.com/Einlanzerous/lyceum/commit/ec65f4388efd696ee7e18b9294df381b0cfc2513))
+* **web:** LYCM-502 — opt-in custom reading font ([cef4e2b](https://github.com/Einlanzerous/lyceum/commit/cef4e2b1e8b64852f354a857707a091e900d09e4))
+* **wrappers:** LYCM-300 cross-platform shells + backend base-URL/CORS seam ([4a47b97](https://github.com/Einlanzerous/lyceum/commit/4a47b976ca1eaf794a15d8ad46c4ac4780a2df6b))
+
+
+### Bug Fixes
+
+* **library:** LYCM-56 uniform cover framing to match the cover source ([94bc300](https://github.com/Einlanzerous/lyceum/commit/94bc3002cf754a1106bc5115e71e5846931ab371))
+* **web:** generate device_id without crypto.randomUUID in insecure contexts ([c59c7df](https://github.com/Einlanzerous/lyceum/commit/c59c7dfbebf2680bbd6dbc933c040de44817d33f))
+* **web:** keep the hatch texture off real cover art ([08bb689](https://github.com/Einlanzerous/lyceum/commit/08bb689ba644c07eab7e53f2753e103da7cc5b6f))
+
+
+### Maintenance
+
+* gitignore local example_docs sample books ([d4d144a](https://github.com/Einlanzerous/lyceum/commit/d4d144afb60742f9135e796588da5c40b920e424))
+* **wrappers:** remove superseded Capacitor Android shell ([bc004ab](https://github.com/Einlanzerous/lyceum/commit/bc004ab006ddcda6c84c7ed81c9439dbff7730b0))
