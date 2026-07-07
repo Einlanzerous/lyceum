@@ -1,0 +1,127 @@
+name: mobile-release
+
+# Builds + ships the native Flutter app (LYCM-700) on the v* tags that
+# release-please cuts.
+# - Android: signed APK attached to the GitHub Release; AAB pushed to the Play
+#   internal track (skipped until PLAY_SERVICE_ACCOUNT_JSON is set).
+# See mobile/lyceum/android/RELEASE.md for the secret/runbook details.
+#
+# Trigger: release-please cuts the tag with an App-minted token from release.yml.
+# Rather than depend on whether that tag re-fires `on: push: tags`, the real
+# entrypoint is `workflow_call` from release.yml (gated on release_created), so
+# the signed build runs exactly once in that same push-to-main run.
+# `workflow_dispatch` lets you rebuild any existing tag by hand.
+#
+# (iOS/TestFlight is intentionally omitted — there's no Apple account yet. When
+# there is, mirror argosy's mobile-release.yml check-apple + ios jobs, which are
+# gated so no macOS minutes are spent until the Apple secrets exist.)
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v1.0.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # upload assets onto the release-please GitHub Release
+
+defaults:
+  run:
+    working-directory: mobile/lyceum
+
+env:
+  FLUTTER_VERSION: "3.44.2"
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag when invoked by release.yml / workflow_dispatch. At release
+          # time main HEAD == the tagged commit, but checking out the tag is
+          # correct for dispatching older tags too.
+          ref: ${{ inputs.tag }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # versionName from the tag (v1.0.0 -> 1.0.0); versionCode from the run
+      # number so it monotonically increases (Play requires it).
+      - name: derive version
+        id: ver
+        run: |
+          tag="${{ inputs.tag }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: decode upload keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — see android/RELEASE.md"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - run: flutter pub get
+
+      - name: build signed APK + AAB
+        run: |
+          flutter build apk --release \
+            --build-name="${{ steps.ver.outputs.name }}" \
+            --build-number="${{ steps.ver.outputs.code }}"
+          flutter build appbundle --release \
+            --build-name="${{ steps.ver.outputs.name }}" \
+            --build-number="${{ steps.ver.outputs.code }}"
+
+      - name: attach APK to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "lyceum-${{ steps.ver.outputs.name }}.apk"
+          gh release upload "${{ steps.ver.outputs.tag }}" \
+            "lyceum-${{ steps.ver.outputs.name }}.apk" --clobber
+
+      # --- Play internal track: only when the service account secret exists ---
+      - name: gate on Play secret
+        id: play
+        run: |
+          if [ -n "$PLAY_JSON" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; fi
+      - name: write Play service account
+        if: steps.play.outputs.enabled == 'true'
+        run: printf '%s' "$PLAY_JSON" > play-service-account.json
+      - name: upload to Play internal track
+        if: steps.play.outputs.enabled == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: mobile/lyceum/play-service-account.json
+          packageName: dev.dodson.lyceum
+          releaseFiles: mobile/lyceum/build/app/outputs/bundle/release/app-release.aab
+          track: internal
+      - name: note when Play is skipped
+        if: steps.play.outputs.enabled != 'true'
+        run: echo "::notice::Play upload skipped — PLAY_SERVICE_ACCOUNT_JSON not set (see android/RELEASE.md)."
