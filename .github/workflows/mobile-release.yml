@@ -57,15 +57,20 @@ jobs:
           channel: stable
           cache: true
 
-      # versionName from the tag (v1.0.0 -> 1.0.0); versionCode from the run
-      # number so it monotonically increases (Play requires it).
+      # versionName from the tag (v1.0.0 -> 1.0.0). versionCode is a Unix
+      # timestamp: Play requires it to strictly increase across ALL uploads, and
+      # since this workflow is reached both via workflow_call (github.run_number
+      # is then the *caller's* counter) and workflow_dispatch (its own counter),
+      # run_number isn't monotonic across paths. A timestamp always increases and
+      # is unique per build — and re-dispatching the same tag still gets a fresh,
+      # higher code. Fits Play's 2.1e9 int cap until ~2036.
       - name: derive version
         id: ver
         run: |
           tag="${{ inputs.tag }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "code=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: decode upload keystore
         env:
