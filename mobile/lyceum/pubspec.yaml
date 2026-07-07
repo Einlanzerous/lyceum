@@ -50,6 +50,21 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  # Generates the Android launcher icons (mipmaps + adaptive icon) from the
+  # brand assets below. Regenerate after changing them with:
+  #   dart run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.4
+
+# Launcher icon: the gold rounded-diamond mark on the dark brand plate (same
+# mark as the Wails desktop appicon). adaptive_icon_background matches the plate
+# fill so the scaled foreground blends into a seamless dark tile on Android 8+.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/brand/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#1c1b1a"
+  adaptive_icon_foreground: "assets/brand/app_icon_foreground.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
