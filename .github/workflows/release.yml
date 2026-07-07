@@ -3,7 +3,8 @@ name: Release Please
 # Automated releases (LYCM-300). Release Please watches conventional commits on
 # main and maintains a release PR (version bump + CHANGELOG). Merging that PR
 # creates the tag + GitHub Release; the windows-installer job then builds the
-# NSIS installer and attaches it. No hand-cut tags.
+# NSIS installer and attaches it, and mobile-release builds the signed Android
+# APK/AAB (LYCM-700). No hand-cut tags.
 on:
   push:
     branches:
@@ -42,6 +43,20 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # When a release is cut, build the signed Flutter Android app (LYCM-700) and
+  # attach the APK to the GitHub Release (+ push the AAB to Play internal when
+  # PLAY_SERVICE_ACCOUNT_JSON is set). Called here — in the same push-to-main run
+  # that cut the tag — rather than via `on: push: tags`, so it fires exactly once
+  # regardless of whether the App-token-pushed tag re-triggers a tag event.
+  # `secrets: inherit` passes the ANDROID_* / PLAY_* secrets through.
+  mobile-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/mobile-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit
 
   # When a release is cut, build the Wails Windows installer and attach it to the
   # GitHub Release. NSIS ships preinstalled on the windows-latest runner, so
