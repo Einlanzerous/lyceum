@@ -61,7 +61,9 @@ const cover = computed(() =>
 
 .card__cover {
   position: relative;
-  aspect-ratio: 2 / 3;
+  /* Matches the aspect of our cover source (Apple Books, ~366x600) so covers
+     fill the card edge-to-edge with no letterbox bars. */
+  aspect-ratio: 366 / 600;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -80,6 +82,9 @@ const cover = computed(() =>
 .card__img {
   width: 100%;
   height: 100%;
+  /* cover, with the card aspect matched to the source above: covers fill
+     edge-to-edge. Any residual aspect difference crops the sides (safe — the
+     top banner and bottom author bar are never clipped). */
   object-fit: cover;
   display: block;
 }

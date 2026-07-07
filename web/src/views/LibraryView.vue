@@ -445,7 +445,7 @@ function onServerSaved(): void {
   }
 }
 .lib__skeleton {
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 366 / 600;
   border-radius: 7px;
   background: linear-gradient(
     100deg,
