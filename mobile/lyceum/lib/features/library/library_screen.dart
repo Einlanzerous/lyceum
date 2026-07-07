@@ -177,7 +177,9 @@ class _Shelf extends StatelessWidget {
                 maxCrossAxisExtent: 190,
                 mainAxisSpacing: 22,
                 crossAxisSpacing: 22,
-                childAspectRatio: 0.52,
+                // Taller cover (366/600) + title/author beneath. Smaller than the
+                // old 2:3 value so the card doesn't overflow its cell.
+                childAspectRatio: 0.48,
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, i) => BookCard(book: books[i]),
@@ -346,7 +348,7 @@ class _LoadingShelfState extends State<_LoadingShelf>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             AspectRatio(
-              aspectRatio: 2 / 3,
+              aspectRatio: 366 / 600,
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: lyc.surfaceRaised,

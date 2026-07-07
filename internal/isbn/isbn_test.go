@@ -65,3 +65,22 @@ func TestFromIdentifier(t *testing.T) {
 		t.Fatal("FromIdentifier(uuid) reported ok; want false")
 	}
 }
+
+func TestFirstFrom(t *testing.T) {
+	// ISBN not first: a UUID precedes it (the Eisenhorn case).
+	if got, ok := FirstFrom([]string{"urn:uuid:6F024F91", "9781800269187"}); !ok || got != "9781800269187" {
+		t.Fatalf("FirstFrom(uuid,isbn) = %q,%v; want 9781800269187,true", got, ok)
+	}
+	// ISBN-10 anywhere in the list normalizes to ISBN-13.
+	if got, ok := FirstFrom([]string{"0140449337"}); !ok || got != "9780140449334" {
+		t.Fatalf("FirstFrom(isbn10) = %q,%v; want 9780140449334,true", got, ok)
+	}
+	// No ISBN at all (UUID-only EPUB, e.g. Spring Dawning / On a Knife Edge).
+	if _, ok := FirstFrom([]string{"urn:uuid:a", "d87e3b24-2a62-4783-b562-f5ef38d4f3a3"}); ok {
+		t.Fatal("FirstFrom(uuids) reported ok; want false")
+	}
+	// Empty input.
+	if _, ok := FirstFrom(nil); ok {
+		t.Fatal("FirstFrom(nil) reported ok; want false")
+	}
+}

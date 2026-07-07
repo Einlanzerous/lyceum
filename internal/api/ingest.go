@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/epub"
 	"github.com/magos/lyceum/internal/isbn"
 	"github.com/magos/lyceum/internal/store"
@@ -51,7 +52,7 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source string) (book 
 		return store.Book{}, false, fmt.Errorf("lookup by hash: %w", err)
 	}
 
-	filePath, coverPath, err := a.store.SaveBlobs(hash, data, md.CoverData)
+	filePath, coverPath, err := a.store.SaveBlobs(hash, data, a.coverForIngest(ctx, md))
 	if err != nil {
 		return store.Book{}, false, fmt.Errorf("save blobs: %w", err)
 	}
@@ -80,12 +81,44 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source string) (book 
 	return saved, true, nil
 }
 
+// coverForIngest returns the cover bytes to store for a freshly-parsed EPUB.
+// It only reaches for external art when the EPUB has NO embedded cover: fetched
+// art fills the gap so the book gets a real cover instead of the generated
+// fallback tile. A book that ships its own cover keeps it — external sources
+// (e.g. Open Library) frequently only have a lower-resolution or wrong-edition
+// image, so replacing a present cover tends to make the shelf worse, not better.
+// Deliberate replacement of a poor embedded cover is the job of the
+// `backfill-covers` tool, not the ingest path. Best effort: a fetch error is
+// logged and never fails the ingest.
+func (a *API) coverForIngest(ctx context.Context, md *epub.Metadata) []byte {
+	if a.covers == nil || len(md.CoverData) > 0 {
+		return md.CoverData
+	}
+	q := coverart.Query{
+		Title:    md.Title,
+		Author:   md.Author,
+		Language: md.Language,
+		ISBNs:    isbn.AllFrom(md.Identifiers),
+	}
+	// Nothing to key on (no ISBN and no title): no cover.
+	if len(q.ISBNs) == 0 && strings.TrimSpace(q.Title) == "" {
+		return md.CoverData
+	}
+	switch art, _, err := a.covers.Fetch(ctx, q); {
+	case err == nil && len(art) > 0:
+		return art
+	case err != nil && !errors.Is(err, coverart.ErrNotFound):
+		log.Printf("api: fetch cover for %q: %v (no embedded cover to fall back to)", md.Title, err)
+	}
+	return md.CoverData
+}
+
 // linkInventory links a freshly-ingested book to its inventory entry by the
-// ISBN carried in the EPUB's dc:identifier, if any. EPUBs frequently identify
-// themselves by UUID rather than ISBN, so a missing ISBN is the normal case and
-// not an error.
+// ISBN carried in the EPUB's dc:identifiers, if any. EPUBs frequently identify
+// themselves by UUID (sometimes ahead of the ISBN), so a missing ISBN is the
+// normal case and not an error.
 func (a *API) linkInventory(ctx context.Context, book store.Book, md *epub.Metadata) {
-	code, ok := isbn.FromIdentifier(md.Identifier)
+	code, ok := isbn.FirstFrom(md.Identifiers)
 	if !ok {
 		return
 	}

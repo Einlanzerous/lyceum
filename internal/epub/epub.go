@@ -23,7 +23,13 @@ type Metadata struct {
 	Title      string
 	Author     string // first dc:creator
 	Language   string
-	Identifier string
+	Identifier string // first dc:identifier (may be a UUID, not the ISBN)
+
+	// Identifiers holds every dc:identifier in manifest order. EPUBs routinely
+	// carry several (a UUID plus one or more ISBNs), and the ISBN is often not
+	// first, so callers that want the ISBN must scan all of these rather than
+	// rely on Identifier.
+	Identifiers []string
 
 	CoverData      []byte
 	CoverMediaType string
@@ -114,10 +120,11 @@ func Parse(r io.ReaderAt, size int64) (*Metadata, error) {
 	}
 
 	md := &Metadata{
-		Title:      first(pkg.Metadata.Titles),
-		Author:     first(pkg.Metadata.Creators),
-		Language:   first(pkg.Metadata.Languages),
-		Identifier: first(pkg.Metadata.Identifiers),
+		Title:       first(pkg.Metadata.Titles),
+		Author:      first(pkg.Metadata.Creators),
+		Language:    first(pkg.Metadata.Languages),
+		Identifier:  first(pkg.Metadata.Identifiers),
+		Identifiers: nonEmpty(pkg.Metadata.Identifiers),
 	}
 
 	if href, mt := resolveCover(pkg); href != "" {
@@ -233,4 +240,15 @@ func first(ss []string) string {
 		}
 	}
 	return ""
+}
+
+// nonEmpty returns the trimmed, non-empty members of ss in order, or nil.
+func nonEmpty(ss []string) []string {
+	var out []string
+	for _, s := range ss {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

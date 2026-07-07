@@ -15,6 +15,9 @@ type sampleSpec struct {
 	creator    string
 	language   string
 	identifier string
+	// extraIdentifiers are additional dc:identifier values emitted after the
+	// primary one (EPUBs routinely carry a UUID plus one or more ISBNs).
+	extraIdentifiers []string
 	// coverStyle selects how the cover is declared: "meta" (EPUB2 legacy),
 	// "property" (EPUB3 cover-image), or "fallback" (no declaration, first
 	// image item is used).
@@ -73,13 +76,18 @@ func buildEPUB(t *testing.T, s sampleSpec) []byte {
 		metaCover = `<meta name="cover" content="cover-img"/>`
 	}
 
+	extraIDs := ""
+	for _, id := range s.extraIdentifiers {
+		extraIDs += "\n    <dc:identifier>" + id + `</dc:identifier>`
+	}
+
 	opf := `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>` + s.title + `</dc:title>
     <dc:creator>` + s.creator + `</dc:creator>
     <dc:language>` + s.language + `</dc:language>
-    <dc:identifier id="bookid">` + s.identifier + `</dc:identifier>
+    <dc:identifier id="bookid">` + s.identifier + `</dc:identifier>` + extraIDs + `
     ` + metaCover + `
   </metadata>
   <manifest>
@@ -180,6 +188,43 @@ func TestParse_DublinCoreAndCover(t *testing.T) {
 				t.Errorf("CoverMediaType = %q, want image/png", md.CoverMediaType)
 			}
 		})
+	}
+}
+
+func TestParse_Identifiers(t *testing.T) {
+	// A UUID first, then two ISBNs — the common real-world shape where the
+	// ISBN is not the first identifier.
+	data := buildEPUB(t, sampleSpec{
+		opfPath:          "OEBPS/content.opf",
+		title:            "The Omnibus",
+		creator:          "Some Author",
+		language:         "en",
+		identifier:       "urn:uuid:6F024F91-9546-4F17-B9B3-FB9EF365BA1F",
+		extraIdentifiers: []string{"9781800269187", "urn:isbn:9780000000000"},
+		coverStyle:       "property",
+		coverBytes:       fakePNG,
+	})
+	md, err := ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	// Identifier keeps the first (UUID) for back-compat.
+	if md.Identifier != "urn:uuid:6F024F91-9546-4F17-B9B3-FB9EF365BA1F" {
+		t.Errorf("Identifier = %q, want the first (UUID)", md.Identifier)
+	}
+	// Identifiers holds all three in order.
+	want := []string{
+		"urn:uuid:6F024F91-9546-4F17-B9B3-FB9EF365BA1F",
+		"9781800269187",
+		"urn:isbn:9780000000000",
+	}
+	if len(md.Identifiers) != len(want) {
+		t.Fatalf("Identifiers = %v, want %v", md.Identifiers, want)
+	}
+	for i := range want {
+		if md.Identifiers[i] != want[i] {
+			t.Errorf("Identifiers[%d] = %q, want %q", i, md.Identifiers[i], want[i])
+		}
 	}
 }
 

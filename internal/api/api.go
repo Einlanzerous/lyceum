@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -41,9 +42,10 @@ type Store interface {
 type API struct {
 	store    Store
 	dataDir  string
-	auth     *TokenAuth      // bearer-token table for the /eidolon + delivery routes
-	delivery *deliveryConfig // "Send to Kindle" dispatcher + policy (nil when unconfigured)
-	acquirer Acquirer        // ISBN -> DRM-free copy requester (logging no-op by default)
+	auth     *TokenAuth       // bearer-token table for the /eidolon + delivery routes
+	delivery *deliveryConfig  // "Send to Kindle" dispatcher + policy (nil when unconfigured)
+	acquirer Acquirer         // ISBN -> DRM-free copy requester (logging no-op by default)
+	covers   coverart.Fetcher // ISBN -> canonical cover art (nil = use embedded covers only)
 }
 
 // Option configures an API at construction time.
@@ -54,6 +56,14 @@ type Option func(*API)
 // closed (every request 401s); core reader routes are unaffected.
 func WithAuth(auth *TokenAuth) Option {
 	return func(a *API) { a.auth = auth }
+}
+
+// WithCoverFetcher installs a source of canonical cover art (e.g. Open Library)
+// consulted at ingest. When set, a freshly-ingested book with a usable ISBN
+// prefers the fetched cover over its embedded one, falling back to the embedded
+// cover when no art is found. Without it, ingest uses embedded covers only.
+func WithCoverFetcher(f coverart.Fetcher) Option {
+	return func(a *API) { a.covers = f }
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with

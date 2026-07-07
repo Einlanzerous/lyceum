@@ -26,11 +26,16 @@ class BookCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: 2 / 3,
+            // Matches our cover source (Apple Books, ~366x600) so covers fill
+            // edge-to-edge; see BoxFit.contain->cover note below.
+            aspectRatio: 366 / 600,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(LycRadii.cover),
               child: DecoratedBox(
                 decoration: BoxDecoration(
+                  // Backs the letterbox bars left by BoxFit.contain, matching
+                  // the web card surface.
+                  color: lyc.surfaceRaised,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.4),
@@ -43,6 +48,9 @@ class BookCard extends ConsumerWidget {
                   fit: StackFit.expand,
                   children: [
                     if (book.hasCover)
+                      // cover, with the card aspect matched to the source: covers
+                      // fill edge-to-edge and any residual aspect difference crops
+                      // the sides, never the top banner / bottom author bar.
                       Image.network(
                         client.coverUrl(book.id),
                         fit: BoxFit.cover,
