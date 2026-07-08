@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/Einlanzerous/lyceum/compare/v1.0.0...v1.1.0) (2026-07-07)
+
+
+### Features
+
+* **mobile:** LYCM-700 app icon, privacy policy, robust versionCode ([#10](https://github.com/Einlanzerous/lyceum/issues/10)) ([d1ee57e](https://github.com/Einlanzerous/lyceum/commit/d1ee57e61290ba31da0da0d427437279031f6c51))
+
 ## 1.0.0 (2026-07-07)
 
 
