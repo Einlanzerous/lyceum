@@ -2,8 +2,8 @@ name: Release Please
 
 # Automated releases (LYCM-300). Release Please watches conventional commits on
 # main and maintains a release PR (version bump + CHANGELOG). Merging that PR
-# creates the tag + GitHub Release; the windows-installer job then builds the
-# NSIS installer and attaches it, and mobile-release builds the signed Android
+# creates the tag + GitHub Release; windows-release then builds the NSIS
+# installer and attaches it, and mobile-release builds the signed Android
 # APK/AAB (LYCM-700). No hand-cut tags.
 on:
   push:
@@ -59,84 +59,14 @@ jobs:
     secrets: inherit
 
   # When a release is cut, build the Wails Windows installer and attach it to the
-  # GitHub Release. NSIS ships preinstalled on the windows-latest runner, so
-  # `wails build -nsis` finds makensis. This is the GENERIC installer — no baked
-  # server URL — so a public artifact never carries a private address; the
-  # zero-config "my library" flavor stays a local VITE_LYCEUM_DEFAULT_SERVER
-  # build (see wrappers/wails/README.md).
-  windows-installer:
+  # GitHub Release. Extracted into a reusable workflow (mirrors mobile-release)
+  # so it's also dispatchable by hand for an existing tag. Called in the same
+  # push-to-main run that cut the tag; `secrets: inherit` passes the optional
+  # WINDOWS_PFX_* signing secrets through.
+  windows-release:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
-    runs-on: windows-latest
-    # Code signing is opt-in: these are '' until the repo has the secrets, which
-    # keeps the sign step below skipped. See wrappers/wails/README.md to enable.
-    env:
-      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
-      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
-
-      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
-      # install web deps explicitly so it's present regardless of frontend:install.
-      - name: Install web deps
-        run: npm --prefix web ci
-
-      # The installer version (Add/Remove Programs + file properties) comes from
-      # wails.json info.productVersion. Stamp it from the release version so it
-      # matches the tag without an in-repo bump.
-      - name: Stamp installer version
-        shell: bash
-        env:
-          VERSION: ${{ needs.release-please.outputs.version }}
-        run: |
-          echo "Building installer version $VERSION"
-          node -e "const fs=require('fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
-
-      # frontend:build builds web/ in native mode and copies the bundle in; -nsis
-      # then runs makensis on build/windows/installer/project.nsi to wrap the exe
-      # (which also bundles the WebView2 bootstrapper). -skipbindings: the app
-      # binds no Go methods (see app.go), lossless on Windows too.
-      - name: Build installer
-        working-directory: wrappers/wails
-        # VITE_APP_VERSION bakes the release version into the SPA so the in-app
-        # update check (update/useUpdate.ts) knows what it's running.
-        env:
-          VITE_APP_VERSION: ${{ needs.release-please.outputs.version }}
-        run: wails build -platform windows/amd64 -skipbindings -nsis
-
-      # Optional Authenticode signing of the installer. Skipped unless the repo
-      # has WINDOWS_PFX_BASE64 (base64 of a .pfx) + WINDOWS_PFX_PASSWORD. To also
-      # sign the inner Lyceum.exe, split the build (build exe -> sign -> makensis)
-      # or use the !finalize hook in project.nsi.
-      - name: Sign installer
-        if: env.WINDOWS_PFX_BASE64 != ''
-        shell: pwsh
-        run: |
-          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
-          $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
-            Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          & $signtool sign /f $pfx /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 `
-            /tr http://timestamp.digicert.com /td SHA256 `
-            'wrappers\wails\build\bin\Lyceum-amd64-installer.exe'
-          Remove-Item $pfx
-
-      - name: Attach installer to the release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: |
-            wrappers/wails/build/bin/Lyceum.exe
-            wrappers/wails/build/bin/Lyceum-amd64-installer.exe
-          fail_on_unmatched_files: true
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/windows-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit
