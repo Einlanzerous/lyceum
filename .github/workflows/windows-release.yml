@@ -1,0 +1,140 @@
+name: windows-release
+
+# Builds + attaches the Wails Windows installer (LYCM-300) on the v* tags that
+# release-please cuts. This is the GENERIC installer — no baked server URL — so a
+# public artifact never carries a private address; the zero-config "my library"
+# flavor stays a local VITE_LYCEUM_DEFAULT_SERVER build (see wrappers/wails/README.md).
+#
+# Trigger mirrors mobile-release.yml: the real entrypoint is `workflow_call` from
+# release.yml (gated on release_created), so it runs once in the same
+# push-to-main run that cut the tag. `workflow_dispatch` rebuilds/re-attaches the
+# installer for any existing tag by hand (also how the makensis fix in LYCM-59
+# was verified without cutting a fresh release).
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v1.1.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v1.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # upload assets onto the release-please GitHub Release
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    # Code signing is opt-in: these are '' until the repo has the secrets, which
+    # keeps the sign step below skipped. See wrappers/wails/README.md to enable.
+    env:
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      # versionName from the tag (v1.1.0 -> 1.1.0), for the installer version
+      # stamp + the SPA's in-app update check.
+      - name: derive version
+        id: ver
+        shell: bash
+        run: |
+          tag="${{ inputs.tag }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+
+      # LYCM-59: makensis is NOT on PATH on the windows-latest runner, so
+      # `wails build -nsis` was silently skipping installer creation (warning
+      # only, exit 0) and the attach step then failed on the missing file.
+      # Install NSIS and put makensis on PATH before the build.
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
+      # install web deps explicitly so it's present regardless of frontend:install.
+      - name: Install web deps
+        run: npm --prefix web ci
+
+      # The installer version (Add/Remove Programs + file properties) comes from
+      # wails.json info.productVersion. Stamp it from the tag so it matches
+      # without an in-repo bump.
+      - name: Stamp installer version
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.name }}
+        run: |
+          echo "Building installer version $VERSION"
+          node -e "const fs=require('fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+
+      # frontend:build builds web/ in native mode and copies the bundle in; -nsis
+      # then runs makensis on build/windows/installer/project.nsi to wrap the exe
+      # (which also bundles the WebView2 bootstrapper). -skipbindings: the app
+      # binds no Go methods (see app.go), lossless on Windows too.
+      - name: Build installer
+        working-directory: wrappers/wails
+        # VITE_APP_VERSION bakes the release version into the SPA so the in-app
+        # update check (update/useUpdate.ts) knows what it's running.
+        env:
+          VITE_APP_VERSION: ${{ steps.ver.outputs.name }}
+        run: wails build -platform windows/amd64 -skipbindings -nsis
+
+      # Guard against a silent makensis miss regressing again: fail loudly here
+      # rather than at the attach step if the installer wasn't produced.
+      - name: Verify installer exists
+        shell: bash
+        run: |
+          f=wrappers/wails/build/bin/Lyceum-amd64-installer.exe
+          if [ ! -f "$f" ]; then
+            echo "::error::$f was not produced — is makensis on PATH? (LYCM-59)"
+            exit 1
+          fi
+          echo "Built $(ls -la "$f")"
+
+      # Optional Authenticode signing of the installer. Skipped unless the repo
+      # has WINDOWS_PFX_BASE64 (base64 of a .pfx) + WINDOWS_PFX_PASSWORD. To also
+      # sign the inner Lyceum.exe, split the build (build exe -> sign -> makensis)
+      # or use the !finalize hook in project.nsi.
+      - name: Sign installer
+        if: env.WINDOWS_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+          $signtool = (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          & $signtool sign /f $pfx /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            'wrappers\wails\build\bin\Lyceum-amd64-installer.exe'
+          Remove-Item $pfx
+
+      # --clobber makes re-dispatch idempotent (overwrites the prior asset).
+      - name: Attach installer to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.ver.outputs.tag }}" \
+            wrappers/wails/build/bin/Lyceum.exe \
+            wrappers/wails/build/bin/Lyceum-amd64-installer.exe \
+            --clobber
