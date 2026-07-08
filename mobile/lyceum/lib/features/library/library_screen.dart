@@ -171,16 +171,9 @@ class _Shelf extends StatelessWidget {
         ),
         if (grid)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
             sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 190,
-                mainAxisSpacing: 22,
-                crossAxisSpacing: 22,
-                // Taller cover (366/600) + title/author beneath. Smaller than the
-                // old 2:3 value so the card doesn't overflow its cell.
-                childAspectRatio: 0.48,
-              ),
+              gridDelegate: _coverGridDelegate(context),
               delegate: SliverChildBuilderDelegate(
                 (context, i) => BookCard(book: books[i]),
                 childCount: books.length,
@@ -334,13 +327,9 @@ class _LoadingShelfState extends State<_LoadingShelf>
   Widget build(BuildContext context) {
     final lyc = context.lyc;
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 28, 20, 40),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 190,
-        mainAxisSpacing: 22,
-        crossAxisSpacing: 22,
-        childAspectRatio: 0.52,
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 28, 16, 40),
+      // Same delegate as the real grid (LYCM-60) so load→content doesn't jump.
+      gridDelegate: _coverGridDelegate(context),
       itemCount: 6,
       itemBuilder: (context, i) => FadeTransition(
         opacity: Tween(begin: 0.35, end: 0.7).animate(_c),
@@ -365,4 +354,35 @@ class _LoadingShelfState extends State<_LoadingShelf>
       ),
     );
   }
+}
+
+/// Delegate for the cover grid (LYCM-60). Targets ~220dp tiles (2-up on phones,
+/// more on tablets), then derives childAspectRatio from the *actual* tile width
+/// so the 366/600 cover fills the cell and the title/author footer stays a fixed
+/// height — no big inter-row gaps on wide screens, no clipping on narrow ones.
+/// The footer term tracks the system text scale so large-font users don't clip.
+SliverGridDelegateWithMaxCrossAxisExtent _coverGridDelegate(BuildContext context) {
+  const hPadding = 16.0;
+  const spacing = 16.0;
+  const maxExtent = 220.0;
+  const coverAspect = 366 / 600;
+
+  final width = MediaQuery.sizeOf(context).width;
+  final avail = width - hPadding * 2;
+  // Mirror the delegate's own column math so our ratio matches the real tileW.
+  final cols = (avail / (maxExtent + spacing)).ceil().clamp(1, 999);
+  final tileW = (avail - spacing * (cols - 1)) / cols;
+
+  // Footer beneath the cover: fixed gaps (SizedBox 10 + 2) plus the title
+  // (2 lines @ ~13px) and author (~11.5px) rows, which scale with system text.
+  final textScale = MediaQuery.textScalerOf(context).scale(1);
+  final footer = 12 + (32.5 + 14) * textScale + 4; // +4 safety buffer
+  final tileH = tileW / coverAspect + footer;
+
+  return SliverGridDelegateWithMaxCrossAxisExtent(
+    maxCrossAxisExtent: maxExtent,
+    mainAxisSpacing: 16,
+    crossAxisSpacing: spacing,
+    childAspectRatio: tileW / tileH,
+  );
 }
