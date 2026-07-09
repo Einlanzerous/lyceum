@@ -12,6 +12,8 @@ export interface Book {
   progress?: number
   /** RFC3339 timestamp the book was ingested; backs the "recently added" sort. */
   added_at?: string
+  /** RFC3339 timestamp of the latest reading position; pins the current read. */
+  read_at?: string
   /** Series the book belongs to, or "" / omitted when it is a standalone. */
   series?: string
   /** 1-based position within {@link series}; omitted when unknown. */

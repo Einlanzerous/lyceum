@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -392,6 +393,25 @@ func (s *Store) UpdateBookContent(ctx context.Context, id int64, b Book) (Book, 
 		return Book{}, fmt.Errorf("store: update book content: %w", err)
 	}
 	return updated, nil
+}
+
+// UpdateBookSeries sets (or clears) a book's series name and position. It backs
+// the `set-series` CLI tool for libraries whose EPUBs carry no series metadata
+// (LYCM-36). An empty series clears both columns; a zero index stores NULL so an
+// unknown position never reads back as a 0th volume. Returns ErrNotFound if the
+// id is gone.
+func (s *Store) UpdateBookSeries(ctx context.Context, id int64, series string, index float64) (Book, error) {
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`UPDATE books SET series = $2, series_index = $3 WHERE id = $1
+		 RETURNING `+bookColumns,
+		id, nullString(strings.TrimSpace(series)), nullFloat(index)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: update book series: %w", err)
+	}
+	return b, nil
 }
 
 // DeleteBook removes a book row and returns the deleted row so the caller can

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildShelf, memberStatus, resumeIndex, type ShelfItem } from './series'
+import { buildShelf, memberStatus, pinnedBookId, resumeIndex, type ShelfItem } from './series'
 import type { Book } from '@/api/types'
 
 function book(partial: Partial<Book> & { id: number }): Book {
@@ -25,11 +25,7 @@ describe('memberStatus', () => {
 
 describe('resumeIndex', () => {
   it('picks the furthest in-progress volume', () => {
-    const members = [
-      book({ id: 1, progress: 1 }),
-      book({ id: 2, progress: 0.7 }),
-      book({ id: 3 }),
-    ]
+    const members = [book({ id: 1, progress: 1 }), book({ id: 2, progress: 0.7 }), book({ id: 3 })]
     expect(resumeIndex(members)).toBe(1)
   })
 
@@ -53,7 +49,9 @@ describe('buildShelf', () => {
       book({ id: 4, title: 'Solo', series: 'Lonely', series_index: 1 }),
     ]
     const items = buildShelf(books, defaultSort)
-    const series = items.filter((i): i is Extract<ShelfItem, { kind: 'series' }> => i.kind === 'series')
+    const series = items.filter(
+      (i): i is Extract<ShelfItem, { kind: 'series' }> => i.kind === 'series',
+    )
     expect(series).toHaveLength(1)
     expect(series[0]!.series.name).toBe('Southern Reach')
     expect(series[0]!.series.members).toHaveLength(2)
@@ -106,5 +104,40 @@ describe('buildShelf', () => {
     const items = buildShelf(books, { key: 'title', dir: 'asc' })
     const titles = items.map((i) => (i.kind === 'book' ? i.book.title : i.series.name))
     expect(titles).toEqual(['Apple', 'Mango', 'Zebra'])
+  })
+
+  it('pins the current read to the front, floating its series card if grouped', () => {
+    const books = [
+      book({ id: 1, title: 'Apple' }),
+      book({ id: 2, title: 'Boxed 1', series: 'Boxed', series_index: 1 }),
+      book({
+        id: 3,
+        title: 'Boxed 2',
+        series: 'Boxed',
+        series_index: 2,
+        progress: 0.5,
+        read_at: '2026-05-01T00:00:00Z',
+      }),
+    ]
+    const items = buildShelf(books, { key: 'title', dir: 'asc' }, 3)
+    // The series holding the in-progress book #3 floats to the front.
+    expect(items[0]!.kind).toBe('series')
+    if (items[0]!.kind === 'series') expect(items[0].series.name).toBe('Boxed')
+  })
+})
+
+describe('pinnedBookId', () => {
+  it('returns the most-recently-read in-progress book', () => {
+    const books = [
+      book({ id: 1, progress: 0.3, read_at: '2026-01-01T00:00:00Z' }),
+      book({ id: 2, progress: 0.6, read_at: '2026-05-01T00:00:00Z' }),
+      book({ id: 3, progress: 1, read_at: '2026-06-01T00:00:00Z' }), // finished — ignored
+      book({ id: 4 }), // never opened
+    ]
+    expect(pinnedBookId(books)).toBe(2)
+  })
+
+  it('returns null when nothing is mid-read', () => {
+    expect(pinnedBookId([book({ id: 1 }), book({ id: 2, progress: 1, read_at: 'x' })])).toBeNull()
   })
 })

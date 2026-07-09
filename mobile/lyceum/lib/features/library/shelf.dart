@@ -7,10 +7,10 @@ enum SortKey { added, title, author }
 
 extension SortKeyLabel on SortKey {
   String get label => switch (this) {
-        SortKey.added => 'Recently added',
-        SortKey.title => 'Title',
-        SortKey.author => 'Author',
-      };
+    SortKey.added => 'Recently added',
+    SortKey.title => 'Title',
+    SortKey.author => 'Author',
+  };
 
   String get storageValue => name;
 
@@ -19,10 +19,10 @@ extension SortKeyLabel on SortKey {
 }
 
 SortKey sortKeyFromStorage(String? value) => switch (value) {
-      'title' => SortKey.title,
-      'author' => SortKey.author,
-      _ => SortKey.added,
-    };
+  'title' => SortKey.title,
+  'author' => SortKey.author,
+  _ => SortKey.added,
+};
 
 class SortState {
   const SortState({this.key = SortKey.added, this.ascending = false});
@@ -47,10 +47,10 @@ MemberStatus memberStatus(Book b) {
 
 extension MemberStatusLabel on MemberStatus {
   String get label => switch (this) {
-        MemberStatus.finished => 'Finished',
-        MemberStatus.inProgress => 'In progress',
-        MemberStatus.notStarted => 'Not started',
-      };
+    MemberStatus.finished => 'Finished',
+    MemberStatus.inProgress => 'In progress',
+    MemberStatus.notStarted => 'Not started',
+  };
 }
 
 /// A series of ≥2 books rolled up for display.
@@ -111,6 +111,20 @@ int resumeIndex(List<Book> members) {
   return 0;
 }
 
+/// The id of the book to pin to the top of the shelf: the most-recently-read
+/// book still in progress (your "continue reading"), or null when none is
+/// mid-read.
+int? pinnedBookId(List<Book> books) {
+  Book? best;
+  for (final b in books) {
+    if (b.readAt == null) continue;
+    final p = b.progress ?? 0;
+    if (p <= 0 || p >= kFinishedAt) continue;
+    if (best == null || b.readAt!.compareTo(best.readAt ?? '') > 0) best = b;
+  }
+  return best?.id;
+}
+
 int _compareText(String a, String b) =>
     a.toLowerCase().compareTo(b.toLowerCase());
 
@@ -120,7 +134,8 @@ int _compareBooks(SortKey key, Book a, Book b) {
       final t = _compareText(a.title, b.title);
       return t != 0 ? t : a.id - b.id;
     case SortKey.author:
-      if (a.author.isEmpty != b.author.isEmpty) return a.author.isEmpty ? 1 : -1;
+      if (a.author.isEmpty != b.author.isEmpty)
+        return a.author.isEmpty ? 1 : -1;
       final au = _compareText(a.author, b.author);
       if (au != 0) return au;
       final t = _compareText(a.title, b.title);
@@ -132,15 +147,22 @@ int _compareBooks(SortKey key, Book a, Book b) {
   }
 }
 
-/// Sort a flat list of books (used for search results).
-List<Book> sortBooks(List<Book> books, SortState sort) {
+/// Sort a flat list of books (used for search results and the list view). When
+/// [pinBookId] is given, that book floats to the front after sorting.
+List<Book> sortBooks(List<Book> books, SortState sort, {int? pinBookId}) {
   final out = [...books]..sort((a, b) => _compareBooks(sort.key, a, b));
-  if (!sort.ascending) return out.reversed.toList();
-  return out;
+  final ordered = sort.ascending ? out : out.reversed.toList();
+  if (pinBookId != null) {
+    final at = ordered.indexWhere((b) => b.id == pinBookId);
+    if (at > 0) ordered.insert(0, ordered.removeAt(at));
+  }
+  return ordered;
 }
 
-String _newestAdded(List<Book> books) =>
-    books.fold('', (max, b) => (b.addedAt ?? '').compareTo(max) > 0 ? (b.addedAt ?? '') : max);
+String _newestAdded(List<Book> books) => books.fold(
+  '',
+  (max, b) => (b.addedAt ?? '').compareTo(max) > 0 ? (b.addedAt ?? '') : max,
+);
 
 String _pickAuthor(List<Book> members) {
   final counts = <String, int>{};
@@ -156,11 +178,14 @@ String _pickAuthor(List<Book> members) {
       bestN = n;
     }
   });
-  return best.isNotEmpty ? best : (members.isNotEmpty ? members.first.author : '');
+  return best.isNotEmpty
+      ? best
+      : (members.isNotEmpty ? members.first.author : '');
 }
 
 SeriesGroup _buildGroup(String name, List<Book> members) {
-  final ordered = [...members]..sort((a, b) {
+  final ordered = [...members]
+    ..sort((a, b) {
       final ai = a.seriesIndex ?? double.infinity;
       final bi = b.seriesIndex ?? double.infinity;
       if (ai != bi) return ai.compareTo(bi);
@@ -169,8 +194,10 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
     });
   final progress =
       ordered.fold<double>(0, (s, m) => s + (m.progress ?? 0)) / ordered.length;
-  final coverBook =
-      ordered.firstWhere((m) => m.hasCover, orElse: () => ordered.first);
+  final coverBook = ordered.firstWhere(
+    (m) => m.hasCover,
+    orElse: () => ordered.first,
+  );
   return SeriesGroup(
     name: name,
     author: _pickAuthor(ordered),
@@ -182,7 +209,7 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
 
 /// Group books into shelf items and order them by [sort]. A series of ≥2 books
 /// becomes one series item; a series of 1 (or none) stays a loose book.
-List<ShelfItem> buildShelf(List<Book> books, SortState sort) {
+List<ShelfItem> buildShelf(List<Book> books, SortState sort, {int? pinBookId}) {
   final groups = <String, ({String name, List<Book> members})>{};
   final loose = <Book>[];
 
@@ -201,7 +228,8 @@ List<ShelfItem> buildShelf(List<Book> books, SortState sort) {
     }
   }
 
-  final entries = <({ShelfItem item, String title, String author, String added, int id})>[];
+  final entries =
+      <({ShelfItem item, String title, String author, String added, int id})>[];
   for (final b in loose) {
     entries.add((
       item: BookItem(b),
@@ -233,14 +261,17 @@ List<ShelfItem> buildShelf(List<Book> books, SortState sort) {
     }
   }
 
-  int cmp(({ShelfItem item, String title, String author, String added, int id}) a,
-      ({ShelfItem item, String title, String author, String added, int id}) b) {
+  int cmp(
+    ({ShelfItem item, String title, String author, String added, int id}) a,
+    ({ShelfItem item, String title, String author, String added, int id}) b,
+  ) {
     switch (sort.key) {
       case SortKey.title:
         final t = _compareText(a.title, b.title);
         return t != 0 ? t : a.id - b.id;
       case SortKey.author:
-        if (a.author.isEmpty != b.author.isEmpty) return a.author.isEmpty ? 1 : -1;
+        if (a.author.isEmpty != b.author.isEmpty)
+          return a.author.isEmpty ? 1 : -1;
         final au = _compareText(a.author, b.author);
         if (au != 0) return au;
         final t = _compareText(a.title, b.title);
@@ -252,8 +283,24 @@ List<ShelfItem> buildShelf(List<Book> books, SortState sort) {
   }
 
   entries.sort(cmp);
-  final ordered = sort.ascending ? entries : entries.reversed;
-  return ordered.map((e) => e.item).toList();
+  final ordered = (sort.ascending ? entries : entries.reversed)
+      .map((e) => e.item)
+      .toList();
+
+  // Pin the shelf item holding the current read to the front — the book if it's
+  // loose, or its series item if it belongs to one (keeping the group intact).
+  if (pinBookId != null) {
+    final at = ordered.indexWhere(
+      (item) => switch (item) {
+        BookItem(:final book) => book.id == pinBookId,
+        SeriesItem(:final series) => series.members.any(
+          (m) => m.id == pinBookId,
+        ),
+      },
+    );
+    if (at > 0) ordered.insert(0, ordered.removeAt(at));
+  }
+  return ordered;
 }
 
 /// Case-insensitive title/author/series match for the search overlay.

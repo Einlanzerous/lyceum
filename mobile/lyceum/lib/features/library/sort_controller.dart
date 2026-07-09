@@ -37,5 +37,6 @@ class SortController extends Notifier<SortState> {
   }
 }
 
-final sortControllerProvider =
-    NotifierProvider<SortController, SortState>(SortController.new);
+final sortControllerProvider = NotifierProvider<SortController, SortState>(
+  SortController.new,
+);

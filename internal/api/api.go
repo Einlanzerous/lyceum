@@ -127,6 +127,10 @@ type bookJSON struct {
 	AddedAt     string   `json:"added_at"`
 	Series      string   `json:"series,omitempty"`
 	SeriesIndex *float64 `json:"series_index,omitempty"`
+	// ReadAt (RFC3339) is when the book's latest reading position was recorded;
+	// it lets the client pin the most-recently-read book to the top of the
+	// shelf. Omitted when the book has never been opened.
+	ReadAt string `json:"read_at,omitempty"`
 }
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
@@ -158,6 +162,7 @@ func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		if pos, err := a.store.GetLatestPosition(ctx, b.ID); err == nil {
 			p := pos.Progress
 			entry.Progress = &p
+			entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
 		} else if !errors.Is(err, store.ErrNotFound) {
 			serverError(w, "get latest position", err)
 			return

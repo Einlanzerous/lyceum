@@ -6,6 +6,7 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
+import 'book_card.dart';
 import 'shelf.dart';
 
 String _pct(double v) => '${(v * 100).round()}%';
@@ -14,8 +15,9 @@ String _pct(double v) => '${(v * 100).round()}%';
 /// count pill and aggregate progress. Tapping opens the members sheet — the
 /// mobile take on the web's inline drawer.
 class SeriesTile extends ConsumerWidget {
-  const SeriesTile({super.key, required this.series});
+  const SeriesTile({super.key, required this.series, this.pinned = false});
   final SeriesGroup series;
+  final bool pinned;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -64,7 +66,8 @@ class SeriesTile extends ConsumerWidget {
                           Image.network(
                             client.coverUrl(series.coverBook.id),
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _SeriesFallback(name: series.name),
+                            errorBuilder: (_, _, _) =>
+                                _SeriesFallback(name: series.name),
                           )
                         else
                           _SeriesFallback(name: series.name),
@@ -73,6 +76,12 @@ class SeriesTile extends ConsumerWidget {
                           left: 8,
                           child: _CountPill(count: series.members.length),
                         ),
+                        if (pinned)
+                          const Positioned(
+                            top: 8,
+                            right: 8,
+                            child: ContinuePill(),
+                          ),
                         Positioned(
                           left: 0,
                           right: 0,
@@ -111,12 +120,12 @@ class SeriesTile extends ConsumerWidget {
   }
 
   Widget _stackLayer(Color color, Color border) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(LycRadii.cover),
-          border: Border.all(color: border),
-        ),
-      );
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(LycRadii.cover),
+      border: Border.all(color: border),
+    ),
+  );
 }
 
 class _CountPill extends StatelessWidget {
@@ -154,8 +163,14 @@ class _Seam extends StatelessWidget {
       height: 3,
       child: Row(
         children: [
-          Expanded(flex: filled, child: ColoredBox(color: lyc.brass)),
-          Expanded(flex: 1000 - filled, child: ColoredBox(color: lyc.pillOnCover)),
+          Expanded(
+            flex: filled,
+            child: ColoredBox(color: lyc.brass),
+          ),
+          Expanded(
+            flex: 1000 - filled,
+            child: ColoredBox(color: lyc.pillOnCover),
+          ),
         ],
       ),
     );
@@ -247,8 +262,10 @@ class _SeriesSheet extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(series.name,
-                            style: Theme.of(context).textTheme.titleLarge),
+                        Text(
+                          series.name,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 2),
                         Text(
                           '${series.members.length} books · ${series.author}',
@@ -274,7 +291,8 @@ class _SeriesSheet extends ConsumerWidget {
                 controller: scrollController,
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                 itemCount: series.members.length,
-                separatorBuilder: (_, _) => Divider(height: 1, color: lyc.border),
+                separatorBuilder: (_, _) =>
+                    Divider(height: 1, color: lyc.border),
                 itemBuilder: (context, i) {
                   final b = series.members[i];
                   return _MemberRow(
@@ -309,8 +327,9 @@ class _MemberRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final lyc = context.lyc;
     final status = memberStatus(book);
-    final statusColor =
-        status == MemberStatus.finished ? lyc.brassBright : lyc.dim;
+    final statusColor = status == MemberStatus.finished
+        ? lyc.brassBright
+        : lyc.dim;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -326,7 +345,9 @@ class _MemberRow extends StatelessWidget {
                 style: TextStyle(
                   fontFamily: kDisplayFont,
                   fontWeight: FontWeight.w800,
-                  color: status == MemberStatus.finished ? lyc.brassBright : lyc.muted,
+                  color: status == MemberStatus.finished
+                      ? lyc.brassBright
+                      : lyc.muted,
                 ),
               ),
             ),
@@ -337,8 +358,12 @@ class _MemberRow extends StatelessWidget {
                 width: 34,
                 height: 50,
                 child: coverUrl != null
-                    ? Image.network(coverUrl!, fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => ColoredBox(color: lyc.surfaceRaised))
+                    ? Image.network(
+                        coverUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            ColoredBox(color: lyc.surfaceRaised),
+                      )
                     : ColoredBox(color: lyc.surfaceRaised),
               ),
             ),
@@ -358,8 +383,10 @@ class _MemberRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(status.label,
-                      style: TextStyle(fontSize: 11.5, color: statusColor)),
+                  Text(
+                    status.label,
+                    style: TextStyle(fontSize: 11.5, color: statusColor),
+                  ),
                 ],
               ),
             ),

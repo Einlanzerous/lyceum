@@ -4,7 +4,7 @@ import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import type { Book } from '@/api/types'
 
-const props = defineProps<{ book: Book }>()
+const props = defineProps<{ book: Book; pinned?: boolean }>()
 
 // Covers can 404 (e.g. a missing blob); fall back to the title treatment.
 const coverFailed = ref(false)
@@ -41,6 +41,7 @@ const cover = computed(() =>
         <div class="card__hatch" aria-hidden="true" />
       </template>
 
+      <span v-if="pinned" class="card__continue">▸ Continue</span>
       <span v-if="hasProgress" class="card__pill">{{ progressLabel }}</span>
       <div v-if="hasProgress" class="card__seam" aria-hidden="true">
         <div class="card__seam-fill" :style="{ width: progressPct + '%' }" />
@@ -146,6 +147,16 @@ const cover = computed(() =>
   border: 1px solid rgba(201, 154, 78, 0.3);
   font: 700 10px var(--font-ui);
   color: var(--brass-bright);
+}
+.card__continue {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--brass);
+  font: 700 10px var(--font-ui);
+  color: var(--on-brass);
 }
 .card__seam {
   position: absolute;

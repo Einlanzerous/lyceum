@@ -4,7 +4,7 @@ import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import type { SeriesGroup } from '@/library/series'
 
-const props = defineProps<{ series: SeriesGroup; open: boolean }>()
+const props = defineProps<{ series: SeriesGroup; open: boolean; pinned?: boolean }>()
 defineEmits<{ (e: 'toggle'): void }>()
 
 const count = computed(() => props.series.members.length)
@@ -39,6 +39,7 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
         <div class="series__hatch" aria-hidden="true" />
 
         <span class="series__count">◲ {{ count }}</span>
+        <span v-if="pinned" class="series__continue">▸ Continue</span>
         <span v-if="!cover" class="series__fallback-title">{{ series.name }}</span>
         <span class="series__open">Open ▾</span>
 
@@ -135,6 +136,16 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
   font: 700 10px var(--font-ui);
   letter-spacing: 0.04em;
   color: var(--brass-bright);
+}
+.series__continue {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--brass);
+  font: 700 10px var(--font-ui);
+  color: var(--on-brass);
 }
 .series__fallback-title {
   position: absolute;

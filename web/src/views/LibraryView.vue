@@ -14,7 +14,7 @@ import { useServer } from '@/api/useServer'
 import { useProfile } from '@/profile'
 import ServerSettings from '@/components/ServerSettings.vue'
 import { loadSort, saveSort, sortBooks, type SortDir, type SortKey } from '@/library/sort'
-import { buildShelf } from '@/library/series'
+import { buildShelf, pinnedBookId } from '@/library/series'
 import { useGridColumns } from '@/library/useColumns'
 import type { Book } from '@/api/types'
 
@@ -65,9 +65,18 @@ const matchedBooks = computed<Book[]>(() => {
   return sortBooks(hit, sort.value)
 })
 
+// The most-recently-read book is pinned to the top of the shelf (its series card
+// floats up if it belongs to one), so "continue reading" is always first.
+const pinnedId = computed(() => pinnedBookId(books.value))
+
 // Series roll-up (LYCM-36): group + sort the shelf, and manage the inline drawer.
-const shelfItems = computed(() => buildShelf(books.value, sort.value))
-const listBooks = computed(() => sortBooks(books.value, sort.value))
+const shelfItems = computed(() => buildShelf(books.value, sort.value, pinnedId.value))
+const listBooks = computed(() => {
+  const sorted = sortBooks(books.value, sort.value)
+  const at = pinnedId.value == null ? -1 : sorted.findIndex((b) => b.id === pinnedId.value)
+  if (at > 0) sorted.unshift(sorted.splice(at, 1)[0]!)
+  return sorted
+})
 
 const openKey = ref<string | null>(null)
 const cols = useGridColumns()
@@ -270,11 +279,16 @@ function onServerSaved(): void {
     <!-- Grid — series roll up into cards; an open series expands inline. -->
     <div v-else-if="view === 'grid'" class="lib__grid">
       <template v-for="(item, i) in shelfItems" :key="item.key">
-        <BookCard v-if="item.kind === 'book'" :book="item.book" />
+        <BookCard
+          v-if="item.kind === 'book'"
+          :book="item.book"
+          :pinned="pinnedId != null && item.book.id === pinnedId"
+        />
         <SeriesCard
           v-else
           :series="item.series"
           :open="openKey === item.key"
+          :pinned="pinnedId != null && item.series.members.some((m) => m.id === pinnedId)"
           @toggle="toggleSeries(item.key)"
         />
         <Transition name="drawer">

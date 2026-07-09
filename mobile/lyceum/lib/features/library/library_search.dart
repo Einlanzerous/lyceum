@@ -25,18 +25,18 @@ class LibrarySearchDelegate extends SearchDelegate<void> {
 
   @override
   List<Widget> buildActions(BuildContext context) => [
-        if (query.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.close_rounded),
-            onPressed: () => query = '',
-          ),
-      ];
+    if (query.isNotEmpty)
+      IconButton(
+        icon: const Icon(Icons.close_rounded),
+        onPressed: () => query = '',
+      ),
+  ];
 
   @override
   Widget buildLeading(BuildContext context) => IconButton(
-        icon: const Icon(Icons.arrow_back_rounded),
-        onPressed: () => close(context, null),
-      );
+    icon: const Icon(Icons.arrow_back_rounded),
+    onPressed: () => close(context, null),
+  );
 
   @override
   Widget buildSuggestions(BuildContext context) => _results(context);
@@ -59,8 +59,10 @@ class LibrarySearchDelegate extends SearchDelegate<void> {
             children: [
               Icon(Icons.search_off_rounded, size: 40, color: lyc.dim),
               const SizedBox(height: 12),
-              Text('No matches',
-                  style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                'No matches',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 4),
               Text(
                 'Nothing on the shelf matches “${query.trim()}”.',
@@ -89,17 +91,25 @@ class LibrarySearchDelegate extends SearchDelegate<void> {
               width: 34,
               height: 50,
               child: b.hasCover
-                  ? Image.network(coverUrlOf(b.id), fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => ColoredBox(color: lyc.surfaceRaised))
+                  ? Image.network(
+                      coverUrlOf(b.id),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          ColoredBox(color: lyc.surfaceRaised),
+                    )
                   : ColoredBox(color: lyc.surfaceRaised),
             ),
           ),
-          title: Text(b.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w700, color: lyc.text)),
+          title: Text(
+            b.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontWeight: FontWeight.w700, color: lyc.text),
+          ),
           subtitle: Text(
-            b.series != null && b.series!.isNotEmpty ? '${b.author} · ${b.series}' : b.author,
+            b.series != null && b.series!.isNotEmpty
+                ? '${b.author} · ${b.series}'
+                : b.author,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: lyc.dim),

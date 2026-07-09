@@ -55,6 +55,22 @@ function normalizeKey(series: string): string {
   return series.trim().toLowerCase()
 }
 
+/**
+ * The id of the book to pin to the top of the shelf: the most-recently-read book
+ * that is still in progress (your "continue reading"). Returns null when nothing
+ * is mid-read.
+ */
+export function pinnedBookId(books: readonly Book[]): number | null {
+  let best: Book | null = null
+  for (const b of books) {
+    if (!b.read_at) continue
+    const p = b.progress ?? 0
+    if (p <= 0 || p >= FINISHED_AT) continue // only books mid-read
+    if (!best || b.read_at > (best.read_at ?? '')) best = b
+  }
+  return best ? best.id : null
+}
+
 function pickAuthor(members: Book[]): string {
   const counts = new Map<string, number>()
   for (const m of members) {
@@ -106,7 +122,11 @@ function newestAdded(books: readonly Book[]): string {
  * grid mixes loose books and series freely. Grouping preserves first-seen order
  * of series so the result is deterministic before sorting.
  */
-export function buildShelf(books: readonly Book[], sort: SortState): ShelfItem[] {
+export function buildShelf(
+  books: readonly Book[],
+  sort: SortState,
+  pinBookId?: number | null,
+): ShelfItem[] {
   const groups = new Map<string, { name: string; members: Book[] }>()
   const loose: Book[] = []
 
@@ -156,5 +176,20 @@ export function buildShelf(books: readonly Book[], sort: SortState): ShelfItem[]
 
   withFields.sort((a, b) => compareFields(sort.key, a.fields, b.fields))
   if (sort.dir === 'desc') withFields.reverse()
-  return withFields.map((w) => w.item)
+  const ordered = withFields.map((w) => w.item)
+
+  // Pin the shelf item holding the current read to the front — the book if it's
+  // loose, or its series card if it belongs to one (keeping the group intact).
+  if (pinBookId != null) {
+    const at = ordered.findIndex((item) =>
+      item.kind === 'book'
+        ? item.book.id === pinBookId
+        : item.series.members.some((m) => m.id === pinBookId),
+    )
+    if (at > 0) {
+      const [pinned] = ordered.splice(at, 1)
+      ordered.unshift(pinned!)
+    }
+  }
+  return ordered
 }
