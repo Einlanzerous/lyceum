@@ -96,7 +96,11 @@ function buildGroup(name: string, members: Book[]): SeriesGroup {
     return byTitle(a, b)
   })
   const progress = ordered.reduce((sum, m) => sum + (m.progress ?? 0), 0) / ordered.length
-  const coverBook = ordered.find((m) => m.cover_url) ?? ordered[0]!
+  // The card wears the cover of the volume you're on (the resume target —
+  // defaults to book 1 until you progress), so it reflects where you are in the
+  // series. Fall back to the first member with any cover, then to book 1.
+  const onBook = ordered[resumeIndex(ordered)]!
+  const coverBook = onBook.cover_url ? onBook : (ordered.find((m) => m.cover_url) ?? ordered[0]!)
   const finishedCount = ordered.filter((m) => memberStatus(m) === 'finished').length
   return {
     name,
