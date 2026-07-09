@@ -20,6 +20,24 @@ class LibraryController extends AsyncNotifier<List<Book>> {
       () => ref.read(lyceumClientProvider).listLibrary(),
     );
   }
+
+  /// Mark a book read/unread, updating the shelf optimistically and rolling back
+  /// if the server rejects it.
+  Future<void> setFinished(int bookId, bool finished) async {
+    final current = state.asData?.value;
+    if (current == null) return;
+    List<Book> patched(bool value) => [
+      for (final b in current)
+        if (b.id == bookId) b.copyWith(finished: value) else b,
+    ];
+    state = AsyncData(patched(finished));
+    try {
+      await ref.read(lyceumClientProvider).setBookFinished(bookId, finished);
+    } catch (_) {
+      state = AsyncData(patched(!finished));
+      rethrow;
+    }
+  }
 }
 
 // retry: (_, _) => null disables Riverpod 3's automatic retry-on-failure for
@@ -31,9 +49,9 @@ class LibraryController extends AsyncNotifier<List<Book>> {
 // (LYCM-54).
 final libraryControllerProvider =
     AsyncNotifierProvider<LibraryController, List<Book>>(
-  LibraryController.new,
-  retry: (_, _) => null,
-);
+      LibraryController.new,
+      retry: (_, _) => null,
+    );
 
 /// Grid vs list shelf layout (session-scoped, defaults to grid like the web).
 class ViewModeController extends Notifier<bool> {
@@ -43,5 +61,6 @@ class ViewModeController extends Notifier<bool> {
   void toggle() => state = !state;
 }
 
-final gridViewProvider =
-    NotifierProvider<ViewModeController, bool>(ViewModeController.new);
+final gridViewProvider = NotifierProvider<ViewModeController, bool>(
+  ViewModeController.new,
+);

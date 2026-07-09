@@ -3,12 +3,15 @@ import { computed, ref } from 'vue'
 import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import type { Book } from '@/api/types'
+import TileMenu from '@/components/TileMenu.vue'
 
 const props = defineProps<{ book: Book; pinned?: boolean }>()
+const emit = defineEmits<{ (e: 'set-finished', id: number, finished: boolean): void }>()
 
 // Covers can 404 (e.g. a missing blob); fall back to the title treatment.
 const coverFailed = ref(false)
 
+const finished = computed(() => props.book.finished === true)
 const hasProgress = computed(() => typeof props.book.progress === 'number')
 const progressPct = computed(() =>
   hasProgress.value ? Math.round((props.book.progress as number) * 100) : 0,
@@ -19,10 +22,26 @@ const progressLabel = computed(() =>
 const cover = computed(() =>
   props.book.cover_url && !coverFailed.value ? coverUrl(props.book.id) : '',
 )
+
+// contextmenu fires on desktop right-click AND Android long-press, so one
+// handler gives the tile its "mark as read" affordance on both.
+const menu = ref<{ x: number; y: number } | null>(null)
+function openMenu(e: MouseEvent): void {
+  menu.value = { x: e.clientX, y: e.clientY }
+}
+function toggleFinished(): void {
+  emit('set-finished', props.book.id, !finished.value)
+  menu.value = null
+}
 </script>
 
 <template>
-  <RouterLink :to="`/reader/${book.id}`" class="card" :title="book.title">
+  <RouterLink
+    :to="`/reader/${book.id}`"
+    class="card"
+    :title="book.title"
+    @contextmenu.prevent="openMenu"
+  >
     <!-- Cover is the hero. A 1px hatch unifies mixed-quality art. -->
     <div class="card__cover" :class="{ 'card__cover--fallback': !cover }">
       <img
@@ -41,15 +60,25 @@ const cover = computed(() =>
         <div class="card__hatch" aria-hidden="true" />
       </template>
 
-      <span v-if="pinned" class="card__continue">▸ Continue</span>
-      <span v-if="hasProgress" class="card__pill">{{ progressLabel }}</span>
-      <div v-if="hasProgress" class="card__seam" aria-hidden="true">
+      <span v-if="pinned && !finished" class="card__continue">▸ Continue</span>
+      <span v-if="finished" class="card__read">✓ Read</span>
+      <span v-else-if="hasProgress" class="card__pill">{{ progressLabel }}</span>
+      <div v-if="hasProgress && !finished" class="card__seam" aria-hidden="true">
         <div class="card__seam-fill" :style="{ width: progressPct + '%' }" />
       </div>
     </div>
 
     <div class="card__title">{{ book.title }}</div>
     <div class="card__author">{{ book.author }}</div>
+
+    <TileMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      :items="[{ key: 'finish', label: finished ? 'Mark as unread' : 'Mark as read' }]"
+      @select="toggleFinished"
+      @close="menu = null"
+    />
   </RouterLink>
 </template>
 
@@ -157,6 +186,16 @@ const cover = computed(() =>
   background: var(--brass);
   font: 700 10px var(--font-ui);
   color: var(--on-brass);
+}
+.card__read {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--success);
+  font: 700 10px var(--font-ui);
+  color: #fff;
 }
 .card__seam {
   position: absolute;

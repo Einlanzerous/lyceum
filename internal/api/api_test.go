@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +104,68 @@ func newServer(t *testing.T, s *store.Store) *httptest.Server {
 	srv := httptest.NewServer(New(s, "").Handler())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestSetFinishedEndpoint(t *testing.T) {
+	s := testStore(t)
+	book := seedBook(t, s, "finish-hash", "Dune", "Herbert", nil)
+	srv := newServer(t, s)
+
+	put := func(finished bool) int {
+		body := strings.NewReader(fmt.Sprintf(`{"finished":%t}`, finished))
+		req, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/books/%d/finished", srv.URL, book.ID), body)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PUT finished: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Mark finished, confirm it surfaces on /library.
+	if code := put(true); code != http.StatusNoContent {
+		t.Fatalf("PUT finished=true status = %d, want 204", code)
+	}
+	if !libraryBookByID(t, srv, book.ID).Finished {
+		t.Fatalf("book not reported finished after marking")
+	}
+
+	// Unmark, confirm it clears.
+	if code := put(false); code != http.StatusNoContent {
+		t.Fatalf("PUT finished=false status = %d, want 204", code)
+	}
+	if libraryBookByID(t, srv, book.ID).Finished {
+		t.Fatalf("book still reported finished after unmarking")
+	}
+
+	// Unknown id → 404.
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/books/999999/finished", strings.NewReader(`{"finished":true}`))
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("PUT finished on missing book status = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// libraryBookByID fetches /library and returns the entry with the given id.
+func libraryBookByID(t *testing.T, srv *httptest.Server, id int64) bookJSON {
+	t.Helper()
+	resp, err := http.Get(srv.URL + "/library")
+	if err != nil {
+		t.Fatalf("GET /library: %v", err)
+	}
+	defer resp.Body.Close()
+	var books []bookJSON
+	if err := json.NewDecoder(resp.Body).Decode(&books); err != nil {
+		t.Fatalf("decode library: %v", err)
+	}
+	for _, b := range books {
+		if b.ID == id {
+			return b
+		}
+	}
+	t.Fatalf("book %d not found in library", id)
+	return bookJSON{}
 }
 
 func TestLibrarySeriesAndAddedAt(t *testing.T) {

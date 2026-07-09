@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ApiError, listLibrary, uploadBook } from '@/api/client'
+import { ApiError, listLibrary, setBookFinished, uploadBook } from '@/api/client'
 import type { Book } from '@/api/types'
 
 /** Outcome of an upload attempt, so the view can message each case distinctly. */
@@ -52,6 +52,22 @@ export const useLibraryStore = defineStore('library', {
           return { kind: 'duplicate' }
         }
         return { kind: 'error', message: err instanceof Error ? err.message : 'upload failed' }
+      }
+    },
+
+    /**
+     * Mark a book read/unread. Updates the local shelf optimistically and rolls
+     * back if the server rejects it.
+     */
+    async setFinished(bookId: number, finished: boolean): Promise<void> {
+      const book = this.books.find((b) => b.id === bookId)
+      const prev = book?.finished
+      if (book) book.finished = finished
+      try {
+        await setBookFinished(bookId, finished)
+      } catch (err) {
+        if (book) book.finished = prev
+        throw err
       }
     },
 

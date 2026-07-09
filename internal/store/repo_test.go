@@ -208,6 +208,39 @@ func TestUpdateBookSeries(t *testing.T) {
 	}
 }
 
+func TestSetBookFinished(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	book, err := s.InsertBook(ctx, sampleBook("finish-h1"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	if book.FinishedAt != nil {
+		t.Fatalf("new book FinishedAt = %v, want nil", book.FinishedAt)
+	}
+
+	done, err := s.SetBookFinished(ctx, book.ID, true)
+	if err != nil {
+		t.Fatalf("SetBookFinished(true): %v", err)
+	}
+	if done.FinishedAt == nil {
+		t.Fatalf("marked book FinishedAt = nil, want a timestamp")
+	}
+
+	cleared, err := s.SetBookFinished(ctx, book.ID, false)
+	if err != nil {
+		t.Fatalf("SetBookFinished(false): %v", err)
+	}
+	if cleared.FinishedAt != nil {
+		t.Fatalf("unmarked book FinishedAt = %v, want nil", cleared.FinishedAt)
+	}
+
+	if _, err := s.SetBookFinished(ctx, 999999, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetBookFinished(missing) err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestPositionUpsertAndGet(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

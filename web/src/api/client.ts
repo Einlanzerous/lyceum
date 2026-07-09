@@ -49,6 +49,23 @@ export async function listLibrary(): Promise<Book[]> {
   return (await res.json()) as Book[]
 }
 
+/** GET /books/{id} — a single book's wire shape (cover, progress, finished). */
+export async function getBook(id: number): Promise<Book> {
+  const res = await fetch(apiUrl(`/books/${id}`))
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book
+}
+
+/** PUT /books/{id}/finished — mark a book read (true) or unread (false). */
+export async function setBookFinished(id: number, finished: boolean): Promise<void> {
+  const res = await fetch(apiUrl(`/books/${id}/finished`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finished }),
+  })
+  if (!res.ok) throw await readError(res)
+}
+
 /**
  * POST /upload — ingest an EPUB. Resolves to the created book (201). A duplicate
  * (409) surfaces as an ApiError so the caller can message it distinctly.

@@ -36,6 +36,7 @@ type Store interface {
 	GetBookBySourcePath(ctx context.Context, sourcePath string) (store.Book, error)
 	SetBookSourcePath(ctx context.Context, id int64, sourcePath string) error
 	UpdateBookContent(ctx context.Context, id int64, b store.Book) (store.Book, error)
+	SetBookFinished(ctx context.Context, id int64, finished bool) (store.Book, error)
 	DeleteBook(ctx context.Context, id int64) (store.Book, error)
 	RemoveBlobs(filePath string) error
 
@@ -100,9 +101,11 @@ func (a *API) Handler() *http.ServeMux {
 
 	mux.HandleFunc("PUT /sync", a.handleSyncPut)
 	mux.HandleFunc("GET /sync", a.handleSyncGet)
+	mux.HandleFunc("GET /books/{id}", a.handleGetBook)
 	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)
 	mux.HandleFunc("GET /books/{id}/file", a.handleFile)
 	mux.HandleFunc("DELETE /books/{id}", a.handleDelete)
+	mux.HandleFunc("PUT /books/{id}/finished", a.handleSetFinished)
 
 	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
 	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
@@ -131,9 +134,40 @@ type bookJSON struct {
 	// it lets the client pin the most-recently-read book to the top of the
 	// shelf. Omitted when the book has never been opened.
 	ReadAt string `json:"read_at,omitempty"`
+	// Finished is true when the book has been explicitly marked read, regardless
+	// of reading progress (LYCM mark-as-read).
+	Finished bool `json:"finished,omitempty"`
 }
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
+
+// bookJSONFor assembles the wire shape for one book, folding in its cover URL,
+// series fields, latest reading position, and finished state.
+func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
+	entry := bookJSON{
+		ID:       b.ID,
+		Title:    b.Title,
+		Author:   b.Author,
+		AddedAt:  b.AddedAt.UTC().Format(time.RFC3339),
+		Series:   b.Series,
+		Finished: b.FinishedAt != nil,
+	}
+	if b.CoverPath != "" {
+		entry.CoverURL = coverURL(b.ID)
+	}
+	if b.SeriesIndex != 0 {
+		idx := b.SeriesIndex
+		entry.SeriesIndex = &idx
+	}
+	if pos, err := a.store.GetLatestPosition(ctx, b.ID); err == nil {
+		p := pos.Progress
+		entry.Progress = &p
+		entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return bookJSON{}, err
+	}
+	return entry, nil
+}
 
 func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -145,32 +179,40 @@ func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]bookJSON, 0, len(books))
 	for _, b := range books {
-		entry := bookJSON{
-			ID:      b.ID,
-			Title:   b.Title,
-			Author:  b.Author,
-			AddedAt: b.AddedAt.UTC().Format(time.RFC3339),
-			Series:  b.Series,
-		}
-		if b.CoverPath != "" {
-			entry.CoverURL = coverURL(b.ID)
-		}
-		if b.SeriesIndex != 0 {
-			idx := b.SeriesIndex
-			entry.SeriesIndex = &idx
-		}
-		if pos, err := a.store.GetLatestPosition(ctx, b.ID); err == nil {
-			p := pos.Progress
-			entry.Progress = &p
-			entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
-		} else if !errors.Is(err, store.ErrNotFound) {
-			serverError(w, "get latest position", err)
+		entry, err := a.bookJSONFor(ctx, b)
+		if err != nil {
+			serverError(w, "build book json", err)
 			return
 		}
 		out = append(out, entry)
 	}
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetBook returns a single book's wire shape (used by the reader to read
+// finished/progress state without loading the whole library).
+func (a *API) handleGetBook(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid book id", http.StatusBadRequest)
+		return
+	}
+	b, err := a.store.GetBook(r.Context(), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		http.Error(w, "book not found", http.StatusNotFound)
+		return
+	case err != nil:
+		serverError(w, "get book", err)
+		return
+	}
+	entry, err := a.bookJSONFor(r.Context(), b)
+	if err != nil {
+		serverError(w, "build book json", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
 }
 
 func (a *API) handleCover(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +245,31 @@ func (a *API) handleFile(w http.ResponseWriter, r *http.Request) {
 // on success, 404 if no book has the id. Dependent rows are handled by the
 // schema FKs (reading_positions/deliveries cascade, inventory link nulled), so
 // this is safe without an explicit cleanup pass.
+// handleSetFinished marks a book read or unread. Body: {"finished": bool}.
+func (a *API) handleSetFinished(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid book id", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Finished bool `json:"finished"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	switch _, err := a.store.SetBookFinished(r.Context(), id, req.Finished); {
+	case errors.Is(err, store.ErrNotFound):
+		http.Error(w, "book not found", http.StatusNotFound)
+		return
+	case err != nil:
+		serverError(w, "set finished", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

@@ -33,6 +33,41 @@ void main() {
     });
   });
 
+  group('finished flag', () {
+    test('marks the book finished regardless of progress', () {
+      final b = Book(
+        id: 1,
+        title: 'x',
+        author: 'y',
+        coverUrl: '',
+        progress: 0.3,
+        finished: true,
+      );
+      expect(memberStatus(b), MemberStatus.finished);
+    });
+
+    test('counts as 100% in the series aggregate', () {
+      final books = [
+        Book(
+          id: 1,
+          title: 'a',
+          author: 'y',
+          coverUrl: '',
+          series: 'S',
+          seriesIndex: 1,
+          finished: true,
+          progress: 0.3,
+        ),
+        _book(id: 2, series: 'S', seriesIndex: 2),
+      ];
+      final series = buildShelf(
+        books,
+        const SortState(key: SortKey.title, ascending: true),
+      ).whereType<SeriesItem>().single.series;
+      expect(series.progress, closeTo(0.5, 1e-9));
+    });
+  });
+
   group('resumeIndex', () {
     test('picks the furthest in-progress volume', () {
       final members = [

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useReader } from '@/reader/useReader'
 import { createPositionSync } from '@/reader/sync'
 import { useUnloadFlush } from '@/reader/useUnloadFlush'
-import { putPositionKeepalive } from '@/api/client'
+import { getBook, putPositionKeepalive, setBookFinished } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import { useTheme, type Theme } from '@/theme'
 import { useReadingFont } from '@/reader/readingFont'
@@ -28,6 +28,24 @@ const themeOptions: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Light' },
 ]
 const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--font-read)')
+
+// Finished (mark-as-read) state, fetched once so the gear shows the right label.
+const finished = ref(false)
+getBook(bookId.value)
+  .then((b) => {
+    finished.value = b.finished === true
+  })
+  .catch(() => {})
+async function toggleFinished(): Promise<void> {
+  const next = !finished.value
+  finished.value = next // optimistic
+  try {
+    await setBookFinished(bookId.value, next)
+  } catch {
+    finished.value = !next // roll back
+  }
+}
+
 const resumedVisible = ref(false)
 let resumedTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -226,6 +244,18 @@ onBeforeUnmount(() => {
           <p class="rset__specimen" :style="{ fontFamily: specimenFamily }">
             The quick brown fox jumps over the lazy dog.
           </p>
+
+          <div class="rset__row rset__row--stack">
+            <span class="rset__label">This book</span>
+            <button
+              type="button"
+              class="rset__finish"
+              :class="{ 'is-done': finished }"
+              @click="toggleFinished()"
+            >
+              {{ finished ? '✓ Read — mark as unread' : 'Mark as read' }}
+            </button>
+          </div>
         </div>
       </div>
     </Transition>
@@ -547,6 +577,23 @@ onBeforeUnmount(() => {
   font-size: 16px;
   line-height: 1.5;
   color: var(--reading);
+}
+.rset__finish {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font: 700 13px var(--font-ui);
+  cursor: pointer;
+}
+.rset__finish:hover {
+  border-color: var(--brass);
+}
+.rset__finish.is-done {
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .pop-enter-active {

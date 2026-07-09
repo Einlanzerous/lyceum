@@ -13,6 +13,7 @@ class Book {
     this.readAt,
     this.series,
     this.seriesIndex,
+    this.finished = false,
   });
 
   final int id;
@@ -38,7 +39,23 @@ class Book {
   /// 1-based position within [series], or null when unknown.
   final double? seriesIndex;
 
+  /// True when the book has been explicitly marked read (independent of progress).
+  final bool finished;
+
   bool get hasCover => coverUrl.isNotEmpty;
+
+  Book copyWith({bool? finished}) => Book(
+    id: id,
+    title: title,
+    author: author,
+    coverUrl: coverUrl,
+    progress: progress,
+    addedAt: addedAt,
+    readAt: readAt,
+    series: series,
+    seriesIndex: seriesIndex,
+    finished: finished ?? this.finished,
+  );
 
   factory Book.fromJson(Map<String, dynamic> json) => Book(
     id: (json['id'] as num).toInt(),
@@ -50,6 +67,7 @@ class Book {
     readAt: json['read_at'] as String?,
     series: json['series'] as String?,
     seriesIndex: (json['series_index'] as num?)?.toDouble(),
+    finished: (json['finished'] as bool?) ?? false,
   );
 }
 

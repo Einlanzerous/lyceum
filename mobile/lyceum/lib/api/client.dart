@@ -53,7 +53,10 @@ class LyceumClient {
 
   Never _throw(http.Response r) {
     final body = r.body.trim();
-    throw ApiException(r.statusCode, body.isEmpty ? 'HTTP ${r.statusCode}' : body);
+    throw ApiException(
+      r.statusCode,
+      body.isEmpty ? 'HTTP ${r.statusCode}' : body,
+    );
   }
 
   /// `GET /healthz` — used by the connection tester. Returns true on 200.
@@ -81,9 +84,13 @@ class LyceumClient {
   }) async {
     final req = http.MultipartRequest('POST', _uri('/upload'));
     if (bytes != null) {
-      req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      req.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: filename),
+      );
     } else if (path != null) {
-      req.files.add(await http.MultipartFile.fromPath('file', path, filename: filename));
+      req.files.add(
+        await http.MultipartFile.fromPath('file', path, filename: filename),
+      );
     } else {
       throw ArgumentError('uploadBook needs either bytes or a path');
     }
@@ -96,10 +103,9 @@ class LyceumClient {
   /// `GET /sync?book_id=&device_id=` — the saved position for this device,
   /// falling back to the latest across devices. 404 → null (fresh book).
   Future<Position?> getPosition(int bookId) async {
-    final r = await _http.get(_uri('/sync', {
-      'book_id': '$bookId',
-      'device_id': deviceId,
-    })).timeout(timeout);
+    final r = await _http
+        .get(_uri('/sync', {'book_id': '$bookId', 'device_id': deviceId}))
+        .timeout(timeout);
     if (r.statusCode == 404) return null;
     if (r.statusCode != 200) _throw(r);
     return Position.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
@@ -107,13 +113,27 @@ class LyceumClient {
 
   /// `PUT /sync` — upsert a position (last-write-wins by `updated_at`).
   Future<Position> putPosition(Position pos) async {
-    final r = await _http.put(
-      _uri('/sync'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(pos.toJson()),
-    ).timeout(timeout);
+    final r = await _http
+        .put(
+          _uri('/sync'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(pos.toJson()),
+        )
+        .timeout(timeout);
     if (r.statusCode != 200) _throw(r);
     return Position.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// `PUT /books/{id}/finished` — mark a book read (true) or unread (false).
+  Future<void> setBookFinished(int id, bool finished) async {
+    final r = await _http
+        .put(
+          _uri('/books/$id/finished'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'finished': finished}),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 204) _throw(r);
   }
 
   void dispose() => _http.close();
