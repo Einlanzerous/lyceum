@@ -4,24 +4,18 @@ name: backend
 # unless TEST_DATABASE_URL is set (see testStore/connectSchema in
 # internal/api/api_test.go), so before this workflow the backend had no CI
 # coverage at all. A Postgres service container provides the database; each test
-# binary migrates + truncates its own isolated schema. Path-scoped so
-# mobile/wrapper/docs-only changes don't pay for it.
+# binary migrates + truncates its own isolated schema.
+#
+# `test` is a REQUIRED status check on main. It therefore has to *report* on
+# every PR, or a PR that touches no Go files can never satisfy the gate and stays
+# BLOCKED forever. So the workflow runs unconditionally, and a paths-filter gates
+# the expensive Go steps: when nothing Go-related changed, the job short-circuits
+# to a trivial pass — the check is only "applicable" when Go/migrations change,
+# but always green.
 on:
   pull_request:
-    paths:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
-      - "migrations/**"
-      - ".github/workflows/backend.yml"
   push:
     branches: [main]
-    paths:
-      - "**.go"
-      - "go.mod"
-      - "go.sum"
-      - "migrations/**"
-      - ".github/workflows/backend.yml"
 
 permissions:
   contents: read
@@ -57,20 +51,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Decide whether the Go steps are applicable to this change. On a PR this
+      # diffs against the base branch; on a main push, against the prior commit.
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            go:
+              - "**.go"
+              - "go.mod"
+              - "go.sum"
+              - "migrations/**"
+              - ".github/workflows/backend.yml"
+
       # go-version-file pins to the exact toolchain in go.mod (1.25.x); setup-go
       # caches the module + build cache keyed on go.sum.
       - uses: actions/setup-go@v5
+        if: steps.changes.outputs.go == 'true'
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Build
+        if: steps.changes.outputs.go == 'true'
         run: go build ./...
 
       - name: Vet
+        if: steps.changes.outputs.go == 'true'
         run: go vet ./...
 
       # -race catches data races (the folder watcher runs in its own goroutine);
       # GitHub's ubuntu runners ship gcc, so the race detector's cgo is available.
       - name: Test
+        if: steps.changes.outputs.go == 'true'
         run: go test -race ./...
+
+      - name: Not applicable
+        if: steps.changes.outputs.go != 'true'
+        run: echo "No Go/migration changes in this PR — backend tests not applicable. Reporting pass so the required check doesn't block non-Go PRs."
