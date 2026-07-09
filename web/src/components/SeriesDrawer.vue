@@ -60,11 +60,6 @@ function pct(b: Book): number {
                 />
                 <span v-else class="drawer__fallback-title">{{ member.title }}</span>
 
-                <span
-                  class="drawer__badge"
-                  :class="{ 'is-read': memberStatus(member) === 'finished' }"
-                  >{{ i + 1 }}</span
-                >
                 <span v-if="memberStatus(member) === 'in-progress'" class="drawer__pct">{{
                   formatProgress(member.progress ?? 0)
                 }}</span>
@@ -74,7 +69,7 @@ function pct(b: Book): number {
               </div>
               <div class="drawer__title">{{ member.title }}</div>
               <div class="drawer__status" :class="`is-${memberStatus(member)}`">
-                {{ STATUS_LABEL[memberStatus(member)] }}
+                {{ STATUS_LABEL[memberStatus(member)] }} · Book {{ i + 1 }}
               </div>
             </RouterLink>
           </li>
@@ -209,25 +204,6 @@ function pct(b: Book): number {
   transform: translateY(-55%);
   font: 800 15px/1.08 var(--font-display);
   color: var(--text);
-}
-.drawer__badge {
-  position: absolute;
-  top: 9px;
-  left: 9px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--pill-on-cover);
-  border: 1px solid var(--border-strong);
-  font: 800 11px var(--font-display);
-  color: var(--dim);
-}
-.drawer__badge.is-read {
-  color: var(--brass-bright);
-  border-color: rgba(201, 154, 78, 0.3);
 }
 .drawer__pct {
   position: absolute;

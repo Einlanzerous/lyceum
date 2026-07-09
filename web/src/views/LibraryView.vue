@@ -288,7 +288,9 @@ function onServerSaved(): void {
           v-else
           :series="item.series"
           :open="openKey === item.key"
-          :pinned="pinnedId != null && item.series.members.some((m) => m.id === pinnedId)"
+          :continue-book-id="
+            pinnedId != null && item.series.members.some((m) => m.id === pinnedId) ? pinnedId : null
+          "
           @toggle="toggleSeries(item.key)"
         />
         <Transition name="drawer">

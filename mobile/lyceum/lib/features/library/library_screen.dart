@@ -291,9 +291,11 @@ class _Shelf extends ConsumerWidget {
                   ),
                   SeriesItem(:final series) => SeriesTile(
                     series: series,
-                    pinned:
+                    continueBookId:
                         pinId != null &&
-                        series.members.any((m) => m.id == pinId),
+                            series.members.any((m) => m.id == pinId)
+                        ? pinId
+                        : null,
                   ),
                 };
               }, childCount: items.length),
