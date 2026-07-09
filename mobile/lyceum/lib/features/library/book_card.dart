@@ -6,8 +6,43 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
+import 'library_controller.dart';
 
 String _pct(double v) => '${(v * 100).round()}%';
+
+/// Long-press action sheet for a library tile: mark the book read/unread.
+void _showReadMenu(BuildContext context, WidgetRef ref, Book book) {
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: Icon(
+              book.finished
+                  ? Icons.remove_done_rounded
+                  : Icons.done_all_rounded,
+              color: context.lyc.brass,
+            ),
+            title: Text(book.finished ? 'Mark as unread' : 'Mark as read'),
+            subtitle: Text(
+              book.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              ref
+                  .read(libraryControllerProvider.notifier)
+                  .setFinished(book.id, !book.finished);
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
 /// Grid tile: a 2:3 cover (or generated fallback) with an optional progress
 /// pill and a brass seam, plus title/author beneath. Mirrors `BookCard.vue`.
@@ -22,6 +57,7 @@ class BookCard extends ConsumerWidget {
     final client = ref.watch(lyceumClientProvider);
     return GestureDetector(
       onTap: () => context.push('/reader/${book.id}'),
+      onLongPress: () => _showReadMenu(context, ref, book),
       behavior: HitTestBehavior.opaque,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,15 +95,17 @@ class BookCard extends ConsumerWidget {
                       )
                     else
                       _FallbackCover(book: book),
-                    if (pinned)
+                    if (pinned && !book.finished)
                       const Positioned(top: 8, left: 8, child: ContinuePill()),
-                    if (book.progress != null)
+                    if (book.finished)
+                      const Positioned(top: 8, right: 8, child: _ReadPill())
+                    else if (book.progress != null)
                       Positioned(
                         top: 8,
                         right: 8,
                         child: _ProgressPill(value: book.progress!),
                       ),
-                    if (book.progress != null)
+                    if (!book.finished && book.progress != null)
                       Positioned(
                         left: 0,
                         right: 0,
@@ -194,6 +232,29 @@ class ContinuePill extends StatelessWidget {
           fontSize: 10.5,
           fontWeight: FontWeight.w700,
           color: lyc.onBrass,
+        ),
+      ),
+    );
+  }
+}
+
+/// Green "Read" chip shown on a book marked finished.
+class _ReadPill extends StatelessWidget {
+  const _ReadPill();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: context.lyc.success,
+        borderRadius: BorderRadius.circular(LycRadii.pill),
+      ),
+      child: const Text(
+        '✓ Read',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
         ),
       ),
     );

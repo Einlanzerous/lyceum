@@ -37,6 +37,10 @@ type Book struct {
 	Series      string
 	SeriesIndex float64
 	AddedAt     time.Time
+	// FinishedAt is when the book was marked read, or nil when it is not
+	// finished. It is an explicit signal independent of reading progress, since
+	// epub.js progress rarely reaches 1.0 (back matter inflates the denominator).
+	FinishedAt *time.Time
 }
 
 // Device is a client that syncs reading positions. Reading positions key off
@@ -80,13 +84,13 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // text columns are coalesced so they scan cleanly into Go strings.
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
 	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''),
-	COALESCE(series, ''), COALESCE(series_index, 0), added_at`
+	COALESCE(series, ''), COALESCE(series_index, 0), added_at, finished_at`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
 		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath,
-		&b.Series, &b.SeriesIndex, &b.AddedAt)
+		&b.Series, &b.SeriesIndex, &b.AddedAt, &b.FinishedAt)
 	return b, err
 }
 
@@ -410,6 +414,25 @@ func (s *Store) UpdateBookSeries(ctx context.Context, id int64, series string, i
 	}
 	if err != nil {
 		return Book{}, fmt.Errorf("store: update book series: %w", err)
+	}
+	return b, nil
+}
+
+// SetBookFinished marks a book read (finished_at = now) or clears it (NULL),
+// returning the updated row. Idempotent re-marks refresh the timestamp. Returns
+// ErrNotFound if the id is gone.
+func (s *Store) SetBookFinished(ctx context.Context, id int64, finished bool) (Book, error) {
+	var at any
+	if finished {
+		at = time.Now().UTC()
+	}
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`UPDATE books SET finished_at = $2 WHERE id = $1 RETURNING `+bookColumns, id, at))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: set book finished: %w", err)
 	}
 	return b, nil
 }

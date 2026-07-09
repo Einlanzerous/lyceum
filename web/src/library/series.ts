@@ -27,6 +27,7 @@ export type ShelfItem =
   { kind: 'book'; key: string; book: Book } | { kind: 'series'; key: string; series: SeriesGroup }
 
 export function memberStatus(b: Book): MemberStatus {
+  if (b.finished) return 'finished' // explicit mark-as-read wins over the % heuristic
   const p = b.progress ?? 0
   if (p >= FINISHED_AT) return 'finished'
   if (p > 0) return 'in-progress'
@@ -64,8 +65,7 @@ export function pinnedBookId(books: readonly Book[]): number | null {
   let best: Book | null = null
   for (const b of books) {
     if (!b.read_at) continue
-    const p = b.progress ?? 0
-    if (p <= 0 || p >= FINISHED_AT) continue // only books mid-read
+    if (memberStatus(b) !== 'in-progress') continue // not finished, not unstarted
     if (!best || b.read_at > (best.read_at ?? '')) best = b
   }
   return best ? best.id : null
@@ -95,7 +95,10 @@ function buildGroup(name: string, members: Book[]): SeriesGroup {
     if (ai !== bi) return ai - bi
     return byTitle(a, b)
   })
-  const progress = ordered.reduce((sum, m) => sum + (m.progress ?? 0), 0) / ordered.length
+  // A marked-read volume counts as fully done in the aggregate even if its
+  // scroll position never reached 100%.
+  const progress =
+    ordered.reduce((sum, m) => sum + (m.finished ? 1 : (m.progress ?? 0)), 0) / ordered.length
   // The card wears the cover of the volume you're on (the resume target —
   // defaults to book 1 until you progress), so it reflects where you are in the
   // series. Fall back to the first member with any cover, then to book 1.

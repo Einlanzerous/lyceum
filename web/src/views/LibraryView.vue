@@ -151,6 +151,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 function onServerSaved(): void {
   void store.load()
 }
+
+function onSetFinished(id: number, finished: boolean): void {
+  void store.setFinished(id, finished)
+}
 </script>
 
 <template>
@@ -273,7 +277,12 @@ function onServerSaved(): void {
 
     <!-- Search results (flat, ungrouped) -->
     <div v-else-if="searching" class="lib__grid">
-      <BookCard v-for="book in matchedBooks" :key="book.id" :book="book" />
+      <BookCard
+        v-for="book in matchedBooks"
+        :key="book.id"
+        :book="book"
+        @set-finished="onSetFinished"
+      />
     </div>
 
     <!-- Grid — series roll up into cards; an open series expands inline. -->
@@ -283,6 +292,7 @@ function onServerSaved(): void {
           v-if="item.kind === 'book'"
           :book="item.book"
           :pinned="pinnedId != null && item.book.id === pinnedId"
+          @set-finished="onSetFinished"
         />
         <SeriesCard
           v-else

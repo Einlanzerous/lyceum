@@ -18,6 +18,8 @@ export interface Book {
   series?: string
   /** 1-based position within {@link series}; omitted when unknown. */
   series_index?: number
+  /** True when the book has been explicitly marked read (independent of progress). */
+  finished?: boolean
 }
 
 /** A device's reading position within a book (GET/PUT /sync). */

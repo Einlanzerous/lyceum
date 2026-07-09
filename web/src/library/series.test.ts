@@ -21,6 +21,11 @@ describe('memberStatus', () => {
     expect(memberStatus(book({ id: 4, progress: 1 }))).toBe('finished')
     expect(memberStatus(book({ id: 5, progress: 0.995 }))).toBe('finished')
   })
+
+  it('treats an explicit finished flag as finished regardless of progress', () => {
+    expect(memberStatus(book({ id: 1, progress: 0.4, finished: true }))).toBe('finished')
+    expect(memberStatus(book({ id: 2, finished: true }))).toBe('finished')
+  })
 })
 
 describe('resumeIndex', () => {
@@ -103,6 +108,16 @@ describe('buildShelf', () => {
     ]
     const [item] = buildShelf(books, defaultSort)
     if (item!.kind === 'series') expect(item.series.coverBook.id).toBe(1)
+  })
+
+  it('counts a marked-read volume as 100% in the aggregate', () => {
+    const books = [
+      book({ id: 1, series: 'S', series_index: 1, finished: true, progress: 0.3 }),
+      book({ id: 2, series: 'S', series_index: 2 }),
+    ]
+    const [item] = buildShelf(books, defaultSort)
+    // (1.0 + 0) / 2 = 0.5 despite book 1's scroll progress being 0.3.
+    if (item!.kind === 'series') expect(item.series.progress).toBeCloseTo(0.5, 5)
   })
 
   it('groups case-insensitively', () => {

@@ -39,6 +39,7 @@ const double kFinishedAt = 0.99;
 enum MemberStatus { finished, inProgress, notStarted }
 
 MemberStatus memberStatus(Book b) {
+  if (b.finished) return MemberStatus.finished; // explicit mark-as-read wins
   final p = b.progress ?? 0;
   if (p >= kFinishedAt) return MemberStatus.finished;
   if (p > 0) return MemberStatus.inProgress;
@@ -118,8 +119,7 @@ int? pinnedBookId(List<Book> books) {
   Book? best;
   for (final b in books) {
     if (b.readAt == null) continue;
-    final p = b.progress ?? 0;
-    if (p <= 0 || p >= kFinishedAt) continue;
+    if (memberStatus(b) != MemberStatus.inProgress) continue;
     if (best == null || b.readAt!.compareTo(best.readAt ?? '') > 0) best = b;
   }
   return best?.id;
@@ -194,7 +194,11 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
       return t != 0 ? t : a.id - b.id;
     });
   final progress =
-      ordered.fold<double>(0, (s, m) => s + (m.progress ?? 0)) / ordered.length;
+      ordered.fold<double>(
+        0,
+        (s, m) => s + (m.finished ? 1 : (m.progress ?? 0)),
+      ) /
+      ordered.length;
   // The card wears the cover of the volume you're on (the resume target —
   // defaults to book 1 until you progress). Fall back to the first member with
   // any cover, then to book 1.
