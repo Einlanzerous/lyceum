@@ -15,9 +15,12 @@ String _pct(double v) => '${(v * 100).round()}%';
 /// count pill and aggregate progress. Tapping opens the members sheet — the
 /// mobile take on the web's inline drawer.
 class SeriesTile extends ConsumerWidget {
-  const SeriesTile({super.key, required this.series, this.pinned = false});
+  const SeriesTile({super.key, required this.series, this.continueBookId});
   final SeriesGroup series;
-  final bool pinned;
+
+  /// When set, this series is the pinned "current read": the Continue chip jumps
+  /// straight into that volume instead of opening the members sheet.
+  final int? continueBookId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -76,11 +79,15 @@ class SeriesTile extends ConsumerWidget {
                           left: 8,
                           child: _CountPill(count: series.members.length),
                         ),
-                        if (pinned)
-                          const Positioned(
+                        if (continueBookId != null)
+                          Positioned(
                             top: 8,
                             right: 8,
-                            child: ContinuePill(),
+                            child: GestureDetector(
+                              onTap: () =>
+                                  context.push('/reader/$continueBookId'),
+                              child: const ContinuePill(),
+                            ),
                           ),
                         Positioned(
                           left: 0,
@@ -337,21 +344,6 @@ class _MemberRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            SizedBox(
-              width: 24,
-              child: Text(
-                '${index + 1}',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontFamily: kDisplayFont,
-                  fontWeight: FontWeight.w800,
-                  color: status == MemberStatus.finished
-                      ? lyc.brassBright
-                      : lyc.muted,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: SizedBox(
@@ -384,7 +376,7 @@ class _MemberRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    status.label,
+                    '${status.label} · Book ${index + 1}',
                     style: TextStyle(fontSize: 11.5, color: statusColor),
                   ),
                 ],

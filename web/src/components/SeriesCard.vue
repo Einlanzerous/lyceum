@@ -4,7 +4,10 @@ import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import type { SeriesGroup } from '@/library/series'
 
-const props = defineProps<{ series: SeriesGroup; open: boolean; pinned?: boolean }>()
+// continueBookId is the id of the in-progress volume when this series is the
+// pinned "current read": it turns the Continue chip into a direct link into that
+// book, rather than opening the drawer.
+const props = defineProps<{ series: SeriesGroup; open: boolean; continueBookId?: number | null }>()
 defineEmits<{ (e: 'toggle'): void }>()
 
 const count = computed(() => props.series.members.length)
@@ -16,13 +19,16 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
 </script>
 
 <template>
-  <button
-    type="button"
+  <div
     class="series"
     :class="{ 'is-open': open }"
+    role="button"
+    tabindex="0"
     :aria-expanded="open"
     :title="`${series.name} — ${count} books`"
     @click="$emit('toggle')"
+    @keydown.enter.prevent="$emit('toggle')"
+    @keydown.space.prevent="$emit('toggle')"
   >
     <!-- Fanned stack: two offset layers peek out behind the top cover. -->
     <div class="series__stack">
@@ -39,7 +45,15 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
         <div class="series__hatch" aria-hidden="true" />
 
         <span class="series__count">◲ {{ count }}</span>
-        <span v-if="pinned" class="series__continue">▸ Continue</span>
+        <RouterLink
+          v-if="continueBookId != null"
+          :to="`/reader/${continueBookId}`"
+          class="series__continue"
+          title="Continue reading"
+          @click.stop
+        >
+          ▸ Continue
+        </RouterLink>
         <span v-if="!cover" class="series__fallback-title">{{ series.name }}</span>
         <span class="series__open">Open ▾</span>
 
@@ -51,7 +65,7 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
 
     <div class="series__title">{{ series.name }}</div>
     <div class="series__meta">Series · {{ progressLabel }}</div>
-  </button>
+  </div>
 </template>
 
 <style scoped>
@@ -146,6 +160,11 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
   background: var(--brass);
   font: 700 10px var(--font-ui);
   color: var(--on-brass);
+  text-decoration: none;
+  cursor: pointer;
+}
+.series__continue:hover {
+  background: var(--brass-bright);
 }
 .series__fallback-title {
   position: absolute;
