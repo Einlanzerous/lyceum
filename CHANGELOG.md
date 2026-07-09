@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0](https://github.com/Einlanzerous/lyceum/compare/v1.1.0...v1.2.0) (2026-07-09)
+
+
+### Features
+
+* **api:** LYCM-66 book delete API + stable-identity folder ingest ([#17](https://github.com/Einlanzerous/lyceum/issues/17)) ([c83ae4e](https://github.com/Einlanzerous/lyceum/commit/c83ae4e23a6429bdd72c18a586c6f32fd1fd0258))
+* **deploy:** LYCM-61 production image + GHCR publish ([#15](https://github.com/Einlanzerous/lyceum/issues/15)) ([7283cbd](https://github.com/Einlanzerous/lyceum/commit/7283cbdc90eb60db664641844a1d816bd4fab628))
+* library sort, search, and series roll-up (LYCM-62/63/36) ([#19](https://github.com/Einlanzerous/lyceum/issues/19)) ([584818a](https://github.com/Einlanzerous/lyceum/commit/584818a588d1f693b5b8ca47589b5d4f46865c4b))
+* **library:** mark books as read (manual finished flag) ([#23](https://github.com/Einlanzerous/lyceum/issues/23)) ([191f061](https://github.com/Einlanzerous/lyceum/commit/191f061987fbd634a7e942b1b9eb1ae347c78d80))
+* **library:** polish series UI + restyle sort dropdown ([#20](https://github.com/Einlanzerous/lyceum/issues/20)) ([99dcf19](https://github.com/Einlanzerous/lyceum/commit/99dcf19bbc81137a179d45e7fed165924df5a06c))
+* **library:** series card wears the cover of the volume you're on ([#22](https://github.com/Einlanzerous/lyceum/issues/22)) ([a982553](https://github.com/Einlanzerous/lyceum/commit/a9825533446431fd99ac159ab7994dc593026b1f))
+* **mobile:** LYCM-60 richer library covers (larger 2-up grid tiles) ([#14](https://github.com/Einlanzerous/lyceum/issues/14)) ([6bd6275](https://github.com/Einlanzerous/lyceum/commit/6bd6275aefca103e98f34648b03aa60f89b20d60))
+
+
+### Bug Fixes
+
+* **ci:** LYCM-59 build Windows installer (makensis was missing on runner) ([#12](https://github.com/Einlanzerous/lyceum/issues/12)) ([c7edbfc](https://github.com/Einlanzerous/lyceum/commit/c7edbfc2e174c5e29da54014974d6a8724a016f2))
+* **mobile:** LYCM-54 stop Android hang on unreachable backend + kill ephemeral dev port ([#16](https://github.com/Einlanzerous/lyceum/issues/16)) ([b1cc8af](https://github.com/Einlanzerous/lyceum/commit/b1cc8af8f1cf0e85b5bd8c44cefadcff89c8b7e7))
+
 ## [1.1.0](https://github.com/Einlanzerous/lyceum/compare/v1.0.0...v1.1.0) (2026-07-07)
 
 
