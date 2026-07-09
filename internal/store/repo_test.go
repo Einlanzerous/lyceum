@@ -136,6 +136,44 @@ func TestListBooks(t *testing.T) {
 	}
 }
 
+func TestBookSeriesRoundTrip(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	// A book with series metadata round-trips through insert.
+	withSeries := sampleBook("series-h1")
+	withSeries.Series = "The Southern Reach"
+	withSeries.SeriesIndex = 2
+	saved, err := s.InsertBook(ctx, withSeries)
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	if saved.Series != "The Southern Reach" || saved.SeriesIndex != 2 {
+		t.Fatalf("insert series = (%q, %v), want (The Southern Reach, 2)", saved.Series, saved.SeriesIndex)
+	}
+
+	// A standalone book stores NULLs and reads back as ("", 0).
+	standalone, err := s.InsertBook(ctx, sampleBook("series-h2"))
+	if err != nil {
+		t.Fatalf("InsertBook standalone: %v", err)
+	}
+	if standalone.Series != "" || standalone.SeriesIndex != 0 {
+		t.Fatalf("standalone series = (%q, %v), want empty", standalone.Series, standalone.SeriesIndex)
+	}
+
+	// A re-stamp (UpdateBookContent) refreshes series metadata.
+	refreshed := sampleBook("series-h3-new")
+	refreshed.Series = "Earthsea"
+	refreshed.SeriesIndex = 1
+	updated, err := s.UpdateBookContent(ctx, saved.ID, refreshed)
+	if err != nil {
+		t.Fatalf("UpdateBookContent: %v", err)
+	}
+	if updated.Series != "Earthsea" || updated.SeriesIndex != 1 {
+		t.Fatalf("updated series = (%q, %v), want (Earthsea, 1)", updated.Series, updated.SeriesIndex)
+	}
+}
+
 func TestPositionUpsertAndGet(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

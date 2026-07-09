@@ -30,7 +30,12 @@ type Book struct {
 	// or "" for HTTP uploads. It gives folder-ingested books a stable identity
 	// so a re-stamped file updates in place instead of duplicating (LYCM-66).
 	SourcePath string
-	AddedAt    time.Time
+	// Series and SeriesIndex describe the book's place in a multi-book series,
+	// read from EPUB metadata at ingest (LYCM-36). Series is "" when the book
+	// belongs to none; SeriesIndex is 0 when the position is unknown.
+	Series      string
+	SeriesIndex float64
+	AddedAt     time.Time
 }
 
 // Device is a client that syncs reading positions. Reading positions key off
@@ -73,12 +78,14 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // bookColumns is the canonical SELECT projection for a Book row. Nullable
 // text columns are coalesced so they scan cleanly into Go strings.
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
-	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''), added_at`
+	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''),
+	COALESCE(series, ''), COALESCE(series_index, 0), added_at`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
-		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath, &b.AddedAt)
+		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath,
+		&b.Series, &b.SeriesIndex, &b.AddedAt)
 	return b, err
 }
 
@@ -94,12 +101,13 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	inserted, err := scanBook(tx.QueryRow(ctx,
-		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path, series, series_index)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 ON CONFLICT (file_hash) DO NOTHING
 		 RETURNING `+bookColumns,
 		b.Title, nullString(b.Author), nullString(b.CoverPath),
-		b.FilePath, b.FileHash, b.SizeBytes, nullString(b.SourcePath)))
+		b.FilePath, b.FileHash, b.SizeBytes, nullString(b.SourcePath),
+		nullString(b.Series), nullFloat(b.SeriesIndex)))
 	switch {
 	case err == nil:
 		if err := tx.Commit(ctx); err != nil {
@@ -370,11 +378,13 @@ func (s *Store) UpdateBookContent(ctx context.Context, id int64, b Book) (Book, 
 	updated, err := scanBook(s.pool.QueryRow(ctx,
 		`UPDATE books
 		    SET title = $2, author = $3, cover_path = $4,
-		        file_path = $5, file_hash = $6, size_bytes = $7
+		        file_path = $5, file_hash = $6, size_bytes = $7,
+		        series = $8, series_index = $9
 		  WHERE id = $1
 		  RETURNING `+bookColumns,
 		id, b.Title, nullString(b.Author), nullString(b.CoverPath),
-		b.FilePath, b.FileHash, b.SizeBytes))
+		b.FilePath, b.FileHash, b.SizeBytes,
+		nullString(b.Series), nullFloat(b.SeriesIndex)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound
 	}
@@ -440,4 +450,13 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullFloat maps 0 to a SQL NULL so an unknown series index stays NULL rather
+// than storing a meaningless 0th position.
+func nullFloat(f float64) any {
+	if f == 0 {
+		return nil
+	}
+	return f
 }

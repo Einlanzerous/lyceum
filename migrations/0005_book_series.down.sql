@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS books_series_idx;
+ALTER TABLE books DROP COLUMN IF EXISTS series_index;
+ALTER TABLE books DROP COLUMN IF EXISTS series;

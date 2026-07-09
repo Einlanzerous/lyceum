@@ -23,6 +23,9 @@ type sampleSpec struct {
 	// image item is used).
 	coverStyle string
 	coverBytes []byte
+	// extraMeta is raw XML injected into the <metadata> block, for exercising
+	// optional metadata like Calibre/EPUB3 series tags.
+	extraMeta string
 }
 
 // buildEPUB synthesizes a minimal but structurally valid EPUB zip in memory.
@@ -89,6 +92,7 @@ func buildEPUB(t *testing.T, s sampleSpec) []byte {
     <dc:language>` + s.language + `</dc:language>
     <dc:identifier id="bookid">` + s.identifier + `</dc:identifier>` + extraIDs + `
     ` + metaCover + `
+    ` + s.extraMeta + `
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -225,6 +229,86 @@ func TestParse_Identifiers(t *testing.T) {
 		if md.Identifiers[i] != want[i] {
 			t.Errorf("Identifiers[%d] = %q, want %q", i, md.Identifiers[i], want[i])
 		}
+	}
+}
+
+func TestParse_Series(t *testing.T) {
+	cases := []struct {
+		name      string
+		extraMeta string
+		wantName  string
+		wantIndex float64
+	}{
+		{
+			name:      "none",
+			extraMeta: "",
+			wantName:  "",
+			wantIndex: 0,
+		},
+		{
+			name: "calibre series with float index",
+			extraMeta: `<meta name="calibre:series" content="The Southern Reach"/>
+    <meta name="calibre:series_index" content="2.0"/>`,
+			wantName:  "The Southern Reach",
+			wantIndex: 2,
+		},
+		{
+			name:      "calibre series without index",
+			extraMeta: `<meta name="calibre:series" content="Earthsea"/>`,
+			wantName:  "Earthsea",
+			wantIndex: 0,
+		},
+		{
+			name: "epub3 belongs-to-collection with group-position",
+			extraMeta: `<meta property="belongs-to-collection" id="c01">The Expanse</meta>
+    <meta refines="#c01" property="collection-type">series</meta>
+    <meta refines="#c01" property="group-position">3</meta>`,
+			wantName:  "The Expanse",
+			wantIndex: 3,
+		},
+		{
+			name: "epub3 prefers series-typed collection over set",
+			extraMeta: `<meta property="belongs-to-collection" id="set1">Boxed Set</meta>
+    <meta refines="#set1" property="collection-type">set</meta>
+    <meta property="belongs-to-collection" id="ser1">Mistborn</meta>
+    <meta refines="#ser1" property="collection-type">series</meta>
+    <meta refines="#ser1" property="group-position">1</meta>`,
+			wantName:  "Mistborn",
+			wantIndex: 1,
+		},
+		{
+			name: "calibre wins over epub3 collection",
+			extraMeta: `<meta name="calibre:series" content="Calibre Series"/>
+    <meta name="calibre:series_index" content="5"/>
+    <meta property="belongs-to-collection" id="c01">EPUB3 Series</meta>`,
+			wantName:  "Calibre Series",
+			wantIndex: 5,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := buildEPUB(t, sampleSpec{
+				opfPath:    "OEBPS/content.opf",
+				title:      "A Book",
+				creator:    "An Author",
+				language:   "en",
+				identifier: "urn:isbn:9780000000000",
+				coverStyle: "property",
+				coverBytes: fakePNG,
+				extraMeta:  tc.extraMeta,
+			})
+			md, err := ParseBytes(data)
+			if err != nil {
+				t.Fatalf("ParseBytes: %v", err)
+			}
+			if md.Series != tc.wantName {
+				t.Errorf("Series = %q, want %q", md.Series, tc.wantName)
+			}
+			if md.SeriesIndex != tc.wantIndex {
+				t.Errorf("SeriesIndex = %v, want %v", md.SeriesIndex, tc.wantIndex)
+			}
+		})
 	}
 }
 

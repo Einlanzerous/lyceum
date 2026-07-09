@@ -104,6 +104,67 @@ func newServer(t *testing.T, s *store.Store) *httptest.Server {
 	return srv
 }
 
+func TestLibrarySeriesAndAddedAt(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	filePath, _, err := s.SaveBlobs("series-hash", epubBytes, nil)
+	if err != nil {
+		t.Fatalf("SaveBlobs: %v", err)
+	}
+	member, err := s.InsertBook(ctx, store.Book{
+		Title:       "Authority",
+		Author:      "Jeff VanderMeer",
+		FilePath:    filePath,
+		FileHash:    "series-hash",
+		SizeBytes:   int64(len(epubBytes)),
+		Series:      "The Southern Reach",
+		SeriesIndex: 2,
+	})
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	standalone := seedBook(t, s, "solo-hash", "Piranesi", "Susanna Clarke", nil)
+
+	srv := newServer(t, s)
+	resp, err := http.Get(srv.URL + "/library")
+	if err != nil {
+		t.Fatalf("GET /library: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var books []bookJSON
+	if err := json.NewDecoder(resp.Body).Decode(&books); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[int64]bookJSON{}
+	for _, b := range books {
+		byID[b.ID] = b
+	}
+
+	m := byID[member.ID]
+	if m.Series != "The Southern Reach" {
+		t.Errorf("member series = %q, want The Southern Reach", m.Series)
+	}
+	if m.SeriesIndex == nil || *m.SeriesIndex != 2 {
+		t.Errorf("member series_index = %v, want 2", m.SeriesIndex)
+	}
+	if m.AddedAt == "" {
+		t.Errorf("member added_at is empty, want RFC3339 timestamp")
+	}
+	if _, err := time.Parse(time.RFC3339, m.AddedAt); err != nil {
+		t.Errorf("member added_at = %q is not RFC3339: %v", m.AddedAt, err)
+	}
+
+	solo := byID[standalone.ID]
+	if solo.Series != "" {
+		t.Errorf("standalone series = %q, want empty", solo.Series)
+	}
+	if solo.SeriesIndex != nil {
+		t.Errorf("standalone series_index = %v, want nil", solo.SeriesIndex)
+	}
+}
+
 func TestLibraryListing(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

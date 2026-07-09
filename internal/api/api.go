@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/store"
@@ -120,6 +121,12 @@ type bookJSON struct {
 	Author   string   `json:"author"`
 	CoverURL string   `json:"cover_url"`
 	Progress *float64 `json:"progress,omitempty"`
+	// AddedAt (RFC3339) backs the "recently added" library sort. Series and
+	// SeriesIndex drive series roll-up in the library grid; both are omitted for
+	// standalone books (LYCM-36 / LYCM-62).
+	AddedAt     string   `json:"added_at"`
+	Series      string   `json:"series,omitempty"`
+	SeriesIndex *float64 `json:"series_index,omitempty"`
 }
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
@@ -135,12 +142,18 @@ func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	out := make([]bookJSON, 0, len(books))
 	for _, b := range books {
 		entry := bookJSON{
-			ID:     b.ID,
-			Title:  b.Title,
-			Author: b.Author,
+			ID:      b.ID,
+			Title:   b.Title,
+			Author:  b.Author,
+			AddedAt: b.AddedAt.UTC().Format(time.RFC3339),
+			Series:  b.Series,
 		}
 		if b.CoverPath != "" {
 			entry.CoverURL = coverURL(b.ID)
+		}
+		if b.SeriesIndex != 0 {
+			idx := b.SeriesIndex
+			entry.SeriesIndex = &idx
 		}
 		if pos, err := a.store.GetLatestPosition(ctx, b.ID); err == nil {
 			p := pos.Progress
