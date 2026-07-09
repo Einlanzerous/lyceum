@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -25,11 +26,19 @@ class LyceumClient {
     required this.baseUrl,
     required this.deviceId,
     http.Client? httpClient,
+    this.timeout = const Duration(seconds: 12),
   }) : _http = httpClient ?? http.Client();
 
   final String baseUrl;
   final String deviceId;
   final http.Client _http;
+
+  /// Per-request timeout. Dart's [http.Client] never times out on its own, so
+  /// without this an unreachable server leaves the library stuck on its loading
+  /// skeleton forever instead of surfacing the "Can't reach the library" error
+  /// card. A [TimeoutException] propagates to callers, where `AsyncValue.guard`
+  /// turns it into that error state.
+  final Duration timeout;
 
   Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
@@ -49,13 +58,13 @@ class LyceumClient {
 
   /// `GET /healthz` — used by the connection tester. Returns true on 200.
   Future<bool> ping() async {
-    final r = await _http.get(_uri('/healthz'));
+    final r = await _http.get(_uri('/healthz')).timeout(timeout);
     return r.statusCode == 200;
   }
 
   /// `GET /library` — the digital shelf.
   Future<List<Book>> listLibrary() async {
-    final r = await _http.get(_uri('/library'));
+    final r = await _http.get(_uri('/library')).timeout(timeout);
     if (r.statusCode != 200) _throw(r);
     final data = jsonDecode(r.body) as List<dynamic>;
     return data
@@ -78,7 +87,7 @@ class LyceumClient {
     } else {
       throw ArgumentError('uploadBook needs either bytes or a path');
     }
-    final streamed = await _http.send(req);
+    final streamed = await _http.send(req).timeout(timeout);
     final r = await http.Response.fromStream(streamed);
     if (r.statusCode != 201) _throw(r);
     return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
@@ -90,7 +99,7 @@ class LyceumClient {
     final r = await _http.get(_uri('/sync', {
       'book_id': '$bookId',
       'device_id': deviceId,
-    }));
+    })).timeout(timeout);
     if (r.statusCode == 404) return null;
     if (r.statusCode != 200) _throw(r);
     return Position.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
@@ -102,7 +111,7 @@ class LyceumClient {
       _uri('/sync'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(pos.toJson()),
-    );
+    ).timeout(timeout);
     if (r.statusCode != 200) _throw(r);
     return Position.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
