@@ -134,8 +134,9 @@ int _compareBooks(SortKey key, Book a, Book b) {
       final t = _compareText(a.title, b.title);
       return t != 0 ? t : a.id - b.id;
     case SortKey.author:
-      if (a.author.isEmpty != b.author.isEmpty)
+      if (a.author.isEmpty != b.author.isEmpty) {
         return a.author.isEmpty ? 1 : -1;
+      }
       final au = _compareText(a.author, b.author);
       if (au != 0) return au;
       final t = _compareText(a.title, b.title);
@@ -270,8 +271,9 @@ List<ShelfItem> buildShelf(List<Book> books, SortState sort, {int? pinBookId}) {
         final t = _compareText(a.title, b.title);
         return t != 0 ? t : a.id - b.id;
       case SortKey.author:
-        if (a.author.isEmpty != b.author.isEmpty)
+        if (a.author.isEmpty != b.author.isEmpty) {
           return a.author.isEmpty ? 1 : -1;
+        }
         final au = _compareText(a.author, b.author);
         if (au != 0) return au;
         final t = _compareText(a.title, b.title);
