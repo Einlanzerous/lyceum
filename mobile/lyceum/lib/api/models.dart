@@ -9,6 +9,9 @@ class Book {
     required this.author,
     required this.coverUrl,
     this.progress,
+    this.addedAt,
+    this.series,
+    this.seriesIndex,
   });
 
   final int id;
@@ -22,6 +25,15 @@ class Book {
   /// Reading progress in `0..1`, or null when the book was never opened.
   final double? progress;
 
+  /// RFC3339 timestamp the book was ingested; backs the "recently added" sort.
+  final String? addedAt;
+
+  /// Series the book belongs to, or null/"" when it is a standalone (LYCM-36).
+  final String? series;
+
+  /// 1-based position within [series], or null when unknown.
+  final double? seriesIndex;
+
   bool get hasCover => coverUrl.isNotEmpty;
 
   factory Book.fromJson(Map<String, dynamic> json) => Book(
@@ -30,6 +42,9 @@ class Book {
         author: (json['author'] as String?) ?? '',
         coverUrl: (json['cover_url'] as String?) ?? '',
         progress: (json['progress'] as num?)?.toDouble(),
+        addedAt: json['added_at'] as String?,
+        series: json['series'] as String?,
+        seriesIndex: (json['series_index'] as num?)?.toDouble(),
       );
 }
 

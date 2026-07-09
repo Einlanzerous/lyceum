@@ -37,6 +37,33 @@ void main() {
       expect(b.hasCover, isFalse);
       expect(b.progress, isNull);
     });
+
+    test('parses series metadata and added_at', () {
+      final b = Book.fromJson({
+        'id': 2,
+        'title': 'Authority',
+        'author': 'VanderMeer',
+        'cover_url': '',
+        'added_at': '2026-07-01T00:00:00Z',
+        'series': 'Southern Reach',
+        'series_index': 2,
+      });
+      expect(b.series, 'Southern Reach');
+      expect(b.seriesIndex, closeTo(2, 1e-9));
+      expect(b.addedAt, '2026-07-01T00:00:00Z');
+    });
+
+    test('series fields default to null when absent', () {
+      final b = Book.fromJson({
+        'id': 1,
+        'title': 'Standalone',
+        'author': '',
+        'cover_url': '',
+      });
+      expect(b.series, isNull);
+      expect(b.seriesIndex, isNull);
+      expect(b.addedAt, isNull);
+    });
   });
 
   group('Position round-trip', () {

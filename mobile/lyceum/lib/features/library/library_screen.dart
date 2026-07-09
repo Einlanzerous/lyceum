@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../api/server_store.dart';
 import '../../prefs/profile.dart';
@@ -10,6 +11,10 @@ import '../../widgets/brand_mark.dart';
 import '../settings/server_settings.dart';
 import 'book_card.dart';
 import 'library_controller.dart';
+import 'library_search.dart';
+import 'series_tile.dart';
+import 'shelf.dart';
+import 'sort_controller.dart';
 
 class LibraryScreen extends ConsumerWidget {
   const LibraryScreen({super.key});
@@ -116,12 +121,13 @@ class _IconPill extends StatelessWidget {
 }
 
 class _Header extends ConsumerWidget {
-  const _Header({required this.count});
-  final int count;
+  const _Header({required this.books});
+  final List<Book> books;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lyc = context.lyc;
     final grid = ref.watch(gridViewProvider);
+    final sort = ref.watch(sortControllerProvider);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -140,12 +146,26 @@ class _Header extends ConsumerWidget {
               Text('All Books',
                   style: Theme.of(context).textTheme.headlineLarge),
               const SizedBox(height: 4),
-              Text('$count on the shelf',
+              Text('${books.length} on the shelf',
                   style: TextStyle(fontSize: 13, color: lyc.dim)),
             ],
           ),
         ),
-        // Grid/list toggle sits across from the header to save top-bar space.
+        // Controls: sort key + direction, search, and the grid/list toggle.
+        _SortMenu(sort: sort),
+        const SizedBox(width: 8),
+        _IconPill(
+          icon: sort.ascending
+              ? Icons.arrow_upward_rounded
+              : Icons.arrow_downward_rounded,
+          onTap: () => ref.read(sortControllerProvider.notifier).toggleDirection(),
+        ),
+        const SizedBox(width: 8),
+        _IconPill(
+          icon: Icons.search_rounded,
+          onTap: () => _openSearch(context, ref, books, sort),
+        ),
+        const SizedBox(width: 8),
         _IconPill(
           icon: grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
           onTap: () => ref.read(gridViewProvider.notifier).toggle(),
@@ -153,21 +173,87 @@ class _Header extends ConsumerWidget {
       ],
     );
   }
+
+  void _openSearch(
+      BuildContext context, WidgetRef ref, List<Book> books, SortState sort) {
+    final client = ref.read(lyceumClientProvider);
+    showSearch<void>(
+      context: context,
+      delegate: LibrarySearchDelegate(
+        books: books,
+        sort: sort,
+        coverUrlOf: client.coverUrl,
+        onOpen: (id) => context.push('/reader/$id'),
+      ),
+    );
+  }
 }
 
-class _Shelf extends StatelessWidget {
+/// Sort-key picker styled as a pill, matching the _IconPill controls.
+class _SortMenu extends ConsumerWidget {
+  const _SortMenu({required this.sort});
+  final SortState sort;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lyc = context.lyc;
+    return PopupMenuButton<SortKey>(
+      tooltip: 'Sort',
+      initialValue: sort.key,
+      onSelected: (key) => ref.read(sortControllerProvider.notifier).setKey(key),
+      itemBuilder: (context) => [
+        for (final key in SortKey.values)
+          PopupMenuItem(
+            value: key,
+            child: Row(
+              children: [
+                Icon(
+                  key == sort.key ? Icons.check_rounded : Icons.check,
+                  size: 18,
+                  color: key == sort.key ? lyc.brass : Colors.transparent,
+                ),
+                const SizedBox(width: 8),
+                Text(key.label),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(LycRadii.pill),
+          border: Border.all(color: lyc.borderStrong),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.sort_rounded, size: 16, color: lyc.muted),
+            const SizedBox(width: 8),
+            Text(sort.key.label,
+                style: TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: lyc.text)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Shelf extends ConsumerWidget {
   const _Shelf({required this.books, required this.grid});
   final List<Book> books;
   final bool grid;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sort = ref.watch(sortControllerProvider);
+    final items = buildShelf(books, sort);
+    final listBooks = sortBooks(books, sort);
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-          sliver: SliverToBoxAdapter(child: _Header(count: books.length)),
+          sliver: SliverToBoxAdapter(child: _Header(books: books)),
         ),
         if (grid)
           SliverPadding(
@@ -175,8 +261,14 @@ class _Shelf extends StatelessWidget {
             sliver: SliverGrid(
               gridDelegate: _coverGridDelegate(context),
               delegate: SliverChildBuilderDelegate(
-                (context, i) => BookCard(book: books[i]),
-                childCount: books.length,
+                (context, i) {
+                  final item = items[i];
+                  return switch (item) {
+                    BookItem(:final book) => BookCard(book: book),
+                    SeriesItem(:final series) => SeriesTile(series: series),
+                  };
+                },
+                childCount: items.length,
               ),
             ),
           )
@@ -184,8 +276,8 @@ class _Shelf extends StatelessWidget {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
             sliver: SliverList.separated(
-              itemCount: books.length,
-              itemBuilder: (context, i) => BookListTile(book: books[i]),
+              itemCount: listBooks.length,
+              itemBuilder: (context, i) => BookListTile(book: listBooks[i]),
               separatorBuilder: (context, _) =>
                   Divider(height: 1, color: context.lyc.border),
             ),
