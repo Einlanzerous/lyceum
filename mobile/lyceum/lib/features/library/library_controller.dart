@@ -22,8 +22,18 @@ class LibraryController extends AsyncNotifier<List<Book>> {
   }
 }
 
+// retry: (_, _) => null disables Riverpod 3's automatic retry-on-failure for
+// this provider. Without it, a failed load (unreachable backend) is silently
+// retried every ~12s (one client timeout apart), so the shelf oscillates
+// loading -> brief error -> loading and the user just sees a perpetual skeleton
+// instead of the _ErrorShelf. Making the failure terminal lets the error card —
+// which already has a manual retry button, plus pull-to-refresh — show and stay
+// (LYCM-54).
 final libraryControllerProvider =
-    AsyncNotifierProvider<LibraryController, List<Book>>(LibraryController.new);
+    AsyncNotifierProvider<LibraryController, List<Book>>(
+  LibraryController.new,
+  retry: (_, _) => null,
+);
 
 /// Grid vs list shelf layout (session-scoped, defaults to grid like the web).
 class ViewModeController extends Notifier<bool> {

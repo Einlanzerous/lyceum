@@ -38,18 +38,23 @@ run:
 # stops both.
 #
 # Backend port: `make dev PORT=9000` wins, else LYCEUM_ADDR's port (.env), else
-# 8080 — but if that port is already taken (e.g. another service on 8080) we fall
-# back to a free one so the reader never proxies to the wrong service. Both the
-# backend and Vite's proxy are pinned to the same chosen port.
+# 8080. The port is FIXED: if it's already in use we abort with guidance rather
+# than silently falling back to a random free one. A random port is ephemeral —
+# once the session ends it's dead, but a mobile/desktop client that saved that
+# dev URL keeps dialing it forever and hangs on a blank library (LYCM-54). Set a
+# stable LYCEUM_ADDR in .env (or pass PORT=) so the dev URL never changes between
+# sessions. Both the backend and Vite's proxy are pinned to the chosen port.
 dev: check-env web-deps
 	@port="$(PORT)"; \
 		[ -n "$$port" ] || port="$${LYCEUM_ADDR##*:}"; \
 		[ -n "$$port" ] || port=8080; \
 		if command -v python3 >/dev/null 2>&1 && \
-		   ! python3 -c "import socket,sys; sys.exit(1 if socket.socket().connect_ex(('127.0.0.1',int('$$port')))==0 else 0)"; then \
-			free=$$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1])"); \
-			echo "==> port $$port is in use; using free backend port $$free instead"; \
-			port=$$free; \
+		   python3 -c "import socket,sys; sys.exit(0 if socket.socket().connect_ex(('127.0.0.1',int('$$port')))==0 else 1)"; then \
+			echo "==> ERROR: backend port $$port is already in use." >&2; \
+			echo "    Lyceum's dev server uses a FIXED port so a saved app server-URL stays valid across sessions (LYCM-54)." >&2; \
+			echo "    Free that port, or pick another: make dev PORT=NNNN" >&2; \
+			echo "    (set LYCEUM_ADDR=:NNNN in .env to make it stick, and update the app's server URL to match)." >&2; \
+			exit 1; \
 		fi; \
 		echo "==> lyceum backend (:$$port) + vite dev server (--host) — open Vite's Network URL; Ctrl-C stops both"; \
 		LYCEUM_ADDR=":$$port" go run ./cmd/lyceum & back=$$!; \
