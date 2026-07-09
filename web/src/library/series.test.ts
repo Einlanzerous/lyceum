@@ -85,6 +85,26 @@ describe('buildShelf', () => {
     }
   })
 
+  it('wears the cover of the volume you are on (resume target)', () => {
+    const books = [
+      book({ id: 1, series: 'S', series_index: 1, cover_url: '/c1', progress: 1 }),
+      book({ id: 2, series: 'S', series_index: 2, cover_url: '/c2', progress: 0.4 }),
+      book({ id: 3, series: 'S', series_index: 3, cover_url: '/c3' }),
+    ]
+    // Book 1 finished, book 2 in progress → the card wears book 2's cover.
+    const [item] = buildShelf(books, defaultSort)
+    if (item!.kind === 'series') expect(item.series.coverBook.id).toBe(2)
+  })
+
+  it('defaults the cover to book 1 when nothing is started', () => {
+    const books = [
+      book({ id: 1, series: 'S', series_index: 1, cover_url: '/c1' }),
+      book({ id: 2, series: 'S', series_index: 2, cover_url: '/c2' }),
+    ]
+    const [item] = buildShelf(books, defaultSort)
+    if (item!.kind === 'series') expect(item.series.coverBook.id).toBe(1)
+  })
+
   it('groups case-insensitively', () => {
     const books = [
       book({ id: 1, series: 'The Expanse', series_index: 1 }),

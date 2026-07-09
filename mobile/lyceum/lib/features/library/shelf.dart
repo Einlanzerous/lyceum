@@ -195,10 +195,13 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
     });
   final progress =
       ordered.fold<double>(0, (s, m) => s + (m.progress ?? 0)) / ordered.length;
-  final coverBook = ordered.firstWhere(
-    (m) => m.hasCover,
-    orElse: () => ordered.first,
-  );
+  // The card wears the cover of the volume you're on (the resume target —
+  // defaults to book 1 until you progress). Fall back to the first member with
+  // any cover, then to book 1.
+  final onBook = ordered[resumeIndex(ordered)];
+  final coverBook = onBook.hasCover
+      ? onBook
+      : ordered.firstWhere((m) => m.hasCover, orElse: () => ordered.first);
   return SeriesGroup(
     name: name,
     author: _pickAuthor(ordered),
