@@ -12,8 +12,9 @@ String _pct(double v) => '${(v * 100).round()}%';
 /// Grid tile: a 2:3 cover (or generated fallback) with an optional progress
 /// pill and a brass seam, plus title/author beneath. Mirrors `BookCard.vue`.
 class BookCard extends ConsumerWidget {
-  const BookCard({super.key, required this.book});
+  const BookCard({super.key, required this.book, this.pinned = false});
   final Book book;
+  final bool pinned;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -58,6 +59,8 @@ class BookCard extends ConsumerWidget {
                       )
                     else
                       _FallbackCover(book: book),
+                    if (pinned)
+                      const Positioned(top: 8, left: 8, child: ContinuePill()),
                     if (book.progress != null)
                       Positioned(
                         top: 8,
@@ -126,7 +129,8 @@ class BookListTile extends ConsumerWidget {
                     ? Image.network(
                         client.coverUrl(book.id),
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => _FallbackCover(book: book, compact: true),
+                        errorBuilder: (_, _, _) =>
+                            _FallbackCover(book: book, compact: true),
                       )
                     : _FallbackCover(book: book, compact: true),
               ),
@@ -166,6 +170,30 @@ class BookListTile extends ConsumerWidget {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Brass "Continue" chip marking the pinned current-read tile.
+class ContinuePill extends StatelessWidget {
+  const ContinuePill({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: lyc.brass,
+        borderRadius: BorderRadius.circular(LycRadii.pill),
+      ),
+      child: Text(
+        '▸ Continue',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+          color: lyc.onBrass,
         ),
       ),
     );
@@ -287,13 +315,14 @@ class _HatchPainter extends CustomPainter {
       ..strokeWidth = 1;
     const gap = 14.0;
     for (double x = -size.height; x < size.width; x += gap) {
-      canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), linePaint);
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        linePaint,
+      );
     }
     // Top-left tick.
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, 18, 4),
-      Paint()..color = tick,
-    );
+    canvas.drawRect(Rect.fromLTWH(0, 0, 18, 4), Paint()..color = tick);
   }
 
   @override

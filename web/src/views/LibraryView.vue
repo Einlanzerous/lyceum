@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import BookCard from '@/components/BookCard.vue'
+import SeriesCard from '@/components/SeriesCard.vue'
+import SeriesDrawer from '@/components/SeriesDrawer.vue'
+import SortControl from '@/components/SortControl.vue'
+import LibrarySearch from '@/components/LibrarySearch.vue'
 import { useLibraryStore } from '@/stores/library'
 import { coverUrl } from '@/api/client'
 import { formatProgress } from '@/api/progress'
@@ -9,6 +13,10 @@ import { isNativeShell } from '@/api/base'
 import { useServer } from '@/api/useServer'
 import { useProfile } from '@/profile'
 import ServerSettings from '@/components/ServerSettings.vue'
+import { loadSort, saveSort, sortBooks, type SortDir, type SortKey } from '@/library/sort'
+import { buildShelf, pinnedBookId } from '@/library/series'
+import { useGridColumns } from '@/library/useColumns'
+import type { Book } from '@/api/types'
 
 const store = useLibraryStore()
 const { initial } = useProfile()
@@ -21,17 +29,123 @@ const needsServer = computed(() => isNativeShell() && !server.value)
 
 const view = ref<'grid' | 'list'>('grid')
 
-const count = computed(() => books.value.length)
-const countLabel = computed(() => `${count.value} on the shelf`)
+// Sort order (LYCM-62), remembered across sessions.
+const sort = ref(loadSort())
+watch(sort, (s) => saveSort(s), { deep: true })
+function setSortKey(key: SortKey): void {
+  sort.value = { ...sort.value, key }
+}
+function setSortDir(dir: SortDir): void {
+  sort.value = { ...sort.value, dir }
+}
 
-// The grid/list toggle only makes sense once a populated shelf is showing.
-const showToggle = computed(
+// Search overlay (LYCM-63). The shelf filters live underneath as you type.
+const searchOpen = ref(false)
+const query = ref('')
+const searching = computed(() => query.value.trim().length > 0)
+
+function openSearch(): void {
+  if (!hasShelf.value) return
+  searchOpen.value = true
+}
+function closeSearch(): void {
+  searchOpen.value = false
+  query.value = '' // closing restores the full shelf
+}
+
+const matchedBooks = computed<Book[]>(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return []
+  const hit = books.value.filter(
+    (b) =>
+      b.title.toLowerCase().includes(q) ||
+      b.author.toLowerCase().includes(q) ||
+      (b.series ?? '').toLowerCase().includes(q),
+  )
+  return sortBooks(hit, sort.value)
+})
+
+// The most-recently-read book is pinned to the top of the shelf (its series card
+// floats up if it belongs to one), so "continue reading" is always first.
+const pinnedId = computed(() => pinnedBookId(books.value))
+
+// Series roll-up (LYCM-36): group + sort the shelf, and manage the inline drawer.
+const shelfItems = computed(() => buildShelf(books.value, sort.value, pinnedId.value))
+const listBooks = computed(() => {
+  const sorted = sortBooks(books.value, sort.value)
+  const at = pinnedId.value == null ? -1 : sorted.findIndex((b) => b.id === pinnedId.value)
+  if (at > 0) sorted.unshift(sorted.splice(at, 1)[0]!)
+  return sorted
+})
+
+const openKey = ref<string | null>(null)
+const cols = useGridColumns()
+
+function toggleSeries(key: string): void {
+  openKey.value = openKey.value === key ? null : key
+}
+
+const openIndex = computed(() =>
+  openKey.value ? shelfItems.value.findIndex((i) => i.key === openKey.value) : -1,
+)
+const openSeries = computed(() => {
+  const item = openIndex.value >= 0 ? shelfItems.value[openIndex.value] : undefined
+  return item && item.kind === 'series' ? item.series : null
+})
+// The drawer slots in at the end of the row holding the open card, so the row
+// below reflows down (Option A).
+const drawerAfterIndex = computed(() => {
+  const i = openIndex.value
+  if (i < 0) return -1
+  const c = cols.value
+  return Math.min(Math.floor(i / c) * c + c - 1, shelfItems.value.length - 1)
+})
+const arrowLeftPct = computed(() => {
+  const c = cols.value
+  return (((openIndex.value % c) + 0.5) / c) * 100
+})
+
+// A changed sort or an active search invalidates the open drawer's position.
+watch([sort, query, searchOpen], () => {
+  openKey.value = null
+})
+
+const count = computed(() => books.value.length)
+const countLabel = computed(() =>
+  searching.value
+    ? `${matchedBooks.value.length} of ${count.value}`
+    : `${count.value} on the shelf`,
+)
+
+// Controls (sort, search, view toggle) only make sense once a shelf is showing.
+const hasShelf = computed(
   () => !needsServer.value && !loading.value && !error.value && count.value > 0,
 )
 
+function onKeydown(e: KeyboardEvent): void {
+  if (searchOpen.value) return // the overlay owns Escape while open
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    openSearch()
+    return
+  }
+  if (e.key === '/' && !isTypingTarget(e.target)) {
+    e.preventDefault()
+    openSearch()
+  }
+}
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+}
+
 onMounted(() => {
   if (!needsServer.value) store.load()
+  window.addEventListener('keydown', onKeydown)
 })
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 // Once the user saves a server, load the shelf from it.
 function onServerSaved(): void {
@@ -63,28 +177,52 @@ function onServerSaved(): void {
           <h1 class="lib__title">All Books</h1>
           <span v-if="!loading && !error" class="lib__count">{{ countLabel }}</span>
         </div>
-        <div v-if="showToggle" class="lib__toggle" role="group" aria-label="View">
+        <div v-if="hasShelf" class="lib__controls">
+          <SortControl
+            :sort-key="sort.key"
+            :dir="sort.dir"
+            @update:sort-key="setSortKey"
+            @update:dir="setSortDir"
+          />
           <button
             type="button"
-            class="lib__toggle-btn"
-            :class="{ 'is-active': view === 'grid' }"
-            aria-label="Grid view"
-            @click="view = 'grid'"
+            class="lib__search-btn"
+            aria-label="Search library"
+            title="Search (press /)"
+            @click="openSearch"
           >
-            ▦
+            ⌕
           </button>
-          <button
-            type="button"
-            class="lib__toggle-btn"
-            :class="{ 'is-active': view === 'list' }"
-            aria-label="List view"
-            @click="view = 'list'"
-          >
-            ☰
-          </button>
+          <div class="lib__toggle" role="group" aria-label="View">
+            <button
+              type="button"
+              class="lib__toggle-btn"
+              :class="{ 'is-active': view === 'grid' }"
+              aria-label="Grid view"
+              @click="view = 'grid'"
+            >
+              ▦
+            </button>
+            <button
+              type="button"
+              class="lib__toggle-btn"
+              :class="{ 'is-active': view === 'list' }"
+              aria-label="List view"
+              @click="view = 'list'"
+            >
+              ☰
+            </button>
+          </div>
         </div>
       </div>
     </div>
+
+    <LibrarySearch
+      v-model="query"
+      :open="searchOpen"
+      :result-count="matchedBooks.length"
+      @close="closeSearch"
+    />
 
     <!-- Connect prompt (native shells, first run) -->
     <div v-if="needsServer" class="lib__state lib__state--center">
@@ -126,14 +264,47 @@ function onServerSaved(): void {
       <p class="lib__state-text">Books appear here once your server ingests them.</p>
     </div>
 
-    <!-- Grid -->
+    <!-- No search matches -->
+    <div v-else-if="searching && matchedBooks.length === 0" class="lib__state lib__state--center">
+      <div class="lib__empty-icon"><span>⌕</span></div>
+      <div class="lib__state-title">No matches</div>
+      <p class="lib__state-text">Nothing on the shelf matches “{{ query.trim() }}”.</p>
+    </div>
+
+    <!-- Search results (flat, ungrouped) -->
+    <div v-else-if="searching" class="lib__grid">
+      <BookCard v-for="book in matchedBooks" :key="book.id" :book="book" />
+    </div>
+
+    <!-- Grid — series roll up into cards; an open series expands inline. -->
     <div v-else-if="view === 'grid'" class="lib__grid">
-      <BookCard v-for="book in books" :key="book.id" :book="book" />
+      <template v-for="(item, i) in shelfItems" :key="item.key">
+        <BookCard
+          v-if="item.kind === 'book'"
+          :book="item.book"
+          :pinned="pinnedId != null && item.book.id === pinnedId"
+        />
+        <SeriesCard
+          v-else
+          :series="item.series"
+          :open="openKey === item.key"
+          :pinned="pinnedId != null && item.series.members.some((m) => m.id === pinnedId)"
+          @toggle="toggleSeries(item.key)"
+        />
+        <Transition name="drawer">
+          <SeriesDrawer
+            v-if="openSeries && i === drawerAfterIndex"
+            :series="openSeries"
+            :arrow-left-pct="arrowLeftPct"
+            @close="openKey = null"
+          />
+        </Transition>
+      </template>
     </div>
 
     <!-- List -->
     <div v-else class="lib__list">
-      <RouterLink v-for="book in books" :key="book.id" :to="`/reader/${book.id}`" class="row">
+      <RouterLink v-for="book in listBooks" :key="book.id" :to="`/reader/${book.id}`" class="row">
         <div class="row__thumb" :class="{ 'row__thumb--fallback': !book.cover_url }">
           <img v-if="book.cover_url" :src="coverUrl(book.id)" :alt="''" loading="lazy" />
           <span v-else>{{ book.title.charAt(0) }}</span>
@@ -226,6 +397,7 @@ function onServerSaved(): void {
   justify-content: space-between;
   gap: 16px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 .lib__title-group {
   display: flex;
@@ -242,6 +414,30 @@ function onServerSaved(): void {
 .lib__count {
   font: 400 14px var(--font-ui);
   color: var(--dim);
+}
+
+/* Sort + search + view toggle cluster, across from the title. */
+.lib__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.lib__search-btn {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-size: 17px;
+  cursor: pointer;
+}
+.lib__search-btn:hover {
+  border-color: var(--brass);
+  color: var(--brass);
 }
 
 /* View toggle — lives across from the title now to keep the top bar clean. */

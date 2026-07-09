@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -133,6 +134,77 @@ func TestListBooks(t *testing.T) {
 	}
 	if len(books) != len(cases) {
 		t.Fatalf("expected %d books, got %d", len(cases), len(books))
+	}
+}
+
+func TestBookSeriesRoundTrip(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	// A book with series metadata round-trips through insert.
+	withSeries := sampleBook("series-h1")
+	withSeries.Series = "The Southern Reach"
+	withSeries.SeriesIndex = 2
+	saved, err := s.InsertBook(ctx, withSeries)
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	if saved.Series != "The Southern Reach" || saved.SeriesIndex != 2 {
+		t.Fatalf("insert series = (%q, %v), want (The Southern Reach, 2)", saved.Series, saved.SeriesIndex)
+	}
+
+	// A standalone book stores NULLs and reads back as ("", 0).
+	standalone, err := s.InsertBook(ctx, sampleBook("series-h2"))
+	if err != nil {
+		t.Fatalf("InsertBook standalone: %v", err)
+	}
+	if standalone.Series != "" || standalone.SeriesIndex != 0 {
+		t.Fatalf("standalone series = (%q, %v), want empty", standalone.Series, standalone.SeriesIndex)
+	}
+
+	// A re-stamp (UpdateBookContent) refreshes series metadata.
+	refreshed := sampleBook("series-h3-new")
+	refreshed.Series = "Earthsea"
+	refreshed.SeriesIndex = 1
+	updated, err := s.UpdateBookContent(ctx, saved.ID, refreshed)
+	if err != nil {
+		t.Fatalf("UpdateBookContent: %v", err)
+	}
+	if updated.Series != "Earthsea" || updated.SeriesIndex != 1 {
+		t.Fatalf("updated series = (%q, %v), want (Earthsea, 1)", updated.Series, updated.SeriesIndex)
+	}
+}
+
+func TestUpdateBookSeries(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	book, err := s.InsertBook(ctx, sampleBook("set-series-h1"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+
+	// Assign a series + index.
+	got, err := s.UpdateBookSeries(ctx, book.ID, "The Broken Empire", 2)
+	if err != nil {
+		t.Fatalf("UpdateBookSeries: %v", err)
+	}
+	if got.Series != "The Broken Empire" || got.SeriesIndex != 2 {
+		t.Fatalf("set series = (%q, %v), want (The Broken Empire, 2)", got.Series, got.SeriesIndex)
+	}
+
+	// Clearing (empty name, 0 index) stores NULLs and reads back empty.
+	cleared, err := s.UpdateBookSeries(ctx, book.ID, "", 0)
+	if err != nil {
+		t.Fatalf("UpdateBookSeries clear: %v", err)
+	}
+	if cleared.Series != "" || cleared.SeriesIndex != 0 {
+		t.Fatalf("cleared series = (%q, %v), want empty", cleared.Series, cleared.SeriesIndex)
+	}
+
+	// A missing id is ErrNotFound.
+	if _, err := s.UpdateBookSeries(ctx, 999999, "X", 1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateBookSeries(missing) err = %v, want ErrNotFound", err)
 	}
 }
 

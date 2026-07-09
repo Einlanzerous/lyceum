@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../api/server_store.dart';
 import '../../prefs/profile.dart';
@@ -10,6 +11,10 @@ import '../../widgets/brand_mark.dart';
 import '../settings/server_settings.dart';
 import 'book_card.dart';
 import 'library_controller.dart';
+import 'library_search.dart';
+import 'series_tile.dart';
+import 'shelf.dart';
+import 'sort_controller.dart';
 
 class LibraryScreen extends ConsumerWidget {
   const LibraryScreen({super.key});
@@ -35,8 +40,9 @@ class LibraryScreen extends ConsumerWidget {
                   ? _ConnectPrompt()
                   : RefreshIndicator(
                       color: lyc.brass,
-                      onRefresh: () =>
-                          ref.read(libraryControllerProvider.notifier).refresh(),
+                      onRefresh: () => ref
+                          .read(libraryControllerProvider.notifier)
+                          .refresh(),
                       child: library.when(
                         loading: () => const _LoadingShelf(),
                         error: (e, _) => _ErrorShelf(
@@ -79,11 +85,14 @@ class _TopBar extends ConsumerWidget {
             child: CircleAvatar(
               radius: 18,
               backgroundColor: lyc.brassWash,
-              child: Text(initial,
-                  style: TextStyle(
-                      color: lyc.brassBright,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14)),
+              child: Text(
+                initial,
+                style: TextStyle(
+                  color: lyc.brassBright,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
             ),
           ),
         ],
@@ -116,12 +125,13 @@ class _IconPill extends StatelessWidget {
 }
 
 class _Header extends ConsumerWidget {
-  const _Header({required this.count});
-  final int count;
+  const _Header({required this.books});
+  final List<Book> books;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lyc = context.lyc;
     final grid = ref.watch(gridViewProvider);
+    final sort = ref.watch(sortControllerProvider);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -129,23 +139,44 @@ class _Header extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('YOUR LIBRARY',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 3,
-                    color: lyc.brass,
-                  )),
+              Text(
+                'YOUR LIBRARY',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                  color: lyc.brass,
+                ),
+              ),
               const SizedBox(height: 6),
-              Text('All Books',
-                  style: Theme.of(context).textTheme.headlineLarge),
+              Text(
+                'All Books',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
               const SizedBox(height: 4),
-              Text('$count on the shelf',
-                  style: TextStyle(fontSize: 13, color: lyc.dim)),
+              Text(
+                '${books.length} on the shelf',
+                style: TextStyle(fontSize: 13, color: lyc.dim),
+              ),
             ],
           ),
         ),
-        // Grid/list toggle sits across from the header to save top-bar space.
+        // Controls: sort key + direction, search, and the grid/list toggle.
+        _SortMenu(sort: sort),
+        const SizedBox(width: 8),
+        _IconPill(
+          icon: sort.ascending
+              ? Icons.arrow_upward_rounded
+              : Icons.arrow_downward_rounded,
+          onTap: () =>
+              ref.read(sortControllerProvider.notifier).toggleDirection(),
+        ),
+        const SizedBox(width: 8),
+        _IconPill(
+          icon: Icons.search_rounded,
+          onTap: () => _openSearch(context, ref, books, sort),
+        ),
+        const SizedBox(width: 8),
         _IconPill(
           icon: grid ? Icons.view_list_rounded : Icons.grid_view_rounded,
           onTap: () => ref.read(gridViewProvider.notifier).toggle(),
@@ -153,39 +184,127 @@ class _Header extends ConsumerWidget {
       ],
     );
   }
+
+  void _openSearch(
+    BuildContext context,
+    WidgetRef ref,
+    List<Book> books,
+    SortState sort,
+  ) {
+    final client = ref.read(lyceumClientProvider);
+    showSearch<void>(
+      context: context,
+      delegate: LibrarySearchDelegate(
+        books: books,
+        sort: sort,
+        coverUrlOf: client.coverUrl,
+        onOpen: (id) => context.push('/reader/$id'),
+      ),
+    );
+  }
 }
 
-class _Shelf extends StatelessWidget {
+/// Sort-key picker styled as a pill, matching the _IconPill controls.
+class _SortMenu extends ConsumerWidget {
+  const _SortMenu({required this.sort});
+  final SortState sort;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lyc = context.lyc;
+    return PopupMenuButton<SortKey>(
+      tooltip: 'Sort',
+      initialValue: sort.key,
+      onSelected: (key) =>
+          ref.read(sortControllerProvider.notifier).setKey(key),
+      itemBuilder: (context) => [
+        for (final key in SortKey.values)
+          PopupMenuItem(
+            value: key,
+            child: Row(
+              children: [
+                Icon(
+                  key == sort.key ? Icons.check_rounded : Icons.check,
+                  size: 18,
+                  color: key == sort.key ? lyc.brass : Colors.transparent,
+                ),
+                const SizedBox(width: 8),
+                Text(key.label),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(LycRadii.pill),
+          border: Border.all(color: lyc.borderStrong),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.sort_rounded, size: 16, color: lyc.muted),
+            const SizedBox(width: 8),
+            Text(
+              sort.key.label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: lyc.text,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Shelf extends ConsumerWidget {
   const _Shelf({required this.books, required this.grid});
   final List<Book> books;
   final bool grid;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sort = ref.watch(sortControllerProvider);
+    final pinId = pinnedBookId(books);
+    final items = buildShelf(books, sort, pinBookId: pinId);
+    final listBooks = sortBooks(books, sort, pinBookId: pinId);
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-          sliver: SliverToBoxAdapter(child: _Header(count: books.length)),
+          sliver: SliverToBoxAdapter(child: _Header(books: books)),
         ),
         if (grid)
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
             sliver: SliverGrid(
               gridDelegate: _coverGridDelegate(context),
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => BookCard(book: books[i]),
-                childCount: books.length,
-              ),
+              delegate: SliverChildBuilderDelegate((context, i) {
+                final item = items[i];
+                return switch (item) {
+                  BookItem(:final book) => BookCard(
+                    book: book,
+                    pinned: book.id == pinId,
+                  ),
+                  SeriesItem(:final series) => SeriesTile(
+                    series: series,
+                    pinned:
+                        pinId != null &&
+                        series.members.any((m) => m.id == pinId),
+                  ),
+                };
+              }, childCount: items.length),
             ),
           )
         else
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
             sliver: SliverList.separated(
-              itemCount: books.length,
-              itemBuilder: (context, i) => BookListTile(book: books[i]),
+              itemCount: listBooks.length,
+              itemBuilder: (context, i) => BookListTile(book: listBooks[i]),
               separatorBuilder: (context, _) =>
                   Divider(height: 1, color: context.lyc.border),
             ),
@@ -214,8 +333,10 @@ class _ConnectPrompt extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Connect to your library',
-                  style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                'Connect to your library',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 6),
               Text(
                 'Point Lyceum at your self-hosted server to see your shelf.',
@@ -245,8 +366,11 @@ class _EmptyShelf extends StatelessWidget {
         Icon(Icons.menu_book_outlined, size: 48, color: lyc.dim),
         const SizedBox(height: 16),
         Center(
-            child: Text('No books yet',
-                style: Theme.of(context).textTheme.titleLarge)),
+          child: Text(
+            'No books yet',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
         const SizedBox(height: 6),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -285,16 +409,23 @@ class _ErrorShelf extends StatelessWidget {
               children: [
                 Icon(Icons.cloud_off_outlined, size: 32, color: lyc.error),
                 const SizedBox(height: 12),
-                Text("Can't reach the library",
-                    style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  "Can't reach the library",
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 6),
-                Text(message,
-                    textAlign: TextAlign.center,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12.5, color: lyc.muted)),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, color: lyc.muted),
+                ),
                 const SizedBox(height: 16),
-                FilledButton(onPressed: onRetry, child: const Text('Try again')),
+                FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Try again'),
+                ),
               ],
             ),
           ),
@@ -361,7 +492,9 @@ class _LoadingShelfState extends State<_LoadingShelf>
 /// so the 366/600 cover fills the cell and the title/author footer stays a fixed
 /// height — no big inter-row gaps on wide screens, no clipping on narrow ones.
 /// The footer term tracks the system text scale so large-font users don't clip.
-SliverGridDelegateWithMaxCrossAxisExtent _coverGridDelegate(BuildContext context) {
+SliverGridDelegateWithMaxCrossAxisExtent _coverGridDelegate(
+  BuildContext context,
+) {
   const hPadding = 16.0;
   const spacing = 16.0;
   const maxExtent = 220.0;

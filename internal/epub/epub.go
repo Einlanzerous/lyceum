@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,13 @@ type Metadata struct {
 	// first, so callers that want the ISBN must scan all of these rather than
 	// rely on Identifier.
 	Identifiers []string
+
+	// Series is the collection/series the book belongs to (e.g. "The Southern
+	// Reach"), empty if the EPUB declares none. SeriesIndex is its position
+	// within that series (1, 2, 3, …); 0 means unknown/unset. Both are read from
+	// Calibre's calibre:series metadata or the EPUB3 belongs-to-collection form.
+	Series      string
+	SeriesIndex float64
 
 	CoverData      []byte
 	CoverMediaType string
@@ -61,8 +69,12 @@ type opfPackage struct {
 		Metas       []struct {
 			Name    string `xml:"name,attr"`
 			Content string `xml:"content,attr"`
-			// EPUB3 refinement form: <meta property="...">value</meta>.
+			// EPUB3 refinement form: <meta property="...">value</meta>. Refines
+			// points at another meta/item by "#id"; ID names this element so a
+			// refinement can target it.
 			Property string `xml:"property,attr"`
+			Refines  string `xml:"refines,attr"`
+			ID       string `xml:"id,attr"`
 			Value    string `xml:",chardata"`
 		} `xml:"meta"`
 	} `xml:"metadata"`
@@ -126,6 +138,7 @@ func Parse(r io.ReaderAt, size int64) (*Metadata, error) {
 		Identifier:  first(pkg.Metadata.Identifiers),
 		Identifiers: nonEmpty(pkg.Metadata.Identifiers),
 	}
+	md.Series, md.SeriesIndex = resolveSeries(pkg)
 
 	if href, mt := resolveCover(pkg); href != "" {
 		// Cover hrefs are relative to the OPF's directory.
@@ -205,6 +218,97 @@ func resolveCover(pkg *opfPackage) (href, mediaType string) {
 		}
 	}
 	return "", ""
+}
+
+// resolveSeries extracts the series name and index from the OPF metadata. It
+// prefers Calibre's widely-used custom form:
+//
+//	<meta name="calibre:series" content="The Southern Reach"/>
+//	<meta name="calibre:series_index" content="2"/>
+//
+// and falls back to the EPUB3 collection form:
+//
+//	<meta property="belongs-to-collection" id="c01">The Southern Reach</meta>
+//	<meta refines="#c01" property="collection-type">series</meta>
+//	<meta refines="#c01" property="group-position">2</meta>
+//
+// A missing series yields ("", 0); a series with no declared position yields
+// (name, 0).
+func resolveSeries(pkg *opfPackage) (name string, index float64) {
+	metas := pkg.Metadata.Metas
+
+	// Calibre custom metadata — the most common source in practice.
+	for _, m := range metas {
+		if strings.EqualFold(m.Name, "calibre:series") {
+			name = strings.TrimSpace(m.Content)
+			break
+		}
+	}
+	if name != "" {
+		for _, m := range metas {
+			if strings.EqualFold(m.Name, "calibre:series_index") {
+				index = parseSeriesIndex(m.Content)
+				break
+			}
+		}
+		return name, index
+	}
+
+	// EPUB3 belongs-to-collection. Prefer a collection explicitly typed as a
+	// "series" over a "set"; if none is typed, take the first collection.
+	type collection struct {
+		id, name string
+		typed    bool
+	}
+	var chosen *collection
+	var candidates []collection
+	for _, m := range metas {
+		if m.Refines == "" && strings.EqualFold(m.Property, "belongs-to-collection") {
+			candidates = append(candidates, collection{id: m.ID, name: strings.TrimSpace(m.Value)})
+		}
+	}
+	for i := range candidates {
+		c := &candidates[i]
+		if c.id == "" {
+			continue
+		}
+		for _, m := range metas {
+			if m.Refines == "#"+c.id && strings.EqualFold(m.Property, "collection-type") &&
+				strings.EqualFold(strings.TrimSpace(m.Value), "series") {
+				chosen = c
+				c.typed = true
+				break
+			}
+		}
+		if chosen != nil {
+			break
+		}
+	}
+	if chosen == nil && len(candidates) > 0 {
+		chosen = &candidates[0]
+	}
+	if chosen == nil || chosen.name == "" {
+		return "", 0
+	}
+	if chosen.id != "" {
+		for _, m := range metas {
+			if m.Refines == "#"+chosen.id && strings.EqualFold(m.Property, "group-position") {
+				index = parseSeriesIndex(m.Value)
+				break
+			}
+		}
+	}
+	return chosen.name, index
+}
+
+// parseSeriesIndex reads a series position, tolerating the "1.0" floats Calibre
+// writes and surrounding whitespace. Unparseable input yields 0 (unknown).
+func parseSeriesIndex(s string) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return f
 }
 
 func hasProperty(properties, want string) bool {

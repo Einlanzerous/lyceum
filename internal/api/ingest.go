@@ -97,13 +97,15 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 	}
 
 	saved, err := a.store.InsertBook(ctx, store.Book{
-		Title:      ingestTitle(md, source),
-		Author:     strings.TrimSpace(md.Author),
-		CoverPath:  coverPath,
-		FilePath:   filePath,
-		FileHash:   hash,
-		SizeBytes:  int64(len(data)),
-		SourcePath: sourcePath,
+		Title:       ingestTitle(md, source),
+		Author:      strings.TrimSpace(md.Author),
+		CoverPath:   coverPath,
+		FilePath:    filePath,
+		FileHash:    hash,
+		SizeBytes:   int64(len(data)),
+		SourcePath:  sourcePath,
+		Series:      strings.TrimSpace(md.Series),
+		SeriesIndex: md.SeriesIndex,
 	})
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("insert book: %w", err)
@@ -136,12 +138,14 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 	}
 
 	updated, err := a.store.UpdateBookContent(ctx, existing.ID, store.Book{
-		Title:     ingestTitle(md, existing.SourcePath),
-		Author:    strings.TrimSpace(md.Author),
-		CoverPath: coverPath,
-		FilePath:  filePath,
-		FileHash:  hash,
-		SizeBytes: int64(len(data)),
+		Title:       ingestTitle(md, existing.SourcePath),
+		Author:      strings.TrimSpace(md.Author),
+		CoverPath:   coverPath,
+		FilePath:    filePath,
+		FileHash:    hash,
+		SizeBytes:   int64(len(data)),
+		Series:      strings.TrimSpace(md.Series),
+		SeriesIndex: md.SeriesIndex,
 	})
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("update book content: %w", err)
