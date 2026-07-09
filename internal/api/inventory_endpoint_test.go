@@ -113,7 +113,7 @@ func TestInventoryFindDigitalSkipsIngested(t *testing.T) {
 
 	// Ingest an EPUB so the ISBN is in the ingested state.
 	data := epubWithIdentifier(t, "Owned Digital", "urn:isbn:9780140449198")
-	if _, _, err := a.ingestEPUB(context.Background(), data, "x.epub"); err != nil {
+	if _, _, err := a.ingestEPUB(context.Background(), data, "x.epub", ""); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
 

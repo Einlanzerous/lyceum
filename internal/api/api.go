@@ -31,6 +31,13 @@ type Store interface {
 	SaveBlobs(fileHash string, epub, cover []byte) (filePath, coverPath string, err error)
 	ListDeliveriesByBook(ctx context.Context, bookID int64) ([]store.Delivery, error)
 
+	// Book lifecycle (LYCM-66): stable-identity folder ingest + delete.
+	GetBookBySourcePath(ctx context.Context, sourcePath string) (store.Book, error)
+	SetBookSourcePath(ctx context.Context, id int64, sourcePath string) error
+	UpdateBookContent(ctx context.Context, id int64, b store.Book) (store.Book, error)
+	DeleteBook(ctx context.Context, id int64) (store.Book, error)
+	RemoveBlobs(filePath string) error
+
 	// Inventory (LYCM-601): ownership/acquisition state keyed by ISBN.
 	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
@@ -94,6 +101,7 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("GET /sync", a.handleSyncGet)
 	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)
 	mux.HandleFunc("GET /books/{id}/file", a.handleFile)
+	mux.HandleFunc("DELETE /books/{id}", a.handleDelete)
 
 	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
 	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
@@ -171,6 +179,33 @@ func (a *API) handleFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fmt.Sprintf("book-%d.epub", b.ID)))
 	serveBlob(w, r, b.FilePath, "application/epub+zip")
+}
+
+// handleDelete removes a book and its on-disk blobs (LYCM-66). It responds 204
+// on success, 404 if no book has the id. Dependent rows are handled by the
+// schema FKs (reading_positions/deliveries cascade, inventory link nulled), so
+// this is safe without an explicit cleanup pass.
+func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid book id", http.StatusBadRequest)
+		return
+	}
+	deleted, err := a.store.DeleteBook(r.Context(), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		http.Error(w, "book not found", http.StatusNotFound)
+		return
+	case err != nil:
+		serverError(w, "delete book", err)
+		return
+	}
+	// The row is gone; a leftover blob dir is only wasted disk, so a cleanup
+	// failure is logged, not surfaced as an error to the caller.
+	if err := a.store.RemoveBlobs(deleted.FilePath); err != nil {
+		log.Printf("api: delete book %d: remove blobs: %v", deleted.ID, err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // lookupBook parses the {id} path value and loads the book, writing the
