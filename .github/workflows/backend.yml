@@ -1,0 +1,76 @@
+name: backend
+
+# Go backend build + test (LYCM-67). The api/store tests are DB-backed and skip
+# unless TEST_DATABASE_URL is set (see testStore/connectSchema in
+# internal/api/api_test.go), so before this workflow the backend had no CI
+# coverage at all. A Postgres service container provides the database; each test
+# binary migrates + truncates its own isolated schema. Path-scoped so
+# mobile/wrapper/docs-only changes don't pay for it.
+on:
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "migrations/**"
+      - ".github/workflows/backend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "migrations/**"
+      - ".github/workflows/backend.yml"
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: lyceum_test
+        ports:
+          - 5432:5432
+        # Gate the job's steps on Postgres accepting connections.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/lyceum_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # go-version-file pins to the exact toolchain in go.mod (1.25.x); setup-go
+      # caches the module + build cache keyed on go.sum.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # -race catches data races (the folder watcher runs in its own goroutine);
+      # GitHub's ubuntu runners ship gcc, so the race detector's cgo is available.
+      - name: Test
+        run: go test -race ./...
