@@ -107,7 +107,9 @@ func (w *Watcher) consider(ctx context.Context, path string, d fs.DirEntry) {
 		return // transient; retry next tick (signature not recorded)
 	}
 
-	book, created, err := w.api.ingestEPUB(ctx, data, path)
+	// The file path is both the human label and the stable identity, so a
+	// re-stamped file updates its book in place instead of duplicating.
+	book, result, err := w.api.ingestEPUB(ctx, data, path, path)
 	switch {
 	case err != nil:
 		// Likely a partial write (still copying) or a non-EPUB. Record the
@@ -115,10 +117,14 @@ func (w *Watcher) consider(ctx context.Context, path string, d fs.DirEntry) {
 		w.bad[path] = sig
 		delete(w.ok, path)
 		log.Printf("watch: ingest %s: %v", path, err)
-	case created:
+	case result == ingestCreated:
 		w.ok[path] = sig
 		delete(w.bad, path)
 		log.Printf("watch: ingested %s -> book %d", path, book.ID)
+	case result == ingestReplaced:
+		w.ok[path] = sig
+		delete(w.bad, path)
+		log.Printf("watch: re-stamped %s -> updated book %d", path, book.ID)
 	default:
 		// Already in the library (deduped); remember it so we skip it next tick.
 		w.ok[path] = sig

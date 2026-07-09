@@ -26,7 +26,11 @@ type Book struct {
 	FilePath  string
 	FileHash  string
 	SizeBytes int64
-	AddedAt   time.Time
+	// SourcePath is the watched-tree path this book was folder-ingested from,
+	// or "" for HTTP uploads. It gives folder-ingested books a stable identity
+	// so a re-stamped file updates in place instead of duplicating (LYCM-66).
+	SourcePath string
+	AddedAt    time.Time
 }
 
 // Device is a client that syncs reading positions. Reading positions key off
@@ -69,12 +73,12 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // bookColumns is the canonical SELECT projection for a Book row. Nullable
 // text columns are coalesced so they scan cleanly into Go strings.
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
-	file_path, file_hash, COALESCE(size_bytes, 0), added_at`
+	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''), added_at`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
-		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.AddedAt)
+		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath, &b.AddedAt)
 	return b, err
 }
 
@@ -90,12 +94,12 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	inserted, err := scanBook(tx.QueryRow(ctx,
-		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (file_hash) DO NOTHING
 		 RETURNING `+bookColumns,
 		b.Title, nullString(b.Author), nullString(b.CoverPath),
-		b.FilePath, b.FileHash, b.SizeBytes))
+		b.FilePath, b.FileHash, b.SizeBytes, nullString(b.SourcePath)))
 	switch {
 	case err == nil:
 		if err := tx.Commit(ctx); err != nil {
@@ -320,6 +324,113 @@ func (s *Store) SetCoverPath(ctx context.Context, bookID int64, coverPath string
 		return ErrNotFound
 	}
 	return nil
+}
+
+// GetBookBySourcePath returns the book folder-ingested from sourcePath, or
+// ErrNotFound. Only folder-ingested books carry a source_path (uploads have
+// none), so an empty path never matches.
+func (s *Store) GetBookBySourcePath(ctx context.Context, sourcePath string) (Book, error) {
+	if sourcePath == "" {
+		return Book{}, ErrNotFound
+	}
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`SELECT `+bookColumns+` FROM books WHERE source_path = $1`, sourcePath))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: get book by source path: %w", err)
+	}
+	return b, nil
+}
+
+// SetBookSourcePath records the watched-tree path a book was ingested from. It
+// lets books ingested before source_path existed (or via a newly-watched path)
+// be adopted, so a later re-stamp updates them in place. Returns ErrNotFound if
+// id is gone; a unique-violation surfaces if another book already claims the
+// path (callers treat that as best-effort).
+func (s *Store) SetBookSourcePath(ctx context.Context, id int64, sourcePath string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE books SET source_path = $2 WHERE id = $1`, id, nullString(sourcePath))
+	if err != nil {
+		return fmt.Errorf("store: set source path: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateBookContent replaces a book's content-derived fields in place, keeping
+// its id (and thus reading positions), source_path, and added_at. The folder
+// watcher uses it when a watched file is re-stamped (new content hash) so the
+// book updates rather than duplicating (LYCM-66). Returns ErrNotFound if id is
+// gone.
+func (s *Store) UpdateBookContent(ctx context.Context, id int64, b Book) (Book, error) {
+	updated, err := scanBook(s.pool.QueryRow(ctx,
+		`UPDATE books
+		    SET title = $2, author = $3, cover_path = $4,
+		        file_path = $5, file_hash = $6, size_bytes = $7
+		  WHERE id = $1
+		  RETURNING `+bookColumns,
+		id, b.Title, nullString(b.Author), nullString(b.CoverPath),
+		b.FilePath, b.FileHash, b.SizeBytes))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: update book content: %w", err)
+	}
+	return updated, nil
+}
+
+// DeleteBook removes a book row and returns the deleted row so the caller can
+// clean up its blobs. Dependents are handled by the schema FKs:
+// reading_positions/deliveries cascade, inventory.book_id is set NULL. Returns
+// ErrNotFound if id is gone.
+func (s *Store) DeleteBook(ctx context.Context, id int64) (Book, error) {
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`DELETE FROM books WHERE id = $1 RETURNING `+bookColumns, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: delete book: %w", err)
+	}
+	return b, nil
+}
+
+// RemoveBlobs deletes the on-disk blob directory backing a book — the
+// hash-named dir holding its book.epub and cover. It is a no-op on an empty
+// path, and defensively refuses any dir whose name is not a 64-char hex hash,
+// so a malformed path can never remove an unrelated directory (e.g. the data
+// dir itself).
+func (s *Store) RemoveBlobs(filePath string) error {
+	if filePath == "" {
+		return nil
+	}
+	dir := filepath.Dir(filePath) // .../<hash>
+	if !isBlobHashDir(filepath.Base(dir)) {
+		return fmt.Errorf("store: refusing to remove non-blob dir %q", dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("store: remove blobs %q: %w", dir, err)
+	}
+	return nil
+}
+
+// isBlobHashDir reports whether name is a 64-char lowercase-hex SHA-256, the
+// shape SaveBlobs gives every blob directory.
+func isBlobHashDir(name string) bool {
+	if len(name) != 64 {
+		return false
+	}
+	for _, c := range name {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // nullString maps "" to a SQL NULL so empty optional text columns stay NULL

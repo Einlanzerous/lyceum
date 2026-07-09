@@ -37,7 +37,10 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved, created, err := a.ingestEPUB(ctx, data, header.Filename)
+	// Uploads have no stable filesystem identity, so pass an empty sourcePath:
+	// the only non-created outcome is a content duplicate (409). Replace-on-
+	// restamp is exclusive to the folder watcher, which knows the file path.
+	saved, result, err := a.ingestEPUB(ctx, data, header.Filename, "")
 	switch {
 	case errors.Is(err, errNotEPUB):
 		http.Error(w, "uploaded file is not a valid EPUB", http.StatusBadRequest)
@@ -45,7 +48,7 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		serverError(w, "ingest epub", err)
 		return
-	case !created:
+	case result != ingestCreated:
 		http.Error(w, "book already exists", http.StatusConflict)
 		return
 	}

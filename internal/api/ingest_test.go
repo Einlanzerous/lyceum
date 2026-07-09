@@ -129,16 +129,16 @@ func TestIngestDuplicateIsNoOp(t *testing.T) {
 	ctx := context.Background()
 
 	data := epubWithIdentifier(t, "Dup", "urn:isbn:9780140449334")
-	first, created, err := a.ingestEPUB(ctx, data, "dup.epub")
-	if err != nil || !created {
-		t.Fatalf("first ingest: created=%v err=%v", created, err)
+	first, result, err := a.ingestEPUB(ctx, data, "dup.epub", "")
+	if err != nil || result != ingestCreated {
+		t.Fatalf("first ingest: result=%v err=%v", result, err)
 	}
-	second, created, err := a.ingestEPUB(ctx, data, "dup.epub")
+	second, result, err := a.ingestEPUB(ctx, data, "dup.epub", "")
 	if err != nil {
 		t.Fatalf("second ingest err: %v", err)
 	}
-	if created {
-		t.Fatal("second ingest reported created=true, want dedup")
+	if result != ingestDuplicate {
+		t.Fatalf("second ingest result=%v, want ingestDuplicate", result)
 	}
 	if second.ID != first.ID {
 		t.Fatalf("dedup returned id %d, want %d", second.ID, first.ID)
