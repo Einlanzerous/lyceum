@@ -10,6 +10,12 @@ export interface Book {
   cover_url: string
   /** Reading progress 0..1; omitted when the book has never been opened. */
   progress?: number
+  /** RFC3339 timestamp the book was ingested; backs the "recently added" sort. */
+  added_at?: string
+  /** Series the book belongs to, or "" / omitted when it is a standalone. */
+  series?: string
+  /** 1-based position within {@link series}; omitted when unknown. */
+  series_index?: number
 }
 
 /** A device's reading position within a book (GET/PUT /sync). */

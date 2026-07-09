@@ -12,8 +12,15 @@ const books: Book[] = [
   { id: 2, title: 'No Cover', author: 'Anon', cover_url: '' },
 ]
 
-function mountView() {
+const seriesBooks: Book[] = [
+  { id: 1, title: 'Annihilation', author: 'VanderMeer', cover_url: '', series: 'Southern Reach', series_index: 1, progress: 1 },
+  { id: 2, title: 'Authority', author: 'VanderMeer', cover_url: '', series: 'Southern Reach', series_index: 2, progress: 0.73 },
+  { id: 3, title: 'Piranesi', author: 'Clarke', cover_url: '' },
+]
+
+function mountView(attach = false) {
   const wrapper = mount(LibraryView, {
+    attachTo: attach ? document.body : undefined,
     global: {
       plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: true })],
       stubs: { RouterLink: RouterLinkStub },
@@ -50,14 +57,87 @@ describe('LibraryView', () => {
     await flushPromises()
 
     const cards = wrapper.findAllComponents(RouterLinkStub)
-    // One card per book; each links to its reader route.
+    // One card per book; each links to its reader route (order is sort-dependent).
     const readerLinks = cards.filter((c) => String(c.props('to')).startsWith('/reader/'))
     expect(readerLinks).toHaveLength(2)
-    expect(readerLinks[0]!.props('to')).toBe('/reader/1')
+    const targets = readerLinks.map((c) => String(c.props('to')))
+    expect(targets).toContain('/reader/1')
+    expect(targets).toContain('/reader/2')
 
     // Progress badge only on the book that has progress.
     expect(wrapper.text()).toContain('42%')
     expect(wrapper.findAll('.card__pill')).toHaveLength(1)
+  })
+
+  it('rolls a multi-book series into one card and expands an inline drawer', async () => {
+    const wrapper = mountView()
+    const store = useLibraryStore()
+    store.books = seriesBooks
+    store.loading = false
+    await flushPromises()
+
+    // The 3 books collapse to 2 tiles: the series card + the standalone.
+    const seriesCard = wrapper.find('.series')
+    expect(seriesCard.exists()).toBe(true)
+    expect(wrapper.find('.drawer').exists()).toBe(false)
+
+    await seriesCard.trigger('click')
+    await flushPromises()
+
+    // Drawer opens with both members and a resume shortcut.
+    const drawer = wrapper.find('.drawer')
+    expect(drawer.exists()).toBe(true)
+    expect(drawer.text()).toContain('Annihilation')
+    expect(drawer.text()).toContain('Authority')
+    // Book 1 is finished, book 2 in progress → resume points at book 2.
+    expect(drawer.text()).toContain('Resume book 2')
+
+    // Clicking again collapses it.
+    await wrapper.find('.series').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.drawer').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('opens a search overlay and filters the shelf by title', async () => {
+    const wrapper = mountView(true)
+    const store = useLibraryStore()
+    store.books = seriesBooks
+    store.loading = false
+    await flushPromises()
+
+    await wrapper.find('.lib__search-btn').trigger('click')
+    await flushPromises()
+
+    const input = document.body.querySelector<HTMLInputElement>('.search__input')
+    expect(input).not.toBeNull()
+
+    input!.value = 'piranesi'
+    input!.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    // Only the matching book remains on the shelf.
+    expect(wrapper.text()).toContain('Piranesi')
+    expect(wrapper.text()).not.toContain('Annihilation')
+    wrapper.unmount()
+  })
+
+  it('shows a no-match state when the search finds nothing', async () => {
+    const wrapper = mountView(true)
+    const store = useLibraryStore()
+    store.books = seriesBooks
+    store.loading = false
+    await flushPromises()
+
+    await wrapper.find('.lib__search-btn').trigger('click')
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('.search__input')
+    input!.value = 'zzznope'
+    input!.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No matches')
+    wrapper.unmount()
   })
 
   it('shows an empty-state message when there are no books', async () => {
