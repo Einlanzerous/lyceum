@@ -308,37 +308,40 @@ func TestGetPositionNotFound(t *testing.T) {
 	}
 }
 
-func TestGetLatestPosition(t *testing.T) {
+func TestGetFurthestPosition(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
-	book, err := s.InsertBook(ctx, sampleBook("latest-hash"))
+	book, err := s.InsertBook(ctx, sampleBook("furthest-hash"))
 	if err != nil {
 		t.Fatalf("InsertBook: %v", err)
 	}
 
-	if _, err := s.GetLatestPosition(ctx, book.ID); err != ErrNotFound {
+	if _, err := s.GetFurthestPosition(ctx, book.ID); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound with no positions, got %v", err)
 	}
 
+	// device-a read furthest (page 90).
 	if _, err := s.UpsertPosition(ctx, ReadingPosition{
-		BookID: book.ID, DeviceID: "device-a", CFI: "/2", Progress: 0.2,
+		BookID: book.ID, DeviceID: "device-a", CFI: "/90", Progress: 0.9,
 	}); err != nil {
 		t.Fatalf("upsert a: %v", err)
 	}
-	// device-b updates later, so it should be the latest.
+	// device-b wrote LATER but at the very start (e.g. a still-open reader that
+	// flushed a pre-pagination progress=0 on navigation). It must NOT win.
 	if _, err := s.UpsertPosition(ctx, ReadingPosition{
-		BookID: book.ID, DeviceID: "device-b", CFI: "/9", Progress: 0.9,
+		BookID: book.ID, DeviceID: "device-b", CFI: "/2", Progress: 0,
 	}); err != nil {
 		t.Fatalf("upsert b: %v", err)
 	}
 
-	latest, err := s.GetLatestPosition(ctx, book.ID)
+	pos, err := s.GetFurthestPosition(ctx, book.ID)
 	if err != nil {
-		t.Fatalf("GetLatestPosition: %v", err)
+		t.Fatalf("GetFurthestPosition: %v", err)
 	}
-	if latest.DeviceID != "device-b" {
-		t.Fatalf("expected latest device-b, got %q", latest.DeviceID)
+	if pos.DeviceID != "device-a" || pos.Progress != 0.9 {
+		t.Fatalf("furthest = %q @ %v, want device-a @ 0.9 (recency must not override progress)",
+			pos.DeviceID, pos.Progress)
 	}
 }
 

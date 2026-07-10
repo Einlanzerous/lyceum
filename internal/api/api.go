@@ -25,7 +25,7 @@ type Store interface {
 	ListBooks(ctx context.Context) ([]store.Book, error)
 	GetBook(ctx context.Context, id int64) (store.Book, error)
 	GetBookByHash(ctx context.Context, hash string) (store.Book, error)
-	GetLatestPosition(ctx context.Context, bookID int64) (store.ReadingPosition, error)
+	GetFurthestPosition(ctx context.Context, bookID int64) (store.ReadingPosition, error)
 	GetPosition(ctx context.Context, bookID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
@@ -159,7 +159,7 @@ func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 		idx := b.SeriesIndex
 		entry.SeriesIndex = &idx
 	}
-	if pos, err := a.store.GetLatestPosition(ctx, b.ID); err == nil {
+	if pos, err := a.store.GetFurthestPosition(ctx, b.ID); err == nil {
 		p := pos.Progress
 		entry.Progress = &p
 		entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)

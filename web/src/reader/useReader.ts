@@ -152,10 +152,16 @@ export function useReader(
     const pct = loc.start.percentage
     if (typeof pct === 'number' && pct > 0) progress.value = clampProgress(pct)
     cfi.value = loc.start.cfi
-    lastPosition = { cfi: loc.start.cfi, progress: progress.value }
     chapter.value = chapterFor(loc.start.href)
     recomputePage()
-    options.onRelocate?.(lastPosition)
+    // Guard against persisting a spurious progress=0 position: epub.js reports
+    // percentage 0 before it finishes paginating, which would otherwise save a
+    // "start of book" position that clobbers real progress. Only persist once we
+    // have real progress, or when genuinely at the very start of the book.
+    if (progress.value > 0 || loc.atStart) {
+      lastPosition = { cfi: loc.start.cfi, progress: progress.value }
+      options.onRelocate?.(lastPosition)
+    }
   }
 
   function onKeyup(event: KeyboardEvent): void {

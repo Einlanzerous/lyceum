@@ -71,7 +71,7 @@ func TestReplaceOnRestamp(t *testing.T) {
 	}
 
 	// Reading position preserved (same book id).
-	pos, err := s.GetLatestPosition(ctx, b1.ID)
+	pos, err := s.GetFurthestPosition(ctx, b1.ID)
 	if err != nil {
 		t.Fatalf("position lost after replace: %v", err)
 	}
