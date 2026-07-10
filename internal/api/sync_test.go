@@ -121,40 +121,44 @@ func TestSyncScopedGetFallsBackToLatest(t *testing.T) {
 	}
 }
 
-// TestSyncLastWriteWinsAcrossDevices verifies the unscoped GET returns whichever
-// device wrote most recently by updated_at.
-func TestSyncLastWriteWinsAcrossDevices(t *testing.T) {
+// TestSyncFurthestWinsAcrossDevices verifies resume tracks the furthest read
+// across devices, not the most recent write: a newer write at an earlier spot
+// (e.g. a still-open reader flushing progress=0 on navigation) must not drag the
+// resume point backward, and any device resumes at the furthest point.
+func TestSyncFurthestWinsAcrossDevices(t *testing.T) {
 	s := testStore(t)
-	book := seedBook(t, s, "lww-hash", "Meditations", "Marcus Aurelius", nil)
+	book := seedBook(t, s, "furthest-hash", "Meditations", "Marcus Aurelius", nil)
 	srv := newServer(t, s)
 
 	base := time.Now().UTC().Truncate(time.Millisecond)
 
-	// Device A writes first (older), device B writes later (newer).
+	// Device A read furthest (0.8), earlier.
 	if resp := putSync(t, srv.URL, map[string]any{
 		"book_id": book.ID, "device_id": "device-a",
-		"cfi": "epubcfi(/6/2!/4)", "progress": 0.1,
+		"cfi": "epubcfi(/6/8!/12)", "progress": 0.8,
 		"updated_at": base.Add(-time.Hour),
 	}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT a status = %d", resp.StatusCode)
 	}
+	// Device B wrote LATER but at the start (0.1) — must not win.
 	if resp := putSync(t, srv.URL, map[string]any{
 		"book_id": book.ID, "device_id": "device-b",
-		"cfi": "epubcfi(/6/8!/12)", "progress": 0.8,
+		"cfi": "epubcfi(/6/2!/4)", "progress": 0.1,
 		"updated_at": base,
 	}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT b status = %d", resp.StatusCode)
 	}
 
+	// Unscoped GET resumes at the furthest read, not the latest write.
 	latest := decodePosition(t, getSync(t, srv.URL, book.ID, ""))
-	if latest.DeviceID != "device-b" || latest.Progress != 0.8 {
-		t.Fatalf("latest = %+v, want device-b progress 0.8", latest)
+	if latest.DeviceID != "device-a" || latest.Progress != 0.8 {
+		t.Fatalf("unscoped GET = %+v, want device-a progress 0.8 (furthest)", latest)
 	}
 
-	// Each device's own position is still independently retrievable.
-	a := decodePosition(t, getSync(t, srv.URL, book.ID, "device-a"))
-	if a.Progress != 0.1 {
-		t.Fatalf("device-a progress = %v, want 0.1", a.Progress)
+	// Device B, asking for its own resume, still gets the furthest read from A.
+	b := decodePosition(t, getSync(t, srv.URL, book.ID, "device-b"))
+	if b.DeviceID != "device-a" || b.Progress != 0.8 {
+		t.Fatalf("device-b GET = %+v, want device-a progress 0.8 (furthest wins)", b)
 	}
 }
 

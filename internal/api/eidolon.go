@@ -32,7 +32,7 @@ func (a *API) handleEidolonLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pos, err := a.store.GetLatestPosition(r.Context(), b.ID)
+	pos, err := a.store.GetFurthestPosition(r.Context(), b.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "no reading position", http.StatusNotFound)
 		return

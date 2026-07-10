@@ -258,18 +258,23 @@ func (s *Store) GetPosition(ctx context.Context, bookID int64, deviceID string) 
 	return p, nil
 }
 
-// GetLatestPosition returns the most recently updated reading position for a
-// book across all devices, or ErrNotFound when the book has no positions.
-func (s *Store) GetLatestPosition(ctx context.Context, bookID int64) (ReadingPosition, error) {
+// GetFurthestPosition returns the reading position with the greatest progress
+// for a book across all devices (ties broken by recency), or ErrNotFound when
+// the book has no positions. This is the cross-device resume/display anchor:
+// ordering by progress rather than write time means a device that saved an
+// earlier spot more recently — e.g. a still-open reader that flushed a
+// pre-pagination progress=0 on navigation — can't clobber the furthest read on
+// another device (LYCM sync fix).
+func (s *Store) GetFurthestPosition(ctx context.Context, bookID int64) (ReadingPosition, error) {
 	p, err := scanPosition(s.pool.QueryRow(ctx,
 		`SELECT `+positionColumns+`
 		 FROM reading_positions WHERE book_id = $1
-		 ORDER BY updated_at DESC, id DESC LIMIT 1`, bookID))
+		 ORDER BY COALESCE(progress, 0) DESC, updated_at DESC, id DESC LIMIT 1`, bookID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReadingPosition{}, ErrNotFound
 	}
 	if err != nil {
-		return ReadingPosition{}, fmt.Errorf("store: get latest position: %w", err)
+		return ReadingPosition{}, fmt.Errorf("store: get furthest position: %w", err)
 	}
 	return p, nil
 }

@@ -98,15 +98,12 @@ func (a *API) handleSyncPut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toPositionJSON(saved))
 }
 
-// handleSyncGet returns the reading position to resume from for a book.
-//
-// With a device_id it returns that device's own position if it has one;
-// otherwise it falls back to the latest position across all devices, so a
-// device that has never synced this book still resumes where another device
-// left off (the cross-device round-trip). Without a device_id it returns the
-// latest position across all devices directly. Conflict resolution is
-// last-write-wins by updated_at. A book with no stored position at all yields
-// 404.
+// handleSyncGet returns the reading position to resume from for a book: the
+// furthest position across all devices. Reading further on any device advances
+// the resume point everywhere, and a later write at an earlier spot (a stale or
+// pre-pagination progress=0 flush) can't drag it backward. device_id is accepted
+// for symmetry with PUT but does not scope the resume. A book with no stored
+// position at all yields 404.
 func (a *API) handleSyncGet(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -116,17 +113,11 @@ func (a *API) handleSyncGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var pos store.ReadingPosition
-	if deviceID := q.Get("device_id"); deviceID != "" {
-		pos, err = a.store.GetPosition(r.Context(), bookID, deviceID)
-		if errors.Is(err, store.ErrNotFound) {
-			// This device hasn't synced the book; resume from whatever
-			// device read it most recently.
-			pos, err = a.store.GetLatestPosition(r.Context(), bookID)
-		}
-	} else {
-		pos, err = a.store.GetLatestPosition(r.Context(), bookID)
-	}
+	// Resume from the furthest position across all devices, not this device's own
+	// bookmark: reading further on any device advances the resume point
+	// everywhere, and a stale/zero write can't drag it backward (LYCM sync fix).
+	// device_id is still accepted (clients send it) but no longer scopes resume.
+	pos, err := a.store.GetFurthestPosition(r.Context(), bookID)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "no reading position", http.StatusNotFound)
 		return
