@@ -45,6 +45,17 @@ type Store interface {
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
 	LinkBookToInventory(ctx context.Context, isbn string, bookID int64, title, author string) (store.Inventory, error)
 	ListInventory(ctx context.Context) ([]store.Inventory, error)
+	GetInventoryByISBN(ctx context.Context, isbn string) (store.Inventory, error)
+
+	// ISBN ingest batch review (LYCM-603): scans -> candidates -> confirm.
+	CreateBatch(ctx context.Context, sourceDevice string) (store.Batch, error)
+	GetBatch(ctx context.Context, id int64) (store.Batch, error)
+	ListBatches(ctx context.Context) ([]store.Batch, error)
+	SetBatchStatus(ctx context.Context, id int64, status string) (store.Batch, error)
+	AddCandidate(ctx context.Context, c store.Candidate) (store.Candidate, error)
+	GetCandidate(ctx context.Context, id int64) (store.Candidate, error)
+	ListCandidates(ctx context.Context, batchID int64) ([]store.Candidate, error)
+	UpdateCandidate(ctx context.Context, c store.Candidate) (store.Candidate, error)
 }
 
 // API bundles the dependencies the handlers need.
@@ -55,6 +66,7 @@ type API struct {
 	delivery *deliveryConfig  // "Send to Kindle" dispatcher + policy (nil when unconfigured)
 	acquirer Acquirer         // ISBN -> DRM-free copy requester (logging no-op by default)
 	covers   coverart.Fetcher // ISBN -> canonical cover art (nil = use embedded covers only)
+	resolver Resolver         // ISBN/title -> candidate editions (no-op no-match by default)
 }
 
 // Option configures an API at construction time.
@@ -79,7 +91,7 @@ func WithCoverFetcher(f coverart.Fetcher) Option {
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
 func New(s Store, dataDir string, opts ...Option) *API {
-	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}}
+	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{}}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -98,6 +110,19 @@ func (a *API) Handler() *http.ServeMux {
 	// ecosystem hooks.
 	mux.HandleFunc("POST /inventory", a.handleInventoryCreate)
 	mux.HandleFunc("GET /inventory", a.handleInventoryList)
+
+	// ISBN ingest batch review (LYCM-603): upload scans, verify matches on the
+	// desktop, confirm into inventory. Open like /inventory — the personal
+	// read/write core, not the scoped ecosystem hooks.
+	mux.HandleFunc("POST /ingest/batches", a.handleBatchCreate)
+	mux.HandleFunc("GET /ingest/batches", a.handleBatchList)
+	mux.HandleFunc("GET /ingest/batches/{id}", a.handleBatchGet)
+	mux.HandleFunc("POST /ingest/batches/{id}/candidates", a.handleBatchAddCandidate)
+	mux.HandleFunc("POST /ingest/batches/{id}/confirm-ready", a.handleBatchConfirmReady)
+	mux.HandleFunc("POST /ingest/candidates/{id}/pick", a.handleCandidatePick)
+	mux.HandleFunc("POST /ingest/candidates/{id}/confirm", a.handleCandidateConfirm)
+	mux.HandleFunc("POST /ingest/candidates/{id}/skip", a.handleCandidateSkip)
+	mux.HandleFunc("GET /ingest/search", a.handleIngestSearch)
 
 	mux.HandleFunc("PUT /sync", a.handleSyncPut)
 	mux.HandleFunc("GET /sync", a.handleSyncGet)

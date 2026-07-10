@@ -20,6 +20,7 @@ import (
 	"github.com/magos/lyceum/internal/api"
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/delivery"
+	"github.com/magos/lyceum/internal/edition"
 	"github.com/magos/lyceum/internal/store"
 	"github.com/magos/lyceum/web"
 )
@@ -49,6 +50,12 @@ type config struct {
 	coverFetch   bool   // LYCEUM_COVER_FETCH — enable external cover fetching (default true)
 	coverBaseURL string // LYCEUM_COVER_BASE_URL — override the Open Library base (testing/self-host)
 
+	// ISBN ingest (LYCM-603): resolve scanned ISBNs / titles to candidate
+	// editions during batch review. Metadata-only (Open Library); distinct from
+	// the acquisition backend that obtains the actual EPUB.
+	editionResolve bool   // LYCEUM_EDITION_RESOLVE — enable edition matching (default true)
+	editionBaseURL string // LYCEUM_EDITION_BASE_URL — override the Open Library search base (testing/self-host)
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -69,6 +76,9 @@ func loadConfig() config {
 
 		coverFetch:   envBool("LYCEUM_COVER_FETCH", true),
 		coverBaseURL: os.Getenv("LYCEUM_COVER_BASE_URL"),
+
+		editionResolve: envBool("LYCEUM_EDITION_RESOLVE", true),
+		editionBaseURL: os.Getenv("LYCEUM_EDITION_BASE_URL"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -143,6 +153,11 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 		log.Printf("cover fetch enabled at ingest (source=%s)", coverSource(cfg))
 	}
 
+	if cfg.editionResolve {
+		opts = append(opts, api.WithResolver(newEditionResolver(cfg)))
+		log.Printf("edition resolve enabled for ISBN ingest (source=%s)", editionSource(cfg))
+	}
+
 	if cfg.smtp.Host == "" || cfg.smtp.From == "" {
 		if cfg.kindleAutoSend || cfg.kindleAddr != "" {
 			log.Printf("config: Kindle delivery requested but LYCEUM_SMTP_HOST/FROM unset; send-to-kindle disabled")
@@ -178,6 +193,25 @@ func coverSource(cfg config) string {
 		return cfg.coverBaseURL
 	}
 	return "applebooks"
+}
+
+// newEditionResolver builds the ISBN/title edition resolver for batch ingest
+// (LYCM-603). Open Library is the source: keyless and matches by ISBN or title.
+// An optional base-URL override (LYCEUM_EDITION_BASE_URL) points it at a mirror
+// or test server.
+func newEditionResolver(cfg config) api.Resolver {
+	r := edition.NewOpenLibrary()
+	if cfg.editionBaseURL != "" {
+		r.SearchBaseURL = cfg.editionBaseURL
+	}
+	return r
+}
+
+func editionSource(cfg config) string {
+	if cfg.editionBaseURL != "" {
+		return cfg.editionBaseURL
+	}
+	return "openlibrary"
 }
 
 func main() {
