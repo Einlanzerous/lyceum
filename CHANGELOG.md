@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Einlanzerous/lyceum/compare/v1.2.0...v1.2.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **sync:** resume from the furthest position across devices, not the latest write ([#24](https://github.com/Einlanzerous/lyceum/issues/24)) ([c4438d4](https://github.com/Einlanzerous/lyceum/commit/c4438d4e051dcb0f70dd40371d7e27f49ea6076f))
+
 ## [1.2.0](https://github.com/Einlanzerous/lyceum/compare/v1.1.0...v1.2.0) (2026-07-09)
 
 
