@@ -204,9 +204,31 @@ func (a *API) linkInventory(ctx context.Context, book store.Book, md *epub.Metad
 	if !ok {
 		return
 	}
-	if _, err := a.store.LinkBookToInventory(ctx, code, book.ID, book.Title, book.Author); err != nil {
+	// Resolve the work so an ingested ebook joins the row a print scan created,
+	// even though their ISBNs differ (LYCM-35). Best effort: no resolver / no
+	// match falls back to exact-ISBN linking.
+	workID := a.resolveWorkID(ctx, code)
+	if _, err := a.store.LinkBookToInventory(ctx, code, workID, book.ID, book.Title, book.Author); err != nil {
 		log.Printf("api: link inventory isbn=%s book=%d: %v", code, book.ID, err)
 	}
+}
+
+// resolveWorkID best-effort resolves an ISBN to its resolver work key, so print
+// and ebook editions of one work group onto a single inventory entry. It returns
+// "" when the resolver is the no-op default, finds nothing, or errors — grouping
+// then falls back to exact-ISBN matching.
+func (a *API) resolveWorkID(ctx context.Context, code string) string {
+	eds, err := a.resolver.ResolveISBN(ctx, code)
+	if err != nil {
+		log.Printf("api: resolve work id for isbn=%s: %v", code, err)
+		return ""
+	}
+	for _, e := range eds {
+		if e.WorkID != "" {
+			return e.WorkID
+		}
+	}
+	return ""
 }
 
 // ingestTitle prefers the EPUB's declared title, falling back to the source

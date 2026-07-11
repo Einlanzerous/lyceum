@@ -90,6 +90,7 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 		ISBN:   code,
 		Title:  req.Title,
 		Author: req.Author,
+		WorkID: a.resolveWorkID(ctx, code), // group print/ebook editions (LYCM-35)
 	})
 	if err != nil {
 		serverError(w, "upsert inventory", err)

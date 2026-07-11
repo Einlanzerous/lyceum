@@ -392,6 +392,7 @@ func (a *API) confirmCandidate(ctx context.Context, c store.Candidate, series st
 		ISBN:   c.ISBN,
 		Title:  chosen.Title,
 		Author: chosen.Author,
+		WorkID: chosen.WorkID, // resolved at batch time; groups print/ebook editions (LYCM-35)
 	})
 	if err != nil {
 		return store.Inventory{}, store.Candidate{}, err

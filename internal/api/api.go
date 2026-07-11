@@ -43,9 +43,10 @@ type Store interface {
 	// Inventory (LYCM-601): ownership/acquisition state keyed by ISBN.
 	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
-	LinkBookToInventory(ctx context.Context, isbn string, bookID int64, title, author string) (store.Inventory, error)
+	LinkBookToInventory(ctx context.Context, isbn, workID string, bookID int64, title, author string) (store.Inventory, error)
 	ListInventory(ctx context.Context) ([]store.Inventory, error)
 	GetInventoryByISBN(ctx context.Context, isbn string) (store.Inventory, error)
+	GetInventoryByAnyISBN(ctx context.Context, isbn string) (store.Inventory, error)
 
 	// ISBN ingest batch review (LYCM-603): scans -> candidates -> confirm.
 	CreateBatch(ctx context.Context, sourceDevice string) (store.Batch, error)
