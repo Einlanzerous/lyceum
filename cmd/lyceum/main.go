@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/magos/lyceum/internal/acquire"
 	"github.com/magos/lyceum/internal/api"
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/delivery"
@@ -56,6 +57,12 @@ type config struct {
 	editionResolve bool   // LYCEUM_EDITION_RESOLVE — enable edition matching (default true)
 	editionBaseURL string // LYCEUM_EDITION_BASE_URL — override the Open Library search base (testing/self-host)
 
+	// Acquisition (LYCM-35): the live Bindery backend that turns a `wanted` ISBN
+	// into a real grab. Disabled (falls back to a logging no-op) unless both the
+	// base URL and API key are set.
+	binderyBaseURL string // LYCEUM_BINDERY_BASE_URL — e.g. http://localhost:8787
+	binderyAPIKey  string // LYCEUM_BINDERY_API_KEY — Bindery Settings → Security
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -79,6 +86,9 @@ func loadConfig() config {
 
 		editionResolve: envBool("LYCEUM_EDITION_RESOLVE", true),
 		editionBaseURL: os.Getenv("LYCEUM_EDITION_BASE_URL"),
+
+		binderyBaseURL: os.Getenv("LYCEUM_BINDERY_BASE_URL"),
+		binderyAPIKey:  os.Getenv("LYCEUM_BINDERY_API_KEY"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -156,6 +166,13 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	if cfg.editionResolve {
 		opts = append(opts, api.WithResolver(newEditionResolver(cfg)))
 		log.Printf("edition resolve enabled for ISBN ingest (source=%s)", editionSource(cfg))
+	}
+
+	if cfg.binderyBaseURL != "" && cfg.binderyAPIKey != "" {
+		opts = append(opts, api.WithAcquirer(acquire.NewBindery(cfg.binderyBaseURL, cfg.binderyAPIKey)))
+		log.Printf("bindery acquirer enabled (base=%s)", cfg.binderyBaseURL)
+	} else if cfg.binderyBaseURL != "" || cfg.binderyAPIKey != "" {
+		log.Printf("config: Bindery acquirer needs both LYCEUM_BINDERY_BASE_URL and LYCEUM_BINDERY_API_KEY; using no-op acquirer")
 	}
 
 	if cfg.smtp.Host == "" || cfg.smtp.From == "" {
