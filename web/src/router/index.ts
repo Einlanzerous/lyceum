@@ -18,6 +18,11 @@ const routes: RouteRecordRaw[] = [
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
   },
+  {
+    path: '/ingest',
+    name: 'ingest',
+    component: () => import('@/views/IngestVerifyView.vue'),
+  },
 ]
 
 export const router = createRouter({

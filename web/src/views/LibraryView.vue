@@ -167,6 +167,13 @@ function onSetFinished(id: number, finished: boolean): void {
       </div>
 
       <div class="lib__actions">
+        <RouterLink
+          to="/ingest"
+          class="lib__ingest"
+          aria-label="Verify scanned books"
+          title="Verify scanned books (ISBN ingest)"
+          >⧉ Ingest</RouterLink
+        >
         <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">{{
           initial
         }}</RouterLink>
@@ -378,6 +385,22 @@ function onSetFinished(id: number, finished: boolean): void {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.lib__ingest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  font: 700 12.5px var(--font-ui);
+  text-decoration: none;
+}
+.lib__ingest:hover {
+  color: var(--text);
+  border-color: var(--brass);
 }
 .lib__avatar {
   width: 40px;
