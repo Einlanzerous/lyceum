@@ -26,6 +26,7 @@ func (f fakeResolver) SearchTitle(_ context.Context, q string) ([]store.Edition,
 
 const (
 	isbnPiranesi = "9781635575637" // resolves to one edition -> ready
+	workPiranesi = "/works/OL21067624W"
 	isbnDune     = "9780441172719" // resolves to two editions -> review
 	isbnDune2    = "9781473233966" // the second Dune edition
 	isbnNoMatch  = "9780306406157" // valid checksum, resolver returns nothing
@@ -34,7 +35,7 @@ const (
 func testResolver() fakeResolver {
 	return fakeResolver{
 		byISBN: map[string][]store.Edition{
-			isbnPiranesi: {{ID: isbnPiranesi, ISBN13: isbnPiranesi, Title: "Piranesi", Author: "Susanna Clarke", CoverURL: "https://c/p.jpg"}},
+			isbnPiranesi: {{ID: isbnPiranesi, ISBN13: isbnPiranesi, WorkID: workPiranesi, Title: "Piranesi", Author: "Susanna Clarke", CoverURL: "https://c/p.jpg"}},
 			isbnDune: {
 				{ID: isbnDune, ISBN13: isbnDune, Title: "Dune", Author: "Frank Herbert", Publisher: "Ace"},
 				{ID: isbnDune2, ISBN13: isbnDune2, Title: "Dune", Author: "Frank Herbert", Publisher: "Gollancz"},
@@ -178,9 +179,12 @@ func TestCandidateConfirm(t *testing.T) {
 	if len(acq.wants) != 1 || acq.wants[0] != isbnPiranesi {
 		t.Fatalf("acquirer wants = %v", acq.wants)
 	}
-	// The ownership row is persisted.
+	// The ownership row is persisted, carrying the chosen edition's work key so a
+	// later ebook ingest of the same work reconciles onto it (LYCM-35).
 	if inv, err := s.GetInventoryByISBN(context.Background(), isbnPiranesi); err != nil || inv.State != store.StateWanted {
 		t.Fatalf("stored inventory = %+v err=%v", inv, err)
+	} else if inv.WorkID != workPiranesi {
+		t.Fatalf("stored work_id = %q, want %q", inv.WorkID, workPiranesi)
 	}
 }
 
@@ -219,7 +223,7 @@ func TestBatchDedupeAgainstLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed book: %v", err)
 	}
-	if _, err := s.LinkBookToInventory(ctx, isbnPiranesi, book.ID, "Piranesi", "Susanna Clarke"); err != nil {
+	if _, err := s.LinkBookToInventory(ctx, isbnPiranesi, "", book.ID, "Piranesi", "Susanna Clarke"); err != nil {
 		t.Fatalf("seed inventory link: %v", err)
 	}
 

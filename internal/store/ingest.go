@@ -46,7 +46,12 @@ const (
 // translations) without a second lookup. ID is stable within a candidate's set
 // (the edition's ISBN-13 when known, else the resolver's own key).
 type Edition struct {
-	ID        string `json:"id"`
+	ID string `json:"id"`
+	// WorkID is the resolver's work key (OpenLibrary /works/OL…W) shared by every
+	// edition of the same title. It groups a print scan and an ebook ingest onto
+	// one inventory row even when their ISBNs differ (LYCM-35). Empty when the
+	// resolver did not supply one.
+	WorkID    string `json:"work_id,omitempty"`
 	ISBN13    string `json:"isbn13,omitempty"`
 	Title     string `json:"title"`
 	Author    string `json:"author,omitempty"`

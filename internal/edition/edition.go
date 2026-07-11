@@ -156,6 +156,7 @@ func (o *OpenLibrary) toEdition(d searchDoc, wantISBN string) store.Edition {
 
 	e := store.Edition{
 		ID:     id,
+		WorkID: d.Key, // the OpenLibrary work key groups editions of one title
 		ISBN13: code,
 		Title:  strings.TrimSpace(d.Title),
 	}

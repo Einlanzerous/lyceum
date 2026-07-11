@@ -37,9 +37,10 @@ func ValidState(s string) bool {
 // no BookID until a digital copy is acquired and ingested. See migration 0003.
 type Inventory struct {
 	ID        int64
-	ISBN      string
+	ISBN      string // the primary/first-seen ISBN-13; see inventory_isbns for the full set
 	Title     string
 	Author    string
+	WorkID    string // OpenLibrary work key grouping print/ebook editions (LYCM-35); "" if unknown
 	State     string
 	BookID    *int64 // the ingested EPUB, once one is linked
 	CreatedAt time.Time
@@ -47,11 +48,17 @@ type Inventory struct {
 }
 
 const inventoryColumns = `id, isbn, COALESCE(title, ''), COALESCE(author, ''),
-	acquisition_state, book_id, created_at, updated_at`
+	COALESCE(work_id, ''), acquisition_state, book_id, created_at, updated_at`
+
+// inventoryColumnsQ is inventoryColumns table-qualified, for queries that JOIN
+// inventory_isbns (whose created_at would otherwise be ambiguous).
+const inventoryColumnsQ = `inventory.id, inventory.isbn, COALESCE(inventory.title, ''),
+	COALESCE(inventory.author, ''), COALESCE(inventory.work_id, ''),
+	inventory.acquisition_state, inventory.book_id, inventory.created_at, inventory.updated_at`
 
 func scanInventory(row pgx.Row) (Inventory, error) {
 	var inv Inventory
-	err := row.Scan(&inv.ID, &inv.ISBN, &inv.Title, &inv.Author,
+	err := row.Scan(&inv.ID, &inv.ISBN, &inv.Title, &inv.Author, &inv.WorkID,
 		&inv.State, &inv.BookID, &inv.CreatedAt, &inv.UpdatedAt)
 	return inv, err
 }
@@ -62,17 +69,30 @@ func scanInventory(row pgx.Row) (Inventory, error) {
 // acquisition state (so re-scanning an already-ingested title stays ingested).
 // The stored row is returned.
 func (s *Store) UpsertInventory(ctx context.Context, inv Inventory) (Inventory, error) {
-	saved, err := scanInventory(s.pool.QueryRow(ctx,
-		`INSERT INTO inventory (isbn, title, author, acquisition_state)
-		 VALUES ($1, $2, $3, $4)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: upsert inventory: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	saved, err := scanInventory(tx.QueryRow(ctx,
+		`INSERT INTO inventory (isbn, title, author, work_id, acquisition_state)
+		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (isbn) DO UPDATE
 		   SET title = COALESCE(NULLIF(inventory.title, ''), EXCLUDED.title),
 		       author = COALESCE(NULLIF(inventory.author, ''), EXCLUDED.author),
+		       work_id = COALESCE(inventory.work_id, EXCLUDED.work_id),
 		       updated_at = now()
 		 RETURNING `+inventoryColumns,
-		inv.ISBN, nullString(inv.Title), nullString(inv.Author), StateOwned))
+		inv.ISBN, nullString(inv.Title), nullString(inv.Author), nullString(inv.WorkID), StateOwned))
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: upsert inventory: %w", err)
+	}
+	if err := registerISBN(ctx, tx, inv.ISBN, saved.ID); err != nil {
+		return Inventory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Inventory{}, fmt.Errorf("store: upsert inventory: commit: %w", err)
 	}
 	return saved, nil
 }
@@ -94,30 +114,100 @@ func (s *Store) SetInventoryState(ctx context.Context, isbn, state string) (Inve
 	return inv, nil
 }
 
-// LinkBookToInventory records that bookID is the ingested EPUB for isbn: it sets
-// book_id and flips the state to ingested, creating the inventory row if the
-// ISBN was not previously known (a direct upload or a Bindery grab that no scan
-// preceded). An existing non-empty title/author is preserved. The stored row is
-// returned.
-func (s *Store) LinkBookToInventory(ctx context.Context, isbn string, bookID int64, title, author string) (Inventory, error) {
-	inv, err := scanInventory(s.pool.QueryRow(ctx,
-		`INSERT INTO inventory (isbn, title, author, acquisition_state, book_id)
-		 VALUES ($1, $2, $3, $4, $5)
-		 ON CONFLICT (isbn) DO UPDATE
-		   SET book_id = EXCLUDED.book_id,
-		       acquisition_state = $4,
-		       title = COALESCE(NULLIF(inventory.title, ''), EXCLUDED.title),
-		       author = COALESCE(NULLIF(inventory.author, ''), EXCLUDED.author),
-		       updated_at = now()
-		 RETURNING `+inventoryColumns,
-		isbn, nullString(title), nullString(author), StateIngested, bookID))
+// LinkBookToInventory records that bookID is the ingested EPUB for code: it sets
+// book_id and flips the state to ingested. It reconciles print↔ebook editions
+// (LYCM-35): the book joins the entry that already knows this ISBN, else a
+// sibling edition of the same work (workID), else a fresh row is created (a
+// direct upload or a Bindery grab that no scan preceded). code is always
+// registered as a known ISBN of the resulting row, so a later lookup by the
+// ebook number finds the same entry a print scan created. An existing non-empty
+// title/author is preserved. The stored row is returned.
+func (s *Store) LinkBookToInventory(ctx context.Context, code, workID string, bookID int64, title, author string) (Inventory, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: link book to inventory: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	targetID, found, err := findInventoryTarget(ctx, tx, code, workID)
+	if err != nil {
+		return Inventory{}, err
+	}
+
+	var inv Inventory
+	if found {
+		inv, err = scanInventory(tx.QueryRow(ctx,
+			`UPDATE inventory SET
+			   book_id = $2,
+			   acquisition_state = $3,
+			   title = COALESCE(NULLIF(title, ''), $4),
+			   author = COALESCE(NULLIF(author, ''), $5),
+			   work_id = COALESCE(work_id, $6),
+			   updated_at = now()
+			 WHERE id = $1
+			 RETURNING `+inventoryColumns,
+			targetID, bookID, StateIngested, nullString(title), nullString(author), nullString(workID)))
+	} else {
+		inv, err = scanInventory(tx.QueryRow(ctx,
+			`INSERT INTO inventory (isbn, title, author, work_id, acquisition_state, book_id)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 RETURNING `+inventoryColumns,
+			code, nullString(title), nullString(author), nullString(workID), StateIngested, bookID))
+	}
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: link book to inventory: %w", err)
+	}
+	if err := registerISBN(ctx, tx, code, inv.ID); err != nil {
+		return Inventory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Inventory{}, fmt.Errorf("store: link book to inventory: commit: %w", err)
 	}
 	return inv, nil
 }
 
-// GetInventoryByISBN returns the entry for isbn, or ErrNotFound.
+// findInventoryTarget picks the inventory row an ingest of code (work workID)
+// should join: first an entry that already maps this exact ISBN, then a sibling
+// edition of the same work. found is false when neither exists (a fresh title).
+func findInventoryTarget(ctx context.Context, tx pgx.Tx, code, workID string) (int64, bool, error) {
+	var id int64
+	switch err := tx.QueryRow(ctx,
+		`SELECT inventory_id FROM inventory_isbns WHERE isbn13 = $1`, code).Scan(&id); {
+	case err == nil:
+		return id, true, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return 0, false, fmt.Errorf("store: find inventory by isbn: %w", err)
+	}
+
+	if workID != "" {
+		switch err := tx.QueryRow(ctx,
+			`SELECT id FROM inventory WHERE work_id = $1 ORDER BY id ASC LIMIT 1`, workID).Scan(&id); {
+		case err == nil:
+			return id, true, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return 0, false, fmt.Errorf("store: find inventory by work: %w", err)
+		}
+	}
+	return 0, false, nil
+}
+
+// registerISBN records code as a known ISBN of inventoryID. It is idempotent and
+// first-writer-wins: an ISBN already mapped to some entry keeps that mapping.
+func registerISBN(ctx context.Context, tx pgx.Tx, code string, inventoryID int64) error {
+	if code == "" {
+		return nil
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO inventory_isbns (isbn13, inventory_id) VALUES ($1, $2)
+		 ON CONFLICT (isbn13) DO NOTHING`, code, inventoryID); err != nil {
+		return fmt.Errorf("store: register inventory isbn: %w", err)
+	}
+	return nil
+}
+
+// GetInventoryByISBN returns the entry whose primary ISBN is isbn, or
+// ErrNotFound. Use GetInventoryByAnyISBN to also match secondary (e.g. ebook)
+// ISBNs recorded during reconciliation.
 func (s *Store) GetInventoryByISBN(ctx context.Context, isbn string) (Inventory, error) {
 	inv, err := scanInventory(s.pool.QueryRow(ctx,
 		`SELECT `+inventoryColumns+` FROM inventory WHERE isbn = $1`, isbn))
@@ -126,6 +216,22 @@ func (s *Store) GetInventoryByISBN(ctx context.Context, isbn string) (Inventory,
 	}
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: get inventory by isbn: %w", err)
+	}
+	return inv, nil
+}
+
+// GetInventoryByAnyISBN returns the entry that knows code as any of its ISBNs
+// (primary or a reconciled print/ebook alternate), or ErrNotFound.
+func (s *Store) GetInventoryByAnyISBN(ctx context.Context, code string) (Inventory, error) {
+	inv, err := scanInventory(s.pool.QueryRow(ctx,
+		`SELECT `+inventoryColumnsQ+` FROM inventory
+		 JOIN inventory_isbns ii ON ii.inventory_id = inventory.id
+		 WHERE ii.isbn13 = $1`, code))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Inventory{}, ErrNotFound
+	}
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: get inventory by any isbn: %w", err)
 	}
 	return inv, nil
 }
