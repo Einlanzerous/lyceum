@@ -530,19 +530,22 @@ function onSetFinished(id: number, finished: boolean): void {
 }
 
 /* ── Grid ── */
+/* minmax(0, 1fr), not bare 1fr: 1fr's implicit auto minimum lets one card's
+   min-content width (a long nowrap title) widen its whole track, blowing up
+   every cover in that column (LYCM-80). */
 .lib__grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 26px 22px;
 }
 @media (max-width: 1200px) {
   .lib__grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 760px) {
   .lib__grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -692,17 +695,17 @@ function onSetFinished(id: number, finished: boolean): void {
 /* Loading skeletons */
 .lib__skeletons {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 22px;
 }
 @media (max-width: 1200px) {
   .lib__skeletons {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 760px) {
   .lib__skeletons {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 .lib__skeleton {
