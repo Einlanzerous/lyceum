@@ -68,6 +68,8 @@ type API struct {
 	acquirer Acquirer         // ISBN -> DRM-free copy requester (logging no-op by default)
 	covers   coverart.Fetcher // ISBN -> canonical cover art (nil = use embedded covers only)
 	resolver Resolver         // ISBN/title -> candidate editions (no-op no-match by default)
+
+	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
 }
 
 // Option configures an API at construction time.
@@ -88,11 +90,21 @@ func WithCoverFetcher(f coverart.Fetcher) Option {
 	return func(a *API) { a.covers = f }
 }
 
+// WithCoverNormalize toggles the ingest-time cover normalization pass (LYCM-65):
+// trimming uniform frames, padding to the shelf aspect, and downscaling the
+// stored cover. It is on by default (see New); pass false to store cover bytes
+// verbatim. Normalization never changes which cover is chosen — only the bytes
+// that get written — and is best-effort, so a cover it can't process is stored
+// unchanged.
+func WithCoverNormalize(enabled bool) Option {
+	return func(a *API) { a.normalizeCovers = enabled }
+}
+
 // New builds an API over the given store. dataDir is retained for symmetry with
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
 func New(s Store, dataDir string, opts ...Option) *API {
-	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{}}
+	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{}, normalizeCovers: true}
 	for _, opt := range opts {
 		opt(a)
 	}

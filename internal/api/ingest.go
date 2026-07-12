@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/magos/lyceum/internal/coverart"
+	"github.com/magos/lyceum/internal/coverimg"
 	"github.com/magos/lyceum/internal/epub"
 	"github.com/magos/lyceum/internal/isbn"
 	"github.com/magos/lyceum/internal/store"
@@ -163,7 +164,25 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 	return updated, ingestReplaced, nil
 }
 
-// coverForIngest returns the cover bytes to store for a freshly-parsed EPUB.
+// coverForIngest returns the cover bytes to store for a freshly-parsed EPUB: it
+// chooses the source cover (chooseCover) and then normalizes it for the shelf
+// (LYCM-65) unless normalization is disabled.
+func (a *API) coverForIngest(ctx context.Context, md *epub.Metadata) []byte {
+	cover := a.chooseCover(ctx, md)
+	if !a.normalizeCovers || len(cover) == 0 {
+		return cover
+	}
+	// Best effort: trim frames, fit the shelf aspect, downscale. On any failure
+	// Normalize returns the original bytes, so ingest never breaks on a bad cover.
+	norm, err := coverimg.Normalize(cover, coverimg.DefaultOptions())
+	if err != nil {
+		log.Printf("api: normalize cover for %q: %v (storing original)", md.Title, err)
+		return cover
+	}
+	return norm
+}
+
+// chooseCover selects the source cover bytes for a freshly-parsed EPUB.
 // It only reaches for external art when the EPUB has NO embedded cover: fetched
 // art fills the gap so the book gets a real cover instead of the generated
 // fallback tile. A book that ships its own cover keeps it — external sources
@@ -172,7 +191,7 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 // Deliberate replacement of a poor embedded cover is the job of the
 // `backfill-covers` tool, not the ingest path. Best effort: a fetch error is
 // logged and never fails the ingest.
-func (a *API) coverForIngest(ctx context.Context, md *epub.Metadata) []byte {
+func (a *API) chooseCover(ctx context.Context, md *epub.Metadata) []byte {
 	if a.covers == nil || len(md.CoverData) > 0 {
 		return md.CoverData
 	}

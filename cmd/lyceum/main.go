@@ -48,8 +48,9 @@ type config struct {
 
 	// Cover art (LYCM-56): at ingest, prefer canonical cover art fetched by ISBN
 	// over the EPUB's embedded cover, which is often poor or a title page.
-	coverFetch   bool   // LYCEUM_COVER_FETCH — enable external cover fetching (default true)
-	coverBaseURL string // LYCEUM_COVER_BASE_URL — override the Open Library base (testing/self-host)
+	coverFetch     bool   // LYCEUM_COVER_FETCH — enable external cover fetching (default true)
+	coverBaseURL   string // LYCEUM_COVER_BASE_URL — override the Open Library base (testing/self-host)
+	coverNormalize bool   // LYCEUM_COVER_NORMALIZE — trim/aspect/downscale stored covers at ingest (default true)
 
 	// ISBN ingest (LYCM-603): resolve scanned ISBNs / titles to candidate
 	// editions during batch review. Metadata-only (Open Library); distinct from
@@ -81,8 +82,9 @@ func loadConfig() config {
 
 		corsOrigins: os.Getenv("LYCEUM_CORS_ORIGINS"),
 
-		coverFetch:   envBool("LYCEUM_COVER_FETCH", true),
-		coverBaseURL: os.Getenv("LYCEUM_COVER_BASE_URL"),
+		coverFetch:     envBool("LYCEUM_COVER_FETCH", true),
+		coverBaseURL:   os.Getenv("LYCEUM_COVER_BASE_URL"),
+		coverNormalize: envBool("LYCEUM_COVER_NORMALIZE", true),
 
 		editionResolve: envBool("LYCEUM_EDITION_RESOLVE", true),
 		editionBaseURL: os.Getenv("LYCEUM_EDITION_BASE_URL"),
@@ -161,6 +163,11 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	if cfg.coverFetch {
 		opts = append(opts, api.WithCoverFetcher(newCoverFetcher(cfg)))
 		log.Printf("cover fetch enabled at ingest (source=%s)", coverSource(cfg))
+	}
+
+	opts = append(opts, api.WithCoverNormalize(cfg.coverNormalize))
+	if !cfg.coverNormalize {
+		log.Printf("config: cover normalization disabled (LYCEUM_COVER_NORMALIZE); storing covers verbatim")
 	}
 
 	if cfg.editionResolve {
