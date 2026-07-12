@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.2](https://github.com/Einlanzerous/lyceum/compare/v1.3.1...v1.3.2) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ingest:** dispatch acquirer.Want in the background so confirm returns immediately (LYCM-79) ([#39](https://github.com/Einlanzerous/lyceum/issues/39)) ([9908a91](https://github.com/Einlanzerous/lyceum/commit/9908a912791bbd3c83c8114079dee47b7c440aab))
+* **ingest:** match source_path case-insensitively so re-cased files update in place (LYCM-68) ([#37](https://github.com/Einlanzerous/lyceum/issues/37)) ([021b705](https://github.com/Einlanzerous/lyceum/commit/021b7059f48e13b561f3843afa2f2025f3f3f7a6))
+* **watch:** surface non-EPUB book landings instead of silently skipping them (LYCM-77) ([#38](https://github.com/Einlanzerous/lyceum/issues/38)) ([d6fa658](https://github.com/Einlanzerous/lyceum/commit/d6fa658cb4f30ab45e3f3057b23934aa29160ec1))
+* **web:** equal grid tracks — minmax(0,1fr) so a long title can't widen a column (LYCM-80) ([#36](https://github.com/Einlanzerous/lyceum/issues/36)) ([1204725](https://github.com/Einlanzerous/lyceum/commit/1204725b5724255324738af92827ff61953959d7))
+
 ## [1.3.1](https://github.com/Einlanzerous/lyceum/compare/v1.3.0...v1.3.1) (2026-07-12)
 
 
