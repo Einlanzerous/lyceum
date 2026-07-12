@@ -13,6 +13,7 @@ import (
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/coverimg"
 	"github.com/magos/lyceum/internal/epub"
+	"github.com/magos/lyceum/internal/ingestqc"
 	"github.com/magos/lyceum/internal/isbn"
 	"github.com/magos/lyceum/internal/store"
 )
@@ -92,7 +93,12 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		}
 	}
 
-	filePath, coverPath, err := a.store.SaveBlobs(hash, data, a.coverForIngest(ctx, md))
+	// Choose the source cover once (chooseCover may hit the network), run ingest
+	// QC on it, then normalize the same bytes for storage.
+	chosen := a.chooseCover(ctx, md)
+	reviewState, reviewFlags := a.reviewOutcome(md, chosen)
+
+	filePath, coverPath, err := a.store.SaveBlobs(hash, data, a.normalizeCover(md.Title, chosen))
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("save blobs: %w", err)
 	}
@@ -107,9 +113,14 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		SourcePath:  sourcePath,
 		Series:      strings.TrimSpace(md.Series),
 		SeriesIndex: md.SeriesIndex,
+		ReviewState: reviewState,
+		ReviewFlags: reviewFlags,
 	})
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("insert book: %w", err)
+	}
+	if reviewState == store.ReviewPending {
+		log.Printf("ingest: %q held for review (flags=%v)", saved.Title, reviewFlags)
 	}
 
 	// Best effort: stamp the ISBN/ingested state onto inventory. Never fails the
@@ -165,21 +176,43 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 }
 
 // coverForIngest returns the cover bytes to store for a freshly-parsed EPUB: it
-// chooses the source cover (chooseCover) and then normalizes it for the shelf
-// (LYCM-65) unless normalization is disabled.
+// chooses the source cover (chooseCover) and normalizes it for the shelf
+// (LYCM-65). It is used by the re-stamp path (replaceBook); the fresh-insert
+// path calls chooseCover + normalizeCover separately so it can also QC the
+// pre-normalization bytes without fetching the cover twice.
 func (a *API) coverForIngest(ctx context.Context, md *epub.Metadata) []byte {
-	cover := a.chooseCover(ctx, md)
+	return a.normalizeCover(md.Title, a.chooseCover(ctx, md))
+}
+
+// normalizeCover cleans cover bytes for the shelf (LYCM-65) unless normalization
+// is disabled. title is only used for log context. Best effort: on any failure
+// Normalize returns the original bytes, so ingest never breaks on a bad cover.
+func (a *API) normalizeCover(title string, cover []byte) []byte {
 	if !a.normalizeCovers || len(cover) == 0 {
 		return cover
 	}
-	// Best effort: trim frames, fit the shelf aspect, downscale. On any failure
-	// Normalize returns the original bytes, so ingest never breaks on a bad cover.
 	norm, err := coverimg.Normalize(cover, coverimg.DefaultOptions())
 	if err != nil {
-		log.Printf("api: normalize cover for %q: %v (storing original)", md.Title, err)
+		log.Printf("api: normalize cover for %q: %v (storing original)", title, err)
 		return cover
 	}
 	return norm
+}
+
+// reviewOutcome decides a freshly-ingested book's review state (LYCM-58). When
+// ingest QC is enabled and the source trips a detector (no ISBN, poor cover,
+// mangled title), the book is held ReviewPending with the detected flags;
+// otherwise it publishes straight to the shelf. cover is the pre-normalization
+// source cover. QC disabled → always published, no flags.
+func (a *API) reviewOutcome(md *epub.Metadata, cover []byte) (string, []string) {
+	if !a.ingestQC {
+		return store.ReviewPublished, nil
+	}
+	flags := ingestqc.Detect(md, cover)
+	if len(flags) == 0 {
+		return store.ReviewPublished, nil
+	}
+	return store.ReviewPending, flags
 }
 
 // chooseCover selects the source cover bytes for a freshly-parsed EPUB.

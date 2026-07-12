@@ -40,6 +40,13 @@ type Store interface {
 	DeleteBook(ctx context.Context, id int64) (store.Book, error)
 	RemoveBlobs(filePath string) error
 
+	// Ingest QC review queue (LYCM-58): hold flagged ingests, then approve/edit.
+	ListPendingBooks(ctx context.Context) ([]store.Book, error)
+	ApproveBook(ctx context.Context, id int64) (store.Book, error)
+	UpdateBookMeta(ctx context.Context, id int64, title, author string) (store.Book, error)
+	SaveCoverAt(coverPath string, cover []byte) error
+	SetCoverPath(ctx context.Context, id int64, coverPath string) error
+
 	// Inventory (LYCM-601): ownership/acquisition state keyed by ISBN.
 	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
@@ -70,6 +77,7 @@ type API struct {
 	resolver Resolver         // ISBN/title -> candidate editions (no-op no-match by default)
 
 	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
+	ingestQC        bool // hold flagged new ingests for review (LYCM-58); off unless wired
 }
 
 // Option configures an API at construction time.
@@ -98,6 +106,15 @@ func WithCoverFetcher(f coverart.Fetcher) Option {
 // unchanged.
 func WithCoverNormalize(enabled bool) Option {
 	return func(a *API) { a.normalizeCovers = enabled }
+}
+
+// WithIngestQC toggles the ingestion QC review queue (LYCM-58). When on, a new
+// ingest that trips a detector (no ISBN, poor source cover, mangled title) is
+// held pending-review and kept off the shelf until approved; clean ingests
+// publish straight through. It is off by default (see New) so existing callers
+// and tests are unaffected; main.go turns it on via LYCEUM_INGEST_QC.
+func WithIngestQC(enabled bool) Option {
+	return func(a *API) { a.ingestQC = enabled }
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with
@@ -143,7 +160,14 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)
 	mux.HandleFunc("GET /books/{id}/file", a.handleFile)
 	mux.HandleFunc("DELETE /books/{id}", a.handleDelete)
+	mux.HandleFunc("PATCH /books/{id}", a.handleUpdateBook)
 	mux.HandleFunc("PUT /books/{id}/finished", a.handleSetFinished)
+
+	// Ingest QC review queue (LYCM-58): held books plus approve / replace-cover.
+	mux.HandleFunc("GET /ingest/review", a.handleReviewList)
+	mux.HandleFunc("POST /books/{id}/approve", a.handleApprove)
+	mux.HandleFunc("POST /books/{id}/cover", a.handleReplaceCover)
+	mux.HandleFunc("POST /books/{id}/cover/refetch", a.handleRefetchCover)
 
 	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
 	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
@@ -175,6 +199,11 @@ type bookJSON struct {
 	// Finished is true when the book has been explicitly marked read, regardless
 	// of reading progress (LYCM mark-as-read).
 	Finished bool `json:"finished,omitempty"`
+	// ReviewState and ReviewFlags surface the ingest-QC status (LYCM-58). Shelf
+	// entries are always "published" so both are omitted there; the review queue
+	// carries "pending" plus the detected issue codes.
+	ReviewState string   `json:"review_state,omitempty"`
+	ReviewFlags []string `json:"review_flags,omitempty"`
 }
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
@@ -189,6 +218,10 @@ func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 		AddedAt:  b.AddedAt.UTC().Format(time.RFC3339),
 		Series:   b.Series,
 		Finished: b.FinishedAt != nil,
+	}
+	if b.ReviewState == store.ReviewPending {
+		entry.ReviewState = b.ReviewState
+		entry.ReviewFlags = b.ReviewFlags
 	}
 	if b.CoverPath != "" {
 		entry.CoverURL = coverURL(b.ID)

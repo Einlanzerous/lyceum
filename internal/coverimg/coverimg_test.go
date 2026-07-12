@@ -212,6 +212,39 @@ func TestNormalizeEmptyPassthrough(t *testing.T) {
 	}
 }
 
+func TestInspect(t *testing.T) {
+	t.Run("clean cover", func(t *testing.T) {
+		r := Inspect(encodePNG(t, solid(366, 600, art)))
+		if !r.Decodable || r.Width != 366 || r.Height != 600 {
+			t.Fatalf("report = %+v, want decodable 366x600", r)
+		}
+		if r.Aspect < 0.60 || r.Aspect > 0.62 {
+			t.Fatalf("aspect = %.3f, want ~0.61", r.Aspect)
+		}
+		if r.BorderFraction > 0.02 {
+			t.Fatalf("border fraction = %.3f, want ~0 for a full-bleed cover", r.BorderFraction)
+		}
+	})
+
+	t.Run("heavily framed cover", func(t *testing.T) {
+		// 60px white frame on a 320x320 image: ~2*60/320 = 37.5% each axis, so a
+		// large border fraction.
+		r := Inspect(encodePNG(t, framed(320, 320, 60, white, art)))
+		if !r.Decodable {
+			t.Fatalf("framed cover did not decode")
+		}
+		if r.BorderFraction < 0.3 {
+			t.Fatalf("border fraction = %.3f, want a large frame detected", r.BorderFraction)
+		}
+	})
+
+	t.Run("non-image", func(t *testing.T) {
+		if r := Inspect([]byte("nope")); r.Decodable {
+			t.Fatalf("non-image reported decodable: %+v", r)
+		}
+	})
+}
+
 func TestNormalizeOutputIsJPEG(t *testing.T) {
 	src := solid(366, 600, art)
 	out, err := Normalize(encodePNG(t, src), DefaultOptions())

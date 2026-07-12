@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -41,7 +42,19 @@ type Book struct {
 	// finished. It is an explicit signal independent of reading progress, since
 	// epub.js progress rarely reaches 1.0 (back matter inflates the denominator).
 	FinishedAt *time.Time
+	// ReviewState is the ingest-QC lifecycle (LYCM-58): ReviewPublished (on the
+	// shelf) or ReviewPending (held for review because ingest flagged an issue).
+	// ReviewFlags carries the detected issue codes for a pending book.
+	ReviewState string
+	ReviewFlags []string
 }
+
+// Ingest-QC review states (LYCM-58). A flagged new ingest lands ReviewPending and
+// is kept off the shelf until approved; everything else is ReviewPublished.
+const (
+	ReviewPending   = "pending"
+	ReviewPublished = "published"
+)
 
 // Device is a client that syncs reading positions. Reading positions key off
 // the device's string identifier (ReadingPosition.DeviceID), which need not be
@@ -84,14 +97,25 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // text columns are coalesced so they scan cleanly into Go strings.
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
 	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''),
-	COALESCE(series, ''), COALESCE(series_index, 0), added_at, finished_at`
+	COALESCE(series, ''), COALESCE(series_index, 0), added_at, finished_at,
+	COALESCE(review_state, 'published'), review_flags`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
+	var reviewFlags []byte
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
 		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath,
-		&b.Series, &b.SeriesIndex, &b.AddedAt, &b.FinishedAt)
-	return b, err
+		&b.Series, &b.SeriesIndex, &b.AddedAt, &b.FinishedAt,
+		&b.ReviewState, &reviewFlags)
+	if err != nil {
+		return Book{}, err
+	}
+	if len(reviewFlags) > 0 {
+		if err := json.Unmarshal(reviewFlags, &b.ReviewFlags); err != nil {
+			return Book{}, fmt.Errorf("store: decode review flags: %w", err)
+		}
+	}
+	return b, nil
 }
 
 // InsertBook inserts b and returns the stored row. It is idempotent on
@@ -106,13 +130,14 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	inserted, err := scanBook(tx.QueryRow(ctx,
-		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path, series, series_index)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path, series, series_index, review_state, review_flags)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'published'), $11::jsonb)
 		 ON CONFLICT (file_hash) DO NOTHING
 		 RETURNING `+bookColumns,
 		b.Title, nullString(b.Author), nullString(b.CoverPath),
 		b.FilePath, b.FileHash, b.SizeBytes, nullString(b.SourcePath),
-		nullString(b.Series), nullFloat(b.SeriesIndex)))
+		nullString(b.Series), nullFloat(b.SeriesIndex),
+		b.ReviewState, marshalFlags(b.ReviewFlags)))
 	switch {
 	case err == nil:
 		if err := tx.Commit(ctx); err != nil {
@@ -135,10 +160,41 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 	}
 }
 
-// ListBooks returns all books, most recently added first.
+// marshalFlags encodes a review-flag slice for the JSONB column, using an empty
+// array (never SQL NULL) so the column's NOT NULL default holds.
+func marshalFlags(flags []string) string {
+	if len(flags) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(flags)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// ListBooks returns the shelf: published books only, most recently added first.
+// Pending-review books (LYCM-58) are held back until approved — see
+// ListPendingBooks for the review queue.
 func (s *Store) ListBooks(ctx context.Context) ([]Book, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT `+bookColumns+` FROM books ORDER BY added_at DESC, id DESC`)
+	return s.listBooks(ctx,
+		`SELECT `+bookColumns+` FROM books
+		 WHERE review_state = 'published'
+		 ORDER BY added_at DESC, id DESC`)
+}
+
+// ListPendingBooks returns the ingest-QC review queue: books held for review,
+// most recently added first.
+func (s *Store) ListPendingBooks(ctx context.Context) ([]Book, error) {
+	return s.listBooks(ctx,
+		`SELECT `+bookColumns+` FROM books
+		 WHERE review_state = 'pending'
+		 ORDER BY added_at DESC, id DESC`)
+}
+
+// listBooks runs a book-projection query and scans the rows.
+func (s *Store) listBooks(ctx context.Context, query string) ([]Book, error) {
+	rows, err := s.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("store: list books: %w", err)
 	}
@@ -419,6 +475,44 @@ func (s *Store) UpdateBookSeries(ctx context.Context, id int64, series string, i
 	}
 	if err != nil {
 		return Book{}, fmt.Errorf("store: update book series: %w", err)
+	}
+	return b, nil
+}
+
+// ApproveBook publishes a pending-review book to the shelf (LYCM-58), clearing
+// its review flags. Idempotent on an already-published book. Returns the updated
+// row, or ErrNotFound if the id is gone.
+func (s *Store) ApproveBook(ctx context.Context, id int64) (Book, error) {
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`UPDATE books SET review_state = 'published', review_flags = '[]'::jsonb
+		 WHERE id = $1 RETURNING `+bookColumns, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: approve book: %w", err)
+	}
+	return b, nil
+}
+
+// UpdateBookMeta edits a book's title and author (LYCM-58 QC override for
+// mangled MOBI metadata). Title is required (the column is NOT NULL); an empty
+// author clears it. It does not change review state — approving is separate.
+// Returns the updated row, or ErrNotFound if the id is gone.
+func (s *Store) UpdateBookMeta(ctx context.Context, id int64, title, author string) (Book, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return Book{}, fmt.Errorf("store: update book meta: title is required")
+	}
+	b, err := scanBook(s.pool.QueryRow(ctx,
+		`UPDATE books SET title = $2, author = $3 WHERE id = $1
+		 RETURNING `+bookColumns,
+		id, title, nullString(strings.TrimSpace(author))))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Book{}, ErrNotFound
+	}
+	if err != nil {
+		return Book{}, fmt.Errorf("store: update book meta: %w", err)
 	}
 	return b, nil
 }

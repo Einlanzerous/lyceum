@@ -122,6 +122,45 @@ func Normalize(data []byte, opts Options) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// Report describes a source cover's quality, for ingest QC (LYCM-58). It is
+// measured on the ORIGINAL bytes (before Normalize cleans them), so it reflects
+// how bad the source was, not the stored result.
+type Report struct {
+	Decodable bool    // the bytes decoded as an image
+	Width     int     // decoded width in px (0 when not decodable)
+	Height    int     // decoded height in px
+	Aspect    float64 // Width/Height (0 when not decodable or zero height)
+	// BorderFraction is the share of the image (0–1) that uniform near-white/
+	// near-black border trimming would remove — a high value means a heavily
+	// framed cover.
+	BorderFraction float64
+}
+
+// Inspect measures a source cover for QC without modifying it. Empty or
+// undecodable input yields a zero Report with Decodable=false. It shares the
+// decode + border detection used by Normalize, using the default options.
+func Inspect(data []byte) Report {
+	if len(data) == 0 {
+		return Report{}
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return Report{}
+	}
+	img := imaging.Clone(decoded)
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	r := Report{Decodable: true, Width: w, Height: h}
+	if h > 0 {
+		r.Aspect = float64(w) / float64(h)
+	}
+	if w > 0 && h > 0 {
+		keep := trimBounds(img, DefaultOptions())
+		kept := float64(keep.Dx()*keep.Dy()) / float64(w*h)
+		r.BorderFraction = 1 - kept
+	}
+	return r
+}
+
 // trim crops away uniform near-white/near-black borders, bounded by
 // MaxTrimFraction per side.
 func trim(img *image.NRGBA, opts Options) *image.NRGBA {

@@ -120,3 +120,52 @@ export function putPositionKeepalive(pos: PositionInput): void {
     keepalive: true,
   })
 }
+
+// --- Ingest QC review queue (LYCM-58) ---
+
+/** GET /ingest/review — books held for review, each with its detected flags. */
+export async function listPendingReview(): Promise<Book[]> {
+  const res = await fetch(apiUrl('/ingest/review'))
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book[]
+}
+
+/** POST /books/{id}/approve — publish a pending book to the shelf. */
+export async function approveBook(id: number): Promise<Book> {
+  const res = await fetch(apiUrl(`/books/${id}/approve`), { method: 'POST' })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book
+}
+
+/** PATCH /books/{id} — correct a book's title/author. Title is required. */
+export async function updateBook(id: number, title: string, author: string): Promise<Book> {
+  const res = await fetch(apiUrl(`/books/${id}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, author }),
+  })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book
+}
+
+/** POST /books/{id}/cover — replace a cover from an uploaded image file. */
+export async function replaceCover(id: number, file: File): Promise<Book> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(apiUrl(`/books/${id}/cover`), { method: 'POST', body: form })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book
+}
+
+/** POST /books/{id}/cover/refetch — re-fetch a cover from the art source. */
+export async function refetchCover(id: number): Promise<Book> {
+  const res = await fetch(apiUrl(`/books/${id}/cover/refetch`), { method: 'POST' })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as Book
+}
+
+/** DELETE /books/{id} — remove a book (used to reject a pending ingest). */
+export async function deleteBook(id: number): Promise<void> {
+  const res = await fetch(apiUrl(`/books/${id}`), { method: 'DELETE' })
+  if (!res.ok) throw await readError(res)
+}

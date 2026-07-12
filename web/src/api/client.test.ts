@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
+  approveBook,
   bookFileUrl,
   coverUrl,
+  deleteBook,
   getPosition,
   listLibrary,
+  listPendingReview,
   putPosition,
   putPositionKeepalive,
+  refetchCover,
+  replaceCover,
+  updateBook,
   uploadBook,
 } from './client'
 import type { Book, Position } from './types'
@@ -165,5 +171,62 @@ describe('putPositionKeepalive', () => {
     const body = JSON.parse(init?.body as string)
     expect(body).toMatchObject({ book_id: 5, device_id: 'dev-1', progress: 0.7 })
     expect(typeof body.updated_at).toBe('string')
+  })
+})
+
+describe('ingest QC review (LYCM-58)', () => {
+  it('listPendingReview GETs /ingest/review and returns Book[]', async () => {
+    const pending: Book[] = [
+      { id: 3, title: 'Held', author: '', cover_url: '', review_state: 'pending', review_flags: ['no_isbn'] },
+    ]
+    const fetchFn = mockFetch(() => jsonResponse(200, pending))
+    await expect(listPendingReview()).resolves.toEqual(pending)
+    expect(fetchFn).toHaveBeenCalledWith('/ingest/review')
+  })
+
+  it('approveBook POSTs to the approve route', async () => {
+    const fetchFn = mockFetch((_url, init) => {
+      expect(init?.method).toBe('POST')
+      return jsonResponse(200, { id: 3, title: 'Held', author: '', cover_url: '' })
+    })
+    await approveBook(3)
+    expect(fetchFn).toHaveBeenCalledWith('/books/3/approve', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('updateBook PATCHes title/author as JSON', async () => {
+    let body: Record<string, unknown> = {}
+    const fetchFn = mockFetch((_url, init) => {
+      expect(init?.method).toBe('PATCH')
+      body = JSON.parse(init?.body as string)
+      return jsonResponse(200, { id: 3, title: 'Fixed', author: 'Real', cover_url: '' })
+    })
+    await expect(updateBook(3, 'Fixed', 'Real')).resolves.toMatchObject({ title: 'Fixed' })
+    expect(fetchFn).toHaveBeenCalledWith('/books/3', expect.objectContaining({ method: 'PATCH' }))
+    expect(body).toEqual({ title: 'Fixed', author: 'Real' })
+  })
+
+  it('replaceCover POSTs multipart with field "file"', async () => {
+    const fetchFn = mockFetch((_url, init) => {
+      expect(init?.method).toBe('POST')
+      expect((init?.body as FormData).get('file')).toBeInstanceOf(File)
+      return jsonResponse(200, { id: 3, title: 'Held', author: '', cover_url: '/books/3/cover' })
+    })
+    const file = new File([new Uint8Array([1])], 'c.png', { type: 'image/png' })
+    await expect(replaceCover(3, file)).resolves.toMatchObject({ cover_url: '/books/3/cover' })
+    expect(fetchFn).toHaveBeenCalledWith('/books/3/cover', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('refetchCover POSTs to the refetch route and surfaces a 404', async () => {
+    mockFetch(() => textResponse(404, 'no cover found for this book'))
+    await expect(refetchCover(3)).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('deleteBook issues a DELETE', async () => {
+    const fetchFn = mockFetch((_url, init) => {
+      expect(init?.method).toBe('DELETE')
+      return new Response(null, { status: 204 })
+    })
+    await deleteBook(3)
+    expect(fetchFn).toHaveBeenCalledWith('/books/3', expect.objectContaining({ method: 'DELETE' }))
   })
 })

@@ -20,6 +20,10 @@ export interface Book {
   series_index?: number
   /** True when the book has been explicitly marked read (independent of progress). */
   finished?: boolean
+  /** Ingest-QC status (LYCM-58): "pending" for a held book, omitted when on the shelf. */
+  review_state?: string
+  /** Detected issue codes for a pending book, e.g. ["no_isbn","suspicious_title"]. */
+  review_flags?: string[]
 }
 
 /** A device's reading position within a book (GET/PUT /sync). */
