@@ -59,6 +59,46 @@ func TestWatcherScanOnce(t *testing.T) {
 	}
 }
 
+// A grab that lands as .mobi/.azw3 is not ingested (the reader is EPUB-only),
+// but the watcher surfaces it — recorded once per file signature so the warning
+// doesn't repeat every tick (LYCM-77).
+func TestWatcherReportsNonEPUBLandings(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	dir := t.TempDir()
+	w := NewWatcher(a, dir, 0)
+	ctx := context.Background()
+
+	sub := filepath.Join(dir, "Joe Abercrombie", "Before they are hanged (2007)")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(sub, "Before they are hanged - Joe Abercrombie.mobi")
+	writeFile(t, path, []byte("BOOKMOBI fake payload"))
+
+	w.scanOnce(ctx)
+	if n := countBooks(t, s); n != 0 {
+		t.Fatalf("mobi landed as %d books, want 0 (not ingestible)", n)
+	}
+	sig, reported := w.nonEPUB[path]
+	if !reported || sig == "" {
+		t.Fatalf("non-EPUB landing not recorded: nonEPUB=%v", w.nonEPUB)
+	}
+
+	// A re-scan of the unchanged file keeps the same signature (one report).
+	w.scanOnce(ctx)
+	if got := w.nonEPUB[path]; got != sig {
+		t.Fatalf("signature churned across ticks: %q -> %q", sig, got)
+	}
+
+	// Unrelated file types (e.g. leftover .jpg sidecars) are ignored entirely.
+	writeFile(t, filepath.Join(sub, "cover.jpg"), []byte("\xff\xd8\xff fake jpeg"))
+	w.scanOnce(ctx)
+	if len(w.nonEPUB) != 1 {
+		t.Fatalf("nonEPUB tracks %d files, want 1 (jpg must not be reported)", len(w.nonEPUB))
+	}
+}
+
 func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o644); err != nil {
