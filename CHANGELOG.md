@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/Einlanzerous/lyceum/compare/v1.2.1...v1.3.0) (2026-07-12)
+
+
+### Features
+
+* **acquire:** live Bindery acquirer (grab w/ bookId via searchOnAdd) (LYCM-35) ([#28](https://github.com/Einlanzerous/lyceum/issues/28)) ([598b18d](https://github.com/Einlanzerous/lyceum/commit/598b18dbc6d8e5de6110267f5aeece7b6c498a85))
+* **ingest:** ISBN batch review + verify admin (LYCM-603) ([#26](https://github.com/Einlanzerous/lyceum/issues/26)) ([cbc01bf](https://github.com/Einlanzerous/lyceum/commit/cbc01bf8957603271100c136d0cbe432d4d7e6bc))
+* **ingest:** normalize cover art at ingest (LYCM-65) ([#30](https://github.com/Einlanzerous/lyceum/issues/30)) ([d386d05](https://github.com/Einlanzerous/lyceum/commit/d386d05ba1db8c0b061d01731f1518513eb6597c))
+* **ingest:** QC review/override queue for new ingests (LYCM-58) ([#31](https://github.com/Einlanzerous/lyceum/issues/31)) ([2dc64c9](https://github.com/Einlanzerous/lyceum/commit/2dc64c9494b6530852594f708481a5de36283082))
+* **inventory:** reconcile print↔ebook ISBNs by work (LYCM-35) ([#29](https://github.com/Einlanzerous/lyceum/issues/29)) ([b5463b8](https://github.com/Einlanzerous/lyceum/commit/b5463b8d12879f3f936456bc6bf253bc2b8d0c5e))
+* **mobile:** in-app ISBN barcode scanning (LYCM-602/LYCM-34) ([#32](https://github.com/Einlanzerous/lyceum/issues/32)) ([0b56bca](https://github.com/Einlanzerous/lyceum/commit/0b56bcaa45a27f3a8283dd4a3974d412e4c3a87f))
+
 ## [1.2.1](https://github.com/Einlanzerous/lyceum/compare/v1.2.0...v1.2.1) (2026-07-10)
 
 
