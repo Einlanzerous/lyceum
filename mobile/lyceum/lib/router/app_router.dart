@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/library/library_screen.dart';
 import '../features/reader/reader_screen.dart';
+import '../features/scan/scan_screen.dart';
 import '../features/settings/settings_screen.dart';
 
 /// The three screens, mirroring the web routes: `/` (library),
@@ -20,6 +21,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/settings',
         name: 'settings',
         builder: (_, _) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/scan',
+        name: 'scan',
+        builder: (_, _) => const ScanScreen(),
       ),
       GoRoute(
         path: '/reader/:id',

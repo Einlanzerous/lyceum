@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Reaches a self-hosted Lyceum server over the LAN (often plain http). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- In-app ISBN barcode scanning (LYCM-602): the camera decodes EAN-13
+         barcodes. mobile_scanner requests the runtime permission on first use. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="Lyceum"
         android:name="${applicationName}"
