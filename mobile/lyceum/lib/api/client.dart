@@ -136,5 +136,28 @@ class LyceumClient {
     if (r.statusCode != 204) _throw(r);
   }
 
+  /// `POST /ingest/batches` — flush a set of scanned ISBNs as one review batch
+  /// (LYCM-602). The server resolves each scan to a candidate and returns the
+  /// batch with per-status counts; confirming/reviewing them is a web/desktop
+  /// step. [sourceDevice] defaults to this device's id. Returns the created
+  /// [Batch] (201); errors surface as [ApiException].
+  Future<Batch> createBatch(
+    List<ScannedIsbn> scans, {
+    String? sourceDevice,
+  }) async {
+    final r = await _http
+        .post(
+          _uri('/ingest/batches'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'source_device': sourceDevice ?? deviceId,
+            'scans': scans.map((s) => s.toJson()).toList(),
+          }),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 201) _throw(r);
+    return Batch.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
   void dispose() => _http.close();
 }

@@ -133,3 +133,119 @@ class InventoryItem {
     bookId: (json['book_id'] as num?)?.toInt(),
   );
 }
+
+/// One ISBN captured by the scanner, awaiting flush to a batch (LYCM-602). The
+/// wire shape matches the Go `scanJSON`: `{isbn, captured_at, source}`.
+class ScannedIsbn {
+  const ScannedIsbn({
+    required this.isbn,
+    required this.capturedAt,
+    this.source = 'camera',
+  });
+
+  /// Canonical ISBN-13 (already normalized by the scanner).
+  final String isbn;
+
+  /// When the scan happened; serialized as RFC3339 UTC.
+  final DateTime capturedAt;
+
+  /// How it was captured: `camera` (barcode) or `manual` (typed/pasted).
+  final String source;
+
+  Map<String, dynamic> toJson() => {
+    'isbn': isbn,
+    'captured_at': capturedAt.toUtc().toIso8601String(),
+    'source': source,
+  };
+
+  factory ScannedIsbn.fromJson(Map<String, dynamic> json) => ScannedIsbn(
+    isbn: (json['isbn'] as String?) ?? '',
+    capturedAt:
+        DateTime.tryParse((json['captured_at'] as String?) ?? '')?.toUtc() ??
+        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+    source: (json['source'] as String?) ?? 'camera',
+  );
+}
+
+/// Per-status tally the server returns for a reviewed batch. The phone shows it
+/// as a read-only summary; review/confirm happens on web/desktop.
+class BatchCounts {
+  const BatchCounts({
+    this.ready = 0,
+    this.review = 0,
+    this.noMatch = 0,
+    this.duplicate = 0,
+    this.confirmed = 0,
+    this.skipped = 0,
+  });
+
+  final int ready;
+  final int review;
+  final int noMatch;
+  final int duplicate;
+  final int confirmed;
+  final int skipped;
+
+  int get total => ready + review + noMatch + duplicate + confirmed + skipped;
+
+  factory BatchCounts.fromJson(Map<String, dynamic>? json) {
+    int at(String k) => (json?[k] as num?)?.toInt() ?? 0;
+    return BatchCounts(
+      ready: at('ready'),
+      review: at('review'),
+      noMatch: at('no_match'),
+      duplicate: at('duplicate'),
+      confirmed: at('confirmed'),
+      skipped: at('skipped'),
+    );
+  }
+}
+
+/// One resolved scan in a batch. Only the fields the phone renders read-only.
+class Candidate {
+  const Candidate({
+    required this.isbn,
+    required this.status,
+    this.title,
+    this.author,
+  });
+
+  final String isbn;
+
+  /// ready | review | no_match | duplicate | confirmed | skipped.
+  final String status;
+  final String? title;
+  final String? author;
+
+  factory Candidate.fromJson(Map<String, dynamic> json) => Candidate(
+    isbn: (json['isbn'] as String?) ?? '',
+    status: (json['status'] as String?) ?? '',
+    title: json['title'] as String?,
+    author: json['author'] as String?,
+  );
+}
+
+/// A review batch created from a set of scans (LYCM-603). The phone creates one
+/// and shows its result; the actual verify/confirm is a web/desktop step.
+class Batch {
+  const Batch({
+    required this.id,
+    required this.status,
+    required this.counts,
+    required this.candidates,
+  });
+
+  final int id;
+  final String status;
+  final BatchCounts counts;
+  final List<Candidate> candidates;
+
+  factory Batch.fromJson(Map<String, dynamic> json) => Batch(
+    id: (json['id'] as num).toInt(),
+    status: (json['status'] as String?) ?? '',
+    counts: BatchCounts.fromJson(json['counts'] as Map<String, dynamic>?),
+    candidates: ((json['candidates'] as List<dynamic>?) ?? const [])
+        .map((e) => Candidate.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false),
+  );
+}

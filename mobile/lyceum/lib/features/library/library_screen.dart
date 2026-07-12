@@ -80,6 +80,13 @@ class _TopBar extends ConsumerWidget {
         children: [
           const BrandMark(),
           const Spacer(),
+          if (ref.watch(hasBackendProvider)) ...[
+            _IconPill(
+              icon: Icons.qr_code_scanner,
+              onTap: () => context.push('/scan'),
+            ),
+            const SizedBox(width: 10),
+          ],
           GestureDetector(
             onTap: () => context.push('/settings'),
             child: CircleAvatar(
