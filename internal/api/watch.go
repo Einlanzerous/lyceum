@@ -33,6 +33,9 @@ type Watcher struct {
 	// signatures that failed to parse, so each is acted on at most once.
 	ok  map[string]string
 	bad map[string]string
+	// nonEPUB holds signatures of non-EPUB book files already reported, so each
+	// landing is warned about once, not every tick (LYCM-77).
+	nonEPUB map[string]string
 }
 
 // NewWatcher builds a Watcher over dir. interval defaults to 15s when not
@@ -47,7 +50,21 @@ func NewWatcher(a *API, dir string, interval time.Duration) *Watcher {
 		interval: interval,
 		ok:       map[string]string{},
 		bad:      map[string]string{},
+		nonEPUB:  map[string]string{},
 	}
+}
+
+// nonEPUBBookExt reports whether ext (lowercase, with dot) is a known ebook
+// format Lyceum cannot ingest. The acquisition stack occasionally grabs these
+// (LYCM-77); they import into the watched tree but the reader is EPUB-only, so
+// they must be surfaced rather than silently skipped — otherwise the matching
+// inventory entry sits `wanted` forever with no signal.
+func nonEPUBBookExt(ext string) bool {
+	switch ext {
+	case ".mobi", ".azw", ".azw3":
+		return true
+	}
+	return false
 }
 
 // Run scans once immediately, then on every tick until ctx is cancelled. It is
@@ -77,15 +94,37 @@ func (w *Watcher) scanOnce(ctx context.Context) {
 			log.Printf("watch: walk %s: %v", path, err)
 			return nil
 		}
-		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".epub") {
+		if d.IsDir() {
 			return nil
 		}
-		w.consider(ctx, path, d)
+		switch ext := strings.ToLower(filepath.Ext(path)); {
+		case ext == ".epub":
+			w.consider(ctx, path, d)
+		case nonEPUBBookExt(ext):
+			w.reportNonEPUB(path, d)
+		}
 		return nil
 	})
 	if err != nil {
 		log.Printf("watch: scan %s: %v", w.dir, err)
 	}
+}
+
+// reportNonEPUB warns (once per file signature) that an ebook landed in the
+// watched tree in a format Lyceum cannot ingest, so a grab that arrived as
+// .mobi/.azw3 doesn't leave its title invisibly stuck in `wanted` (LYCM-77).
+func (w *Watcher) reportNonEPUB(path string, d fs.DirEntry) {
+	info, err := d.Info()
+	if err != nil {
+		log.Printf("watch: stat %s: %v", path, err)
+		return
+	}
+	sig := fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+	if w.nonEPUB[path] == sig {
+		return
+	}
+	w.nonEPUB[path] = sig
+	log.Printf("watch: non-EPUB book landed: %s — NOT ingested (Lyceum ingests EPUB only); its title stays 'wanted'. Convert it to .epub, or set the acquisition quality profile to prefer EPUB", path)
 }
 
 // consider ingests path when its (size, modtime) signature has not already been
