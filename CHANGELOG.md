@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/Einlanzerous/lyceum/compare/v1.3.0...v1.3.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* **ingest:** auto-close a batch when its last candidate is resolved ([#35](https://github.com/Einlanzerous/lyceum/issues/35)) ([8b7a433](https://github.com/Einlanzerous/lyceum/commit/8b7a4337946c5e5c17e4bbb5d7c918142dbf2a3b))
+* **mobile:** 16 KB page-align native libs — bump mobile_scanner to 7.2.0 (LYCM-73) ([#33](https://github.com/Einlanzerous/lyceum/issues/33)) ([cd62c46](https://github.com/Einlanzerous/lyceum/commit/cd62c4678e40df16e92c068d3d27ad8635509bec))
+
 ## [1.3.0](https://github.com/Einlanzerous/lyceum/compare/v1.2.1...v1.3.0) (2026-07-12)
 
 
