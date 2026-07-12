@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/magos/lyceum/internal/isbn"
 	"github.com/magos/lyceum/internal/store"
@@ -35,6 +36,43 @@ func (logAcquirer) Want(_ context.Context, code string) error {
 func WithAcquirer(acq Acquirer) Option {
 	return func(a *API) { a.acquirer = acq }
 }
+
+const (
+	// maxConcurrentWants caps in-flight background acquisition dispatches so a
+	// big batch confirm doesn't hit the acquisition backend with N searches at
+	// once (LYCM-79).
+	maxConcurrentWants = 3
+	// wantTimeout bounds one background dispatch. A live Bindery Want does a
+	// lookup + add (a metadata pull each, ~15s cap apiece) — generous headroom
+	// without letting a wedged dispatch pin a semaphore slot forever.
+	wantTimeout = 2 * time.Minute
+)
+
+// dispatchWant hands an ISBN to the acquirer in the background, so the confirm
+// request that recorded the inventory entry as `wanted` returns immediately
+// instead of blocking on the acquisition backend's search (LYCM-79: a live
+// batch confirm took ~80s synchronously). It deliberately uses a fresh
+// background context, not the request's: the grab must survive the client
+// disconnecting right after confirm. Failures are logged only — the entry
+// already rests in `wanted`, which is exactly the state a failed grab should
+// leave behind.
+func (a *API) dispatchWant(code string) {
+	a.wantWG.Add(1)
+	go func() {
+		defer a.wantWG.Done()
+		a.wantSem <- struct{}{}
+		defer func() { <-a.wantSem }()
+		ctx, cancel := context.WithTimeout(context.Background(), wantTimeout)
+		defer cancel()
+		if err := a.acquirer.Want(ctx, code); err != nil {
+			log.Printf("api: acquire want isbn=%s: %v (inventory stays wanted)", code, err)
+		}
+	}()
+}
+
+// waitWants blocks until every dispatched background acquisition has finished.
+// Tests use it to assert on the acquirer after an async confirm returns.
+func (a *API) waitWants() { a.wantWG.Wait() }
 
 // inventoryJSON is the wire shape for an inventory entry.
 type inventoryJSON struct {
@@ -98,17 +136,16 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Only request a digital copy when one isn't already in hand. A title that
-	// is already ingested stays ingested.
+	// is already ingested stays ingested. The state is recorded first, then the
+	// grab dispatches in the background (LYCM-79) — the response never waits on
+	// the acquisition backend.
 	if req.FindDigital && inv.State != store.StateIngested {
-		if err := a.acquirer.Want(ctx, code); err != nil {
-			serverError(w, "acquire want", err)
-			return
-		}
 		inv, err = a.store.SetInventoryState(ctx, code, store.StateWanted)
 		if err != nil {
 			serverError(w, "set inventory state", err)
 			return
 		}
+		a.dispatchWant(code)
 	}
 
 	writeJSON(w, http.StatusOK, toInventoryJSON(inv))

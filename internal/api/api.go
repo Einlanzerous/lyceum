@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
@@ -76,6 +77,12 @@ type API struct {
 	covers   coverart.Fetcher // ISBN -> canonical cover art (nil = use embedded covers only)
 	resolver Resolver         // ISBN/title -> candidate editions (no-op no-match by default)
 
+	// wantSem bounds concurrent background acquisition dispatches (LYCM-79) so a
+	// big batch confirm doesn't hammer the backend all at once; wantWG lets tests
+	// (and a graceful shutdown) wait for in-flight dispatches.
+	wantSem chan struct{}
+	wantWG  sync.WaitGroup
+
 	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
 	ingestQC        bool // hold flagged new ingests for review (LYCM-58); off unless wired
 }
@@ -121,7 +128,11 @@ func WithIngestQC(enabled bool) Option {
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
 func New(s Store, dataDir string, opts ...Option) *API {
-	a := &API{store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{}, normalizeCovers: true}
+	a := &API{
+		store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{},
+		wantSem:         make(chan struct{}, maxConcurrentWants),
+		normalizeCovers: true,
+	}
 	for _, opt := range opts {
 		opt(a)
 	}

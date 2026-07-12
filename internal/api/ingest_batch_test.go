@@ -154,7 +154,10 @@ func TestCandidatePick(t *testing.T) {
 // moving the inventory entry to wanted and calling the acquirer.
 func TestCandidateConfirm(t *testing.T) {
 	acq := &recordingAcquirer{}
-	srv, s := ingestServer(t, acq)
+	s := testStore(t)
+	a := New(s, "", WithResolver(testResolver()), WithAcquirer(acq))
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
 	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
 		"scans": []map[string]any{{"isbn": isbnPiranesi}},
 	}))
@@ -176,6 +179,7 @@ func TestCandidateConfirm(t *testing.T) {
 	if got.Inventory.State != store.StateWanted || got.Inventory.ISBN != isbnPiranesi {
 		t.Fatalf("inventory = %+v, want wanted %s", got.Inventory, isbnPiranesi)
 	}
+	a.waitWants() // the grab dispatches in the background (LYCM-79)
 	if len(acq.wants) != 1 || acq.wants[0] != isbnPiranesi {
 		t.Fatalf("acquirer wants = %v", acq.wants)
 	}

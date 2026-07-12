@@ -401,13 +401,15 @@ func (a *API) confirmCandidate(ctx context.Context, c store.Candidate, series st
 		return store.Inventory{}, store.Candidate{}, err
 	}
 	if inv.State != store.StateIngested {
-		if err := a.acquirer.Want(ctx, c.ISBN); err != nil {
-			return store.Inventory{}, store.Candidate{}, err
-		}
+		// Record `wanted` first, then dispatch the actual grab in the background
+		// (LYCM-79): a batch confirm used to block seconds × N on the acquisition
+		// backend's synchronous search. A dispatch failure only logs — `wanted` is
+		// already the right resting state for a grab that didn't happen.
 		inv, err = a.store.SetInventoryState(ctx, c.ISBN, store.StateWanted)
 		if err != nil {
 			return store.Inventory{}, store.Candidate{}, err
 		}
+		a.dispatchWant(c.ISBN)
 	}
 
 	c.Status = store.CandidateConfirmed
