@@ -42,7 +42,8 @@ func postInventory(t *testing.T, baseURL string, body any) *http.Response {
 func TestInventoryScanFindDigital(t *testing.T) {
 	s := testStore(t)
 	acq := &recordingAcquirer{}
-	srv := httptest.NewServer(New(s, "", WithAcquirer(acq)).Handler())
+	a := New(s, "", WithAcquirer(acq))
+	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
 
 	resp := postInventory(t, srv.URL, map[string]any{
@@ -64,8 +65,55 @@ func TestInventoryScanFindDigital(t *testing.T) {
 	if got.State != "wanted" {
 		t.Fatalf("state = %q, want wanted", got.State)
 	}
+	a.waitWants() // the grab dispatches in the background (LYCM-79)
 	if len(acq.wants) != 1 || acq.wants[0] != "9780140449198" {
 		t.Fatalf("acquirer wants = %v, want [9780140449198]", acq.wants)
+	}
+}
+
+// blockingAcquirer parks every Want on a channel so tests can hold the
+// acquisition backend "busy" and observe what confirm does in the meantime.
+type blockingAcquirer struct {
+	recordingAcquirer
+	release chan struct{}
+}
+
+func (b *blockingAcquirer) Want(ctx context.Context, code string) error {
+	<-b.release
+	return b.recordingAcquirer.Want(ctx, code)
+}
+
+// The LYCM-79 regression test: confirm must return while the acquisition
+// backend is still busy — the grab happens in the background, and the entry
+// rests in `wanted` either way.
+func TestFindDigitalDoesNotBlockOnAcquirer(t *testing.T) {
+	s := testStore(t)
+	acq := &blockingAcquirer{release: make(chan struct{})}
+	a := New(s, "", WithAcquirer(acq))
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	// With Want parked, the request must still complete.
+	resp := postInventory(t, srv.URL, map[string]any{"isbn": "9780140449198", "find_digital": true})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 while acquirer is busy", resp.StatusCode)
+	}
+	var got inventoryJSON
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.State != "wanted" {
+		t.Fatalf("state = %q, want wanted (recorded before dispatch)", got.State)
+	}
+	if n := len(acq.wants); n != 0 {
+		t.Fatalf("acquirer completed %d wants while parked, want 0", n)
+	}
+
+	close(acq.release)
+	a.waitWants()
+	if len(acq.wants) != 1 || acq.wants[0] != "9780140449198" {
+		t.Fatalf("acquirer wants = %v after release, want [9780140449198]", acq.wants)
 	}
 }
 
