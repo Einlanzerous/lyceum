@@ -402,13 +402,18 @@ func (s *Store) SetCoverPath(ctx context.Context, bookID int64, coverPath string
 
 // GetBookBySourcePath returns the book folder-ingested from sourcePath, or
 // ErrNotFound. Only folder-ingested books carry a source_path (uploads have
-// none), so an empty path never matches.
+// none), so an empty path never matches. Matching is case-insensitive: the
+// acquisition pipeline re-cases folder names between imports (LYCM-68), and a
+// re-cased path must still resolve to the same book instead of duplicating it.
+// ORDER BY id keeps the result deterministic (the original row wins) for legacy
+// rows that already duplicated across casings.
 func (s *Store) GetBookBySourcePath(ctx context.Context, sourcePath string) (Book, error) {
 	if sourcePath == "" {
 		return Book{}, ErrNotFound
 	}
 	b, err := scanBook(s.pool.QueryRow(ctx,
-		`SELECT `+bookColumns+` FROM books WHERE source_path = $1`, sourcePath))
+		`SELECT `+bookColumns+` FROM books WHERE lower(source_path) = lower($1)
+		  ORDER BY id LIMIT 1`, sourcePath))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound
 	}

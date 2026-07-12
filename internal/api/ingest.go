@@ -61,11 +61,14 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 	hash := hex.EncodeToString(sum[:])
 
 	// Dedup on content hash before writing any blobs. If this exact content
-	// arrived via the watcher and the existing row has no source path yet, adopt
-	// this path so a later re-stamp updates it in place instead of duplicating.
+	// arrived via the watcher and the existing row has no source path yet — or
+	// has the same path under different casing (the acquisition pipeline re-cases
+	// folder names, LYCM-68) — adopt this path so a later re-stamp updates it in
+	// place instead of duplicating.
 	switch existing, err := a.store.GetBookByHash(ctx, hash); {
 	case err == nil:
-		if sourcePath != "" && existing.SourcePath == "" {
+		if sourcePath != "" && existing.SourcePath != sourcePath &&
+			(existing.SourcePath == "" || strings.EqualFold(existing.SourcePath, sourcePath)) {
 			if e := a.store.SetBookSourcePath(ctx, existing.ID, sourcePath); e != nil {
 				log.Printf("api: adopt source path for book %d: %v", existing.ID, e)
 			} else {
@@ -85,7 +88,7 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 	if sourcePath != "" {
 		switch existing, err := a.store.GetBookBySourcePath(ctx, sourcePath); {
 		case err == nil:
-			return a.replaceBook(ctx, existing, md, data, hash)
+			return a.replaceBook(ctx, existing, sourcePath, md, data, hash)
 		case errors.Is(err, store.ErrNotFound):
 			// no book at this path yet; fall through to a fresh insert
 		default:
@@ -140,8 +143,10 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 // title/author from the new metadata, removes the now-orphaned old blobs, and
 // re-links inventory. The book keeps its id, so reading positions survive. It
 // deliberately does not re-fire auto-delivery — a re-stamp is an update, not a
-// new acquisition.
-func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Metadata, data []byte, hash string) (store.Book, ingestResult, error) {
+// new acquisition. sourcePath is the path the new content arrived at; when it
+// differs from the stored one (a re-cased folder, LYCM-68) the row adopts it so
+// source_path keeps tracking the on-disk truth.
+func (a *API) replaceBook(ctx context.Context, existing store.Book, sourcePath string, md *epub.Metadata, data []byte, hash string) (store.Book, ingestResult, error) {
 	oldFilePath := existing.FilePath
 
 	filePath, coverPath, err := a.store.SaveBlobs(hash, data, a.coverForIngest(ctx, md))
@@ -150,7 +155,7 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 	}
 
 	updated, err := a.store.UpdateBookContent(ctx, existing.ID, store.Book{
-		Title:       ingestTitle(md, existing.SourcePath),
+		Title:       ingestTitle(md, sourcePath),
 		Author:      strings.TrimSpace(md.Author),
 		CoverPath:   coverPath,
 		FilePath:    filePath,
@@ -168,6 +173,17 @@ func (a *API) replaceBook(ctx context.Context, existing store.Book, md *epub.Met
 	if oldFilePath != "" && oldFilePath != filePath {
 		if e := a.store.RemoveBlobs(oldFilePath); e != nil {
 			log.Printf("api: replace book %d: remove old blobs: %v", updated.ID, e)
+		}
+	}
+
+	// A re-cased path (matched case-insensitively) replaces the stored one, so
+	// the row keeps naming the file as it exists on disk. Best effort — the
+	// case-insensitive lookup finds the book either way.
+	if existing.SourcePath != sourcePath {
+		if e := a.store.SetBookSourcePath(ctx, updated.ID, sourcePath); e != nil {
+			log.Printf("api: replace book %d: update source path: %v", updated.ID, e)
+		} else {
+			updated.SourcePath = sourcePath
 		}
 	}
 
