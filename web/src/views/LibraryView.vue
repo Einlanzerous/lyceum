@@ -7,7 +7,7 @@ import SeriesDrawer from '@/components/SeriesDrawer.vue'
 import SortControl from '@/components/SortControl.vue'
 import LibrarySearch from '@/components/LibrarySearch.vue'
 import { useLibraryStore } from '@/stores/library'
-import { coverUrl } from '@/api/client'
+import { coverUrl, listPendingReview } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import { isNativeShell } from '@/api/base'
 import { useServer } from '@/api/useServer'
@@ -141,8 +141,21 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
 
+// Ingest-QC review queue size (LYCM-58), shown as a badge on the Review link.
+const reviewCount = ref(0)
+async function loadReviewCount(): Promise<void> {
+  try {
+    reviewCount.value = (await listPendingReview()).length
+  } catch {
+    reviewCount.value = 0 // a failed count must never break the library
+  }
+}
+
 onMounted(() => {
-  if (!needsServer.value) store.load()
+  if (!needsServer.value) {
+    store.load()
+    void loadReviewCount()
+  }
   window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
@@ -173,6 +186,13 @@ function onSetFinished(id: number, finished: boolean): void {
           aria-label="Verify scanned books"
           title="Verify scanned books (ISBN ingest)"
           >⧉ Ingest</RouterLink
+        >
+        <RouterLink
+          to="/review"
+          class="lib__ingest lib__review"
+          aria-label="Review held ingests"
+          title="Review ingests held for quality check"
+          >⚑ Review<span v-if="reviewCount" class="lib__badge">{{ reviewCount }}</span></RouterLink
         >
         <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">{{
           initial
@@ -401,6 +421,16 @@ function onSetFinished(id: number, finished: boolean): void {
 .lib__ingest:hover {
   color: var(--text);
   border-color: var(--brass);
+}
+.lib__badge {
+  background: var(--brass);
+  color: var(--on-brass);
+  border-radius: 999px;
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
 }
 .lib__avatar {
   width: 40px;

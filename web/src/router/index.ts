@@ -23,6 +23,11 @@ const routes: RouteRecordRaw[] = [
     name: 'ingest',
     component: () => import('@/views/IngestVerifyView.vue'),
   },
+  {
+    path: '/review',
+    name: 'review',
+    component: () => import('@/views/ReviewView.vue'),
+  },
 ]
 
 export const router = createRouter({

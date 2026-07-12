@@ -51,6 +51,7 @@ type config struct {
 	coverFetch     bool   // LYCEUM_COVER_FETCH — enable external cover fetching (default true)
 	coverBaseURL   string // LYCEUM_COVER_BASE_URL — override the Open Library base (testing/self-host)
 	coverNormalize bool   // LYCEUM_COVER_NORMALIZE — trim/aspect/downscale stored covers at ingest (default true)
+	ingestQC       bool   // LYCEUM_INGEST_QC — hold flagged new ingests for review (default true)
 
 	// ISBN ingest (LYCM-603): resolve scanned ISBNs / titles to candidate
 	// editions during batch review. Metadata-only (Open Library); distinct from
@@ -85,6 +86,7 @@ func loadConfig() config {
 		coverFetch:     envBool("LYCEUM_COVER_FETCH", true),
 		coverBaseURL:   os.Getenv("LYCEUM_COVER_BASE_URL"),
 		coverNormalize: envBool("LYCEUM_COVER_NORMALIZE", true),
+		ingestQC:       envBool("LYCEUM_INGEST_QC", true),
 
 		editionResolve: envBool("LYCEUM_EDITION_RESOLVE", true),
 		editionBaseURL: os.Getenv("LYCEUM_EDITION_BASE_URL"),
@@ -168,6 +170,13 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	opts = append(opts, api.WithCoverNormalize(cfg.coverNormalize))
 	if !cfg.coverNormalize {
 		log.Printf("config: cover normalization disabled (LYCEUM_COVER_NORMALIZE); storing covers verbatim")
+	}
+
+	opts = append(opts, api.WithIngestQC(cfg.ingestQC))
+	if cfg.ingestQC {
+		log.Printf("ingest QC enabled: flagged new ingests held for review")
+	} else {
+		log.Printf("config: ingest QC disabled (LYCEUM_INGEST_QC); all ingests publish immediately")
 	}
 
 	if cfg.editionResolve {

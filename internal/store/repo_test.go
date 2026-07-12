@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,8 +28,12 @@ func newStore(t *testing.T) *Store {
 // schema_migrations) intact. RESTART IDENTITY resets the BIGINT id sequences.
 func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	// inventory_isbns and the ingest_* tables are listed explicitly rather than
+	// left to CASCADE: this persistent test schema predates some of their FKs, so
+	// relying on cascade let stale rows survive between tests.
 	_, err := pool.Exec(ctx,
-		`TRUNCATE reading_positions, devices, inventory, books RESTART IDENTITY CASCADE`)
+		`TRUNCATE reading_positions, devices, inventory_isbns, inventory,
+		         ingest_candidates, ingest_batches, books RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -68,7 +73,7 @@ func TestInsertAndGetBook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBook: %v", err)
 	}
-	if fetched != got {
+	if !reflect.DeepEqual(fetched, got) {
 		t.Fatalf("GetBook mismatch: got %+v want %+v", fetched, got)
 	}
 }
