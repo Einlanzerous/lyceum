@@ -370,6 +370,9 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "confirm candidate", err)
 		return
 	}
+	// This may have resolved the last reviewable candidate; close the batch so it
+	// doesn't stay open with nothing left to review.
+	a.closeBatchIfDone(ctx, saved.BatchID)
 	writeJSON(w, http.StatusOK, confirmResponse{
 		Candidate: toCandidateJSON(saved),
 		Inventory: toInventoryJSON(inv),
@@ -433,6 +436,8 @@ func (a *API) handleCandidateSkip(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "skip candidate", err)
 		return
 	}
+	// Skipping the last reviewable candidate also completes the batch.
+	a.closeBatchIfDone(ctx, c.BatchID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -497,6 +502,35 @@ func hasReviewable(cands []store.Candidate) bool {
 		}
 	}
 	return false
+}
+
+// closeBatchIfDone transitions a batch to confirmed once none of its candidates
+// are still reviewable (ready/review) — i.e. everything has been confirmed,
+// skipped, or was unmatched. It is called after a single confirm/skip so a
+// fully-resolved batch stops lingering in the open list (the batch-level
+// confirm-ready path does the same check inline). Best-effort: it is invoked
+// after the candidate action already succeeded, so any failure is logged, not
+// surfaced. Only an open batch is closed, so a discarded batch is left alone.
+func (a *API) closeBatchIfDone(ctx context.Context, batchID int64) {
+	cands, err := a.store.ListCandidates(ctx, batchID)
+	if err != nil {
+		log.Printf("api: close-check batch %d: list candidates: %v", batchID, err)
+		return
+	}
+	if hasReviewable(cands) {
+		return
+	}
+	b, err := a.store.GetBatch(ctx, batchID)
+	if err != nil {
+		log.Printf("api: close-check batch %d: get batch: %v", batchID, err)
+		return
+	}
+	if b.Status != store.BatchOpen {
+		return
+	}
+	if _, err := a.store.SetBatchStatus(ctx, batchID, store.BatchConfirmed); err != nil {
+		log.Printf("api: mark batch %d confirmed: %v", batchID, err)
+	}
 }
 
 // ---- add-by-title ----

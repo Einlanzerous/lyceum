@@ -214,6 +214,46 @@ func TestBatchConfirmReady(t *testing.T) {
 	}
 }
 
+// Confirming/skipping candidates one at a time (what the web verify view does)
+// must close the batch once nothing reviewable remains — otherwise a fully
+// resolved batch lingers open with no visible candidates.
+func TestSingleConfirmAndSkipCloseBatch(t *testing.T) {
+	srv, _ := ingestServer(t, &recordingAcquirer{})
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnPiranesi}, {"isbn": isbnDune}},
+	}))
+	id := map[string]int64{}
+	for _, c := range b.Candidates {
+		id[c.ISBN] = c.ID
+	}
+
+	batchStatus := func() string {
+		return decodeBatch(t, mustGet(t, srv.URL+"/ingest/batches/"+itoa(b.ID))).Status
+	}
+
+	// Confirm the ready item: the review item is still outstanding, so the batch
+	// must stay open.
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(id[isbnPiranesi])+"/confirm", map[string]any{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirm status = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if s := batchStatus(); s != store.BatchOpen {
+		t.Fatalf("batch status = %q after confirming 1 of 2, want open", s)
+	}
+
+	// Skip the last reviewable candidate: now nothing reviewable remains, so the
+	// batch auto-closes to confirmed.
+	resp = postJSON(t, srv.URL+"/ingest/candidates/"+itoa(id[isbnDune])+"/skip", map[string]any{})
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("skip status = %d, want 204", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if s := batchStatus(); s != store.BatchConfirmed {
+		t.Fatalf("batch status = %q after resolving all candidates, want confirmed", s)
+	}
+}
+
 // A scan whose ISBN is already a shelved library book is flagged duplicate, not
 // re-resolved.
 func TestBatchDedupeAgainstLibrary(t *testing.T) {
