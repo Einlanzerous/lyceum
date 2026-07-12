@@ -154,22 +154,24 @@ function pct(b: Book): number {
   cursor: pointer;
 }
 
+/* minmax(0, 1fr): don't let a long nowrap member title widen its whole track
+   (LYCM-80). */
 .drawer__grid {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 22px;
 }
 @media (max-width: 1200px) {
   .drawer__grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 760px) {
   .drawer__grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 .drawer__link {

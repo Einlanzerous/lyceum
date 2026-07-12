@@ -908,7 +908,8 @@ function relTime(iso: string): string {
 .detail__fields {
   margin-top: 20px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, 1fr): equal tracks even when a field value is long (LYCM-80). */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px 26px;
 }
 .detail__fields dt,
