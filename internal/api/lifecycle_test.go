@@ -129,6 +129,91 @@ func TestAdoptSourcePathOnDuplicate(t *testing.T) {
 	}
 }
 
+// TestReplaceOnRecasedPath verifies the LYCM-68 fix: the acquisition pipeline
+// re-cases folder names between imports, so re-encoded content arriving at a
+// path that differs from the stored one only by case must update the existing
+// book in place (and adopt the new casing) — not ingest a duplicate row.
+func TestReplaceOnRecasedPath(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	ctx := context.Background()
+	const pathV1 = "/data/media/books/Victor Milán/The dinosaur knights (2016)/The dinosaur knights.epub"
+	const pathV2 = "/data/media/books/Victor Milán/The Dinosaur Knights (2016)/The Dinosaur Knights.epub"
+
+	v1 := epubWithIdentifier(t, "The Dinosaur Knights", "urn:isbn:9780765332677")
+	b1, result, err := a.ingestEPUB(ctx, v1, pathV1, pathV1)
+	if err != nil || result != ingestCreated {
+		t.Fatalf("first ingest: result=%v err=%v", result, err)
+	}
+
+	// Re-organized: same book re-encoded (new bytes) at a re-cased path.
+	v2 := epubWithIdentifier(t, "The Dinosaur Knights (v2)", "urn:isbn:9780765332677")
+	b2, result, err := a.ingestEPUB(ctx, v2, pathV2, pathV2)
+	if err != nil {
+		t.Fatalf("re-cased ingest err: %v", err)
+	}
+	if result != ingestReplaced {
+		t.Fatalf("re-cased ingest result=%v, want ingestReplaced", result)
+	}
+	if b2.ID != b1.ID {
+		t.Fatalf("re-cased path created a new id %d, want %d (no duplicate)", b2.ID, b1.ID)
+	}
+	if b2.SourcePath != pathV2 {
+		t.Fatalf("source_path=%q after re-cased replace, want adopted %q", b2.SourcePath, pathV2)
+	}
+
+	books, err := s.ListBooks(ctx)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("library has %d books after re-cased re-ingest, want 1", len(books))
+	}
+}
+
+// TestAdoptRecasedPathOnDuplicate covers the rename-only variant of LYCM-68:
+// identical bytes reappear at a re-cased path (moved, not re-encoded). The
+// content-hash dedup hits, and the row adopts the new casing so source_path
+// keeps naming the file as it exists on disk.
+func TestAdoptRecasedPathOnDuplicate(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	ctx := context.Background()
+	const pathV1 = "/data/media/books/recase/lower title.epub"
+	const pathV2 = "/data/media/books/recase/Lower Title.epub"
+
+	data := epubWithIdentifier(t, "Lower Title", "urn:isbn:9780618260300")
+	b1, result, err := a.ingestEPUB(ctx, data, pathV1, pathV1)
+	if err != nil || result != ingestCreated {
+		t.Fatalf("first ingest: result=%v err=%v", result, err)
+	}
+
+	b2, result, err := a.ingestEPUB(ctx, data, pathV2, pathV2)
+	if err != nil {
+		t.Fatalf("re-cased duplicate ingest err: %v", err)
+	}
+	if result != ingestDuplicate {
+		t.Fatalf("re-cased duplicate result=%v, want ingestDuplicate", result)
+	}
+	if b2.ID != b1.ID {
+		t.Fatalf("re-cased duplicate created id %d, want %d", b2.ID, b1.ID)
+	}
+	if b2.SourcePath != pathV2 {
+		t.Fatalf("source_path=%q, want adopted %q", b2.SourcePath, pathV2)
+	}
+
+	// An unrelated existing path must NOT be stolen by a different path that
+	// happens to carry identical bytes.
+	const otherPath = "/data/media/books/elsewhere/other-copy.epub"
+	b3, result, err := a.ingestEPUB(ctx, data, otherPath, otherPath)
+	if err != nil || result != ingestDuplicate {
+		t.Fatalf("unrelated-path duplicate: result=%v err=%v", result, err)
+	}
+	if b3.SourcePath != pathV2 {
+		t.Fatalf("source_path=%q after unrelated-path duplicate, want unchanged %q", b3.SourcePath, pathV2)
+	}
+}
+
 // TestDeleteBookEndpoint verifies DELETE /books/{id} removes the row and its
 // blobs (204), and 404s an unknown id.
 func TestDeleteBookEndpoint(t *testing.T) {
