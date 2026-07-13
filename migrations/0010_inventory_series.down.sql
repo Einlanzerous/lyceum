@@ -1,0 +1,2 @@
+ALTER TABLE inventory DROP COLUMN IF EXISTS series_index;
+ALTER TABLE inventory DROP COLUMN IF EXISTS series;

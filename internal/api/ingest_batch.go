@@ -418,12 +418,31 @@ func (a *API) confirmCandidate(ctx context.Context, c store.Candidate, series st
 	if series != "" {
 		c.Series = series
 		c.SeriesIndex = seriesIndex
+		inv = a.recordSeriesIntent(ctx, inv, series, seriesIndex)
 	}
 	saved, err := a.store.UpdateCandidate(ctx, c)
 	if err != nil {
 		return store.Inventory{}, store.Candidate{}, err
 	}
 	return inv, saved, nil
+}
+
+// recordSeriesIntent stamps the confirm-time series onto the inventory row so
+// the later EPUB ingest can apply it to the book (LYCM-82 — the grab arrives
+// under the ebook ISBN, so inventory is the only reliable rendezvous). When a
+// book is already linked, the intent is applied to it immediately. Best effort:
+// series is a display nicety, so a failure here logs and never fails the
+// confirm that just recorded ownership.
+func (a *API) recordSeriesIntent(ctx context.Context, inv store.Inventory, series string, seriesIndex float64) store.Inventory {
+	updated, err := a.store.SetInventorySeries(ctx, inv.ISBN, series, seriesIndex)
+	if err != nil {
+		log.Printf("api: record series intent isbn=%s: %v", inv.ISBN, err)
+		return inv
+	}
+	if updated.BookID != nil {
+		a.applySeriesIntent(ctx, *updated.BookID, series, seriesIndex)
+	}
+	return updated
 }
 
 // handleCandidateSkip removes a candidate from review without shelving it.

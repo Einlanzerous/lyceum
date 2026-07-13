@@ -36,30 +36,39 @@ func ValidState(s string) bool {
 // independently of any EPUB: a scanned physical book has an inventory row with
 // no BookID until a digital copy is acquired and ingested. See migration 0003.
 type Inventory struct {
-	ID        int64
-	ISBN      string // the primary/first-seen ISBN-13; see inventory_isbns for the full set
-	Title     string
-	Author    string
-	WorkID    string // OpenLibrary work key grouping print/ebook editions (LYCM-35); "" if unknown
-	State     string
-	BookID    *int64 // the ingested EPUB, once one is linked
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID     int64
+	ISBN   string // the primary/first-seen ISBN-13; see inventory_isbns for the full set
+	Title  string
+	Author string
+	WorkID string // OpenLibrary work key grouping print/ebook editions (LYCM-35); "" if unknown
+	State  string
+	BookID *int64 // the ingested EPUB, once one is linked
+	// Series and SeriesIndex carry the series intent assigned at ingest confirm
+	// (LYCM-82). Ingest applies them to the linked book when the EPUB itself
+	// declares no series; "" / 0 when no intent was recorded.
+	Series      string
+	SeriesIndex float64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 const inventoryColumns = `id, isbn, COALESCE(title, ''), COALESCE(author, ''),
-	COALESCE(work_id, ''), acquisition_state, book_id, created_at, updated_at`
+	COALESCE(work_id, ''), acquisition_state, book_id,
+	COALESCE(series, ''), COALESCE(series_index, 0), created_at, updated_at`
 
 // inventoryColumnsQ is inventoryColumns table-qualified, for queries that JOIN
 // inventory_isbns (whose created_at would otherwise be ambiguous).
 const inventoryColumnsQ = `inventory.id, inventory.isbn, COALESCE(inventory.title, ''),
 	COALESCE(inventory.author, ''), COALESCE(inventory.work_id, ''),
-	inventory.acquisition_state, inventory.book_id, inventory.created_at, inventory.updated_at`
+	inventory.acquisition_state, inventory.book_id,
+	COALESCE(inventory.series, ''), COALESCE(inventory.series_index, 0),
+	inventory.created_at, inventory.updated_at`
 
 func scanInventory(row pgx.Row) (Inventory, error) {
 	var inv Inventory
 	err := row.Scan(&inv.ID, &inv.ISBN, &inv.Title, &inv.Author, &inv.WorkID,
-		&inv.State, &inv.BookID, &inv.CreatedAt, &inv.UpdatedAt)
+		&inv.State, &inv.BookID, &inv.Series, &inv.SeriesIndex,
+		&inv.CreatedAt, &inv.UpdatedAt)
 	return inv, err
 }
 
@@ -110,6 +119,25 @@ func (s *Store) SetInventoryState(ctx context.Context, isbn, state string) (Inve
 	}
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: set inventory state: %w", err)
+	}
+	return inv, nil
+}
+
+// SetInventorySeries records the series intent for the entry whose primary ISBN
+// is isbn (LYCM-82). Confirm is an explicit user action, so a re-confirm
+// overwrites earlier intent; an empty series clears it (index stores NULL for
+// unknown positions, matching books.series_index semantics). Returns the
+// updated row, or ErrNotFound when no entry has the ISBN.
+func (s *Store) SetInventorySeries(ctx context.Context, isbn, series string, index float64) (Inventory, error) {
+	inv, err := scanInventory(s.pool.QueryRow(ctx,
+		`UPDATE inventory SET series = $2, series_index = $3, updated_at = now()
+		 WHERE isbn = $1
+		 RETURNING `+inventoryColumns, isbn, nullString(series), nullFloat(index)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Inventory{}, ErrNotFound
+	}
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: set inventory series: %w", err)
 	}
 	return inv, nil
 }

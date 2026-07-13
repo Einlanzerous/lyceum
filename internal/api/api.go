@@ -51,10 +51,15 @@ type Store interface {
 	// Inventory (LYCM-601): ownership/acquisition state keyed by ISBN.
 	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
+	SetInventorySeries(ctx context.Context, isbn, series string, index float64) (store.Inventory, error)
 	LinkBookToInventory(ctx context.Context, isbn, workID string, bookID int64, title, author string) (store.Inventory, error)
 	ListInventory(ctx context.Context) ([]store.Inventory, error)
 	GetInventoryByISBN(ctx context.Context, isbn string) (store.Inventory, error)
 	GetInventoryByAnyISBN(ctx context.Context, isbn string) (store.Inventory, error)
+
+	// Series intent application (LYCM-82): the confirm-time series lands on the
+	// book once its EPUB ingests (or immediately, when one is already linked).
+	UpdateBookSeries(ctx context.Context, id int64, series string, index float64) (store.Book, error)
 
 	// ISBN ingest batch review (LYCM-603): scans -> candidates -> confirm.
 	CreateBatch(ctx context.Context, sourceDevice string) (store.Batch, error)
