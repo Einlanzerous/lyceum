@@ -250,7 +250,9 @@ func (a *API) chooseCover(ctx context.Context, md *epub.Metadata) []byte {
 // linkInventory links a freshly-ingested book to its inventory entry by the
 // ISBN carried in the EPUB's dc:identifiers, if any. EPUBs frequently identify
 // themselves by UUID (sometimes ahead of the ISBN), so a missing ISBN is the
-// normal case and not an error.
+// normal case and not an error. A series assigned at ingest confirm rides on
+// the inventory row (LYCM-82); it is applied here when the EPUB itself declares
+// no series — an embedded series wins, matching the fill-gap cover policy.
 func (a *API) linkInventory(ctx context.Context, book store.Book, md *epub.Metadata) {
 	code, ok := isbn.FirstFrom(md.Identifiers)
 	if !ok {
@@ -260,9 +262,33 @@ func (a *API) linkInventory(ctx context.Context, book store.Book, md *epub.Metad
 	// even though their ISBNs differ (LYCM-35). Best effort: no resolver / no
 	// match falls back to exact-ISBN linking.
 	workID := a.resolveWorkID(ctx, code)
-	if _, err := a.store.LinkBookToInventory(ctx, code, workID, book.ID, book.Title, book.Author); err != nil {
+	inv, err := a.store.LinkBookToInventory(ctx, code, workID, book.ID, book.Title, book.Author)
+	if err != nil {
 		log.Printf("api: link inventory isbn=%s book=%d: %v", code, book.ID, err)
+		return
 	}
+	if book.Series == "" && inv.Series != "" {
+		a.applySeriesIntent(ctx, book.ID, inv.Series, inv.SeriesIndex)
+	}
+}
+
+// applySeriesIntent writes a confirm-time series assignment onto a book, unless
+// the book already carries one from its own metadata (fill-gap, LYCM-82). Best
+// effort: a failure logs and never disturbs the ingest/confirm that called it.
+func (a *API) applySeriesIntent(ctx context.Context, bookID int64, series string, index float64) {
+	book, err := a.store.GetBook(ctx, bookID)
+	if err != nil {
+		log.Printf("api: apply series intent book=%d: %v", bookID, err)
+		return
+	}
+	if book.Series != "" {
+		return // the EPUB's own metadata wins
+	}
+	if _, err := a.store.UpdateBookSeries(ctx, bookID, series, index); err != nil {
+		log.Printf("api: apply series intent book=%d: %v", bookID, err)
+		return
+	}
+	log.Printf("api: applied series intent %q #%v to book %d", series, index, bookID)
 }
 
 // resolveWorkID best-effort resolves an ISBN to its resolver work key, so print
