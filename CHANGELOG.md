@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/Einlanzerous/lyceum/compare/v1.3.2...v1.3.3) (2026-07-13)
+
+
+### Bug Fixes
+
+* **ingest:** carry confirm-time series intent through inventory to the ingested book (LYCM-82) ([#41](https://github.com/Einlanzerous/lyceum/issues/41)) ([e783070](https://github.com/Einlanzerous/lyceum/commit/e7830707fabdb9b70e29f7c0bf75d9cf6805ed7f))
+
 ## [1.3.2](https://github.com/Einlanzerous/lyceum/compare/v1.3.1...v1.3.2) (2026-07-12)
 
 
