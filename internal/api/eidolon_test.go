@@ -66,7 +66,7 @@ func TestEidolonLocation(t *testing.T) {
 
 	when := time.Date(2026, 6, 26, 19, 0, 0, 0, time.UTC)
 	if _, err := s.UpsertPositionLWW(context.Background(), store.ReadingPosition{
-		BookID: b.ID, DeviceID: "kobo-1",
+		BookID: b.ID, UserID: ownerID(context.Background(), t, s), DeviceID: "kobo-1",
 		CFI:       "epubcfi(/6/2[c1]!/4/2/1:0)", // spine index 0 -> chapter1
 		Progress:  0.42,
 		UpdatedAt: when,

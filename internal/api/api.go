@@ -26,8 +26,8 @@ type Store interface {
 	ListBooks(ctx context.Context) ([]store.Book, error)
 	GetBook(ctx context.Context, id int64) (store.Book, error)
 	GetBookByHash(ctx context.Context, hash string) (store.Book, error)
-	GetFurthestPosition(ctx context.Context, bookID int64) (store.ReadingPosition, error)
-	GetPosition(ctx context.Context, bookID int64, deviceID string) (store.ReadingPosition, error)
+	GetFurthestPosition(ctx context.Context, bookID, userID int64) (store.ReadingPosition, error)
+	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
 	SaveBlobs(fileHash string, epub, cover []byte) (filePath, coverPath string, err error)
@@ -70,6 +70,19 @@ type Store interface {
 	GetCandidate(ctx context.Context, id int64) (store.Candidate, error)
 	ListCandidates(ctx context.Context, batchID int64) ([]store.Candidate, error)
 	UpdateCandidate(ctx context.Context, c store.Candidate) (store.Candidate, error)
+
+	// Accounts (LYCM-801): the household's users plus the invite/session tokens
+	// that authenticate them. See session.go.
+	CreateUser(ctx context.Context, email, displayName string) (store.User, error)
+	GetUser(ctx context.Context, id int64) (store.User, error)
+	GetOwner(ctx context.Context) (store.User, error)
+	ListUsers(ctx context.Context) ([]store.User, error)
+	UpdateDisplayName(ctx context.Context, id int64, displayName string) (store.User, error)
+	DeleteUser(ctx context.Context, id int64) error
+	MintToken(ctx context.Context, userID int64, kind, label string, expiresAt *time.Time) (string, error)
+	UserByToken(ctx context.Context, plaintext string) (store.User, error)
+	RedeemInvite(ctx context.Context, plaintext, deviceLabel string) (store.User, string, error)
+	RevokeToken(ctx context.Context, plaintext string) error
 }
 
 // API bundles the dependencies the handlers need.
@@ -88,8 +101,30 @@ type API struct {
 	wantSem chan struct{}
 	wantWG  sync.WaitGroup
 
+	// ownerUser memoises the owner account (LYCM-801). With user auth off it is
+	// resolved on every request, so re-querying it would cost a round-trip per
+	// cover blob; see (*API).owner in session.go.
+	ownerMu   sync.RWMutex
+	ownerUser store.User
+
 	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
 	ingestQC        bool // hold flagged new ingests for review (LYCM-58); off unless wired
+	userAuth        bool // require a session token on the reader core (LYCM-801)
+}
+
+// blobCacheControl is the caching policy for the cover and EPUB blob routes.
+//
+// The bytes are content-addressed and immutable, so they can be cached hard. But
+// once the routes require a session (LYCM-801) the response must not be marked
+// `public`: a shared cache in front of Lyceum — a reverse proxy, or the
+// Cloudflare edge the LYCM-803 work puts us behind — would happily store one
+// and then serve it to a caller with no session at all, routing straight around
+// the gate. `private` keeps it in the browser's own cache, where it belongs.
+func (a *API) blobCacheControl() string {
+	if a.userAuth {
+		return "private, max-age=31536000, immutable"
+	}
+	return "public, max-age=31536000, immutable"
 }
 
 // Option configures an API at construction time.
@@ -129,6 +164,20 @@ func WithIngestQC(enabled bool) Option {
 	return func(a *API) { a.ingestQC = enabled }
 }
 
+// WithUserAuth toggles session-token enforcement on the reader core (LYCM-801).
+//
+// It is off by default, and main.go leaves it off unless LYCEUM_AUTH is set.
+// While off, every request to a gated route is served as the owner — the exact
+// behaviour Lyceum had before accounts existed — so a server whose clients don't
+// yet sign in keeps working. The clients gain a sign-in screen in a follow-up,
+// and flipping this on is what actually closes the door.
+//
+// It never affects the /eidolon and send-to-kindle routes: those are guarded by
+// the separate service-token scopes (see auth.go) and are closed either way.
+func WithUserAuth(enabled bool) Option {
+	return func(a *API) { a.userAuth = enabled }
+}
+
 // New builds an API over the given store. dataDir is retained for symmetry with
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
@@ -148,42 +197,57 @@ func New(s Store, dataDir string, opts ...Option) *API {
 // mount it (it does not register /healthz, which main.go owns).
 func (a *API) Handler() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /upload", a.handleUpload)
-	mux.HandleFunc("GET /library", a.handleLibrary)
 
-	// Inventory (LYCM-601): the scan/capture surface LYCM-602 feeds. Open like
-	// /upload and /library — the personal read/write core, not the scoped
-	// ecosystem hooks.
-	mux.HandleFunc("POST /inventory", a.handleInventoryCreate)
-	mux.HandleFunc("GET /inventory", a.handleInventoryList)
+	// Sign-in (LYCM-801). Redeeming an invite is the one route that must stay
+	// reachable without a session — it is how a client gets one.
+	mux.HandleFunc("POST /auth/session", a.handleAuthSession)
+	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
+	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
+	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
+
+	// Household administration (LYCM-801). Owner only. POST /admin/users is the
+	// hook Purser's `lyceum` connector calls (SERV-38).
+	mux.HandleFunc("POST /admin/users", a.requireOwner(a.handleAdminUserCreate))
+	mux.HandleFunc("GET /admin/users", a.requireOwner(a.handleAdminUserList))
+	mux.HandleFunc("POST /admin/users/{id}/invite", a.requireOwner(a.handleAdminUserInvite))
+	mux.HandleFunc("DELETE /admin/users/{id}", a.requireOwner(a.handleAdminUserDelete))
+
+	// The reader core. Every route below is the household's own read/write
+	// surface and requires a signed-in user (LYCM-801) — distinct from the
+	// scoped service tokens that guard the ecosystem hooks further down.
+	mux.HandleFunc("POST /upload", a.requireUser(a.handleUpload))
+	mux.HandleFunc("GET /library", a.requireUser(a.handleLibrary))
+
+	// Inventory (LYCM-601): the scan/capture surface LYCM-602 feeds.
+	mux.HandleFunc("POST /inventory", a.requireUser(a.handleInventoryCreate))
+	mux.HandleFunc("GET /inventory", a.requireUser(a.handleInventoryList))
 
 	// ISBN ingest batch review (LYCM-603): upload scans, verify matches on the
-	// desktop, confirm into inventory. Open like /inventory — the personal
-	// read/write core, not the scoped ecosystem hooks.
-	mux.HandleFunc("POST /ingest/batches", a.handleBatchCreate)
-	mux.HandleFunc("GET /ingest/batches", a.handleBatchList)
-	mux.HandleFunc("GET /ingest/batches/{id}", a.handleBatchGet)
-	mux.HandleFunc("POST /ingest/batches/{id}/candidates", a.handleBatchAddCandidate)
-	mux.HandleFunc("POST /ingest/batches/{id}/confirm-ready", a.handleBatchConfirmReady)
-	mux.HandleFunc("POST /ingest/candidates/{id}/pick", a.handleCandidatePick)
-	mux.HandleFunc("POST /ingest/candidates/{id}/confirm", a.handleCandidateConfirm)
-	mux.HandleFunc("POST /ingest/candidates/{id}/skip", a.handleCandidateSkip)
-	mux.HandleFunc("GET /ingest/search", a.handleIngestSearch)
+	// desktop, confirm into inventory.
+	mux.HandleFunc("POST /ingest/batches", a.requireUser(a.handleBatchCreate))
+	mux.HandleFunc("GET /ingest/batches", a.requireUser(a.handleBatchList))
+	mux.HandleFunc("GET /ingest/batches/{id}", a.requireUser(a.handleBatchGet))
+	mux.HandleFunc("POST /ingest/batches/{id}/candidates", a.requireUser(a.handleBatchAddCandidate))
+	mux.HandleFunc("POST /ingest/batches/{id}/confirm-ready", a.requireUser(a.handleBatchConfirmReady))
+	mux.HandleFunc("POST /ingest/candidates/{id}/pick", a.requireUser(a.handleCandidatePick))
+	mux.HandleFunc("POST /ingest/candidates/{id}/confirm", a.requireUser(a.handleCandidateConfirm))
+	mux.HandleFunc("POST /ingest/candidates/{id}/skip", a.requireUser(a.handleCandidateSkip))
+	mux.HandleFunc("GET /ingest/search", a.requireUser(a.handleIngestSearch))
 
-	mux.HandleFunc("PUT /sync", a.handleSyncPut)
-	mux.HandleFunc("GET /sync", a.handleSyncGet)
-	mux.HandleFunc("GET /books/{id}", a.handleGetBook)
-	mux.HandleFunc("GET /books/{id}/cover", a.handleCover)
-	mux.HandleFunc("GET /books/{id}/file", a.handleFile)
-	mux.HandleFunc("DELETE /books/{id}", a.handleDelete)
-	mux.HandleFunc("PATCH /books/{id}", a.handleUpdateBook)
-	mux.HandleFunc("PUT /books/{id}/finished", a.handleSetFinished)
+	mux.HandleFunc("PUT /sync", a.requireUser(a.handleSyncPut))
+	mux.HandleFunc("GET /sync", a.requireUser(a.handleSyncGet))
+	mux.HandleFunc("GET /books/{id}", a.requireUser(a.handleGetBook))
+	mux.HandleFunc("GET /books/{id}/cover", a.requireUser(a.handleCover))
+	mux.HandleFunc("GET /books/{id}/file", a.requireUser(a.handleFile))
+	mux.HandleFunc("DELETE /books/{id}", a.requireUser(a.handleDelete))
+	mux.HandleFunc("PATCH /books/{id}", a.requireUser(a.handleUpdateBook))
+	mux.HandleFunc("PUT /books/{id}/finished", a.requireUser(a.handleSetFinished))
 
 	// Ingest QC review queue (LYCM-58): held books plus approve / replace-cover.
-	mux.HandleFunc("GET /ingest/review", a.handleReviewList)
-	mux.HandleFunc("POST /books/{id}/approve", a.handleApprove)
-	mux.HandleFunc("POST /books/{id}/cover", a.handleReplaceCover)
-	mux.HandleFunc("POST /books/{id}/cover/refetch", a.handleRefetchCover)
+	mux.HandleFunc("GET /ingest/review", a.requireUser(a.handleReviewList))
+	mux.HandleFunc("POST /books/{id}/approve", a.requireUser(a.handleApprove))
+	mux.HandleFunc("POST /books/{id}/cover", a.requireUser(a.handleReplaceCover))
+	mux.HandleFunc("POST /books/{id}/cover/refetch", a.requireUser(a.handleRefetchCover))
 
 	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
 	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
@@ -226,6 +290,10 @@ func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
 
 // bookJSONFor assembles the wire shape for one book, folding in its cover URL,
 // series fields, latest reading position, and finished state.
+//
+// Progress and ReadAt are those of the signed-in user (LYCM-801): the shelf is
+// shared, but each person sees their own place in it. ctx must come from a
+// request handled behind requireUser.
 func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 	entry := bookJSON{
 		ID:       b.ID,
@@ -246,7 +314,7 @@ func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 		idx := b.SeriesIndex
 		entry.SeriesIndex = &idx
 	}
-	if pos, err := a.store.GetFurthestPosition(ctx, b.ID); err == nil {
+	if pos, err := a.store.GetFurthestPosition(ctx, b.ID, userFrom(ctx).ID); err == nil {
 		p := pos.Progress
 		entry.Progress = &p
 		entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
@@ -314,7 +382,7 @@ func (a *API) handleCover(w http.ResponseWriter, r *http.Request) {
 	// Covers are content-addressed and effectively immutable, so they can be
 	// cached aggressively. Content-Type is sniffed since the blob is stored
 	// extensionless (cover.bin).
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", a.blobCacheControl())
 	serveBlob(w, r, b.CoverPath, "")
 }
 
@@ -323,7 +391,7 @@ func (a *API) handleFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", a.blobCacheControl())
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fmt.Sprintf("book-%d.epub", b.ID)))
 	serveBlob(w, r, b.FilePath, "application/epub+zip")
 }

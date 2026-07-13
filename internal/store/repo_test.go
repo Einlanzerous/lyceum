@@ -37,6 +37,26 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+	// users is deliberately NOT truncated: migration 0011 seeds exactly one owner
+	// and the schema insists on it. Clear the members and every credential
+	// instead, so each case starts from a lone, token-less owner (LYCM-801).
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM user_tokens; DELETE FROM users WHERE NOT is_owner`); err != nil {
+		t.Fatalf("reset users: %v", err)
+	}
+}
+
+// ownerID is the account that migration 0011 seeds and that adopts all
+// pre-accounts reading history. Reading positions are per-user, so tests that
+// write them directly through the store hang them off the owner — which is also
+// who the API serves when user auth is off.
+func ownerID(ctx context.Context, t *testing.T, s *Store) int64 {
+	t.Helper()
+	owner, err := s.GetOwner(ctx)
+	if err != nil {
+		t.Fatalf("GetOwner: %v", err)
+	}
+	return owner.ID
 }
 
 func sampleBook(hash string) Book {
@@ -250,6 +270,8 @@ func TestPositionUpsertAndGet(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
+	owner := ownerID(ctx, t, s)
+
 	book, err := s.InsertBook(ctx, sampleBook("pos-hash"))
 	if err != nil {
 		t.Fatalf("InsertBook: %v", err)
@@ -263,13 +285,13 @@ func TestPositionUpsertAndGet(t *testing.T) {
 	}{
 		{
 			name:     "insert",
-			pos:      ReadingPosition{BookID: book.ID, DeviceID: "kobo-1", CFI: "/6/4!/2", Progress: 0.1},
+			pos:      ReadingPosition{BookID: book.ID, UserID: owner, DeviceID: "kobo-1", CFI: "/6/4!/2", Progress: 0.1},
 			wantCFI:  "/6/4!/2",
 			wantProg: 0.1,
 		},
 		{
 			name:     "update same device",
-			pos:      ReadingPosition{BookID: book.ID, DeviceID: "kobo-1", CFI: "/6/8!/4", Progress: 0.42},
+			pos:      ReadingPosition{BookID: book.ID, UserID: owner, DeviceID: "kobo-1", CFI: "/6/8!/4", Progress: 0.42},
 			wantCFI:  "/6/8!/4",
 			wantProg: 0.42,
 		},
@@ -285,7 +307,7 @@ func TestPositionUpsertAndGet(t *testing.T) {
 				t.Fatalf("saved = %+v, want cfi=%q prog=%v", saved, tc.wantCFI, tc.wantProg)
 			}
 
-			got, err := s.GetPosition(ctx, book.ID, tc.pos.DeviceID)
+			got, err := s.GetPosition(ctx, book.ID, owner, tc.pos.DeviceID)
 			if err != nil {
 				t.Fatalf("GetPosition: %v", err)
 			}
@@ -308,7 +330,7 @@ func TestPositionUpsertAndGet(t *testing.T) {
 
 func TestGetPositionNotFound(t *testing.T) {
 	s := newStore(t)
-	if _, err := s.GetPosition(context.Background(), 1, "ghost"); err != ErrNotFound {
+	if _, err := s.GetPosition(context.Background(), 1, 1, "ghost"); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -317,30 +339,32 @@ func TestGetFurthestPosition(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
+	owner := ownerID(ctx, t, s)
+
 	book, err := s.InsertBook(ctx, sampleBook("furthest-hash"))
 	if err != nil {
 		t.Fatalf("InsertBook: %v", err)
 	}
 
-	if _, err := s.GetFurthestPosition(ctx, book.ID); err != ErrNotFound {
+	if _, err := s.GetFurthestPosition(ctx, book.ID, owner); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound with no positions, got %v", err)
 	}
 
 	// device-a read furthest (page 90).
 	if _, err := s.UpsertPosition(ctx, ReadingPosition{
-		BookID: book.ID, DeviceID: "device-a", CFI: "/90", Progress: 0.9,
+		BookID: book.ID, UserID: owner, DeviceID: "device-a", CFI: "/90", Progress: 0.9,
 	}); err != nil {
 		t.Fatalf("upsert a: %v", err)
 	}
 	// device-b wrote LATER but at the very start (e.g. a still-open reader that
 	// flushed a pre-pagination progress=0 on navigation). It must NOT win.
 	if _, err := s.UpsertPosition(ctx, ReadingPosition{
-		BookID: book.ID, DeviceID: "device-b", CFI: "/2", Progress: 0,
+		BookID: book.ID, UserID: owner, DeviceID: "device-b", CFI: "/2", Progress: 0,
 	}); err != nil {
 		t.Fatalf("upsert b: %v", err)
 	}
 
-	pos, err := s.GetFurthestPosition(ctx, book.ID)
+	pos, err := s.GetFurthestPosition(ctx, book.ID, owner)
 	if err != nil {
 		t.Fatalf("GetFurthestPosition: %v", err)
 	}

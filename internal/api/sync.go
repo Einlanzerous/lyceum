@@ -85,6 +85,7 @@ func (a *API) handleSyncPut(w http.ResponseWriter, r *http.Request) {
 
 	saved, err := a.store.UpsertPositionLWW(r.Context(), store.ReadingPosition{
 		BookID:    req.BookID,
+		UserID:    userFrom(r.Context()).ID,
 		DeviceID:  req.DeviceID,
 		CFI:       req.CFI,
 		Progress:  req.Progress,
@@ -113,11 +114,12 @@ func (a *API) handleSyncGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resume from the furthest position across all devices, not this device's own
-	// bookmark: reading further on any device advances the resume point
-	// everywhere, and a stale/zero write can't drag it backward (LYCM sync fix).
-	// device_id is still accepted (clients send it) but no longer scopes resume.
-	pos, err := a.store.GetFurthestPosition(r.Context(), bookID)
+	// Resume from the furthest position across the signed-in user's devices, not
+	// this device's own bookmark: reading further on any of their devices advances
+	// the resume point everywhere, and a stale/zero write can't drag it backward
+	// (LYCM sync fix). device_id is still accepted (clients send it) but no longer
+	// scopes resume. Housemates' positions are never consulted (LYCM-801).
+	pos, err := a.store.GetFurthestPosition(r.Context(), bookID, userFrom(r.Context()).ID)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "no reading position", http.StatusNotFound)
 		return
