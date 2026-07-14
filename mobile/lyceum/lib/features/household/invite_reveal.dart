@@ -12,12 +12,16 @@ import '../../widgets/lyc_sheet.dart';
 /// keeps only a hash — so "did they actually get it out of here?" decides whether
 /// the next thing they see is a shrug or a recovery path.
 ///
-///  - [saved] — they confirmed: a successful copy, or "I've saved it". Just close.
-///  - [dismissed] — they walked away: the ✕, or the back gesture. Show them the
-///    key is gone and offer to issue another.
+///  - [saved] — the key got out: they copied it, or said they'd saved it.
+///  - [dismissed] — they walked away without ever taking it. Show them it's gone
+///    and offer to issue another.
 ///
-/// Getting this backwards means telling someone who *just copied the key* that
-/// they lost it — or, far worse, letting someone who lost it believe they didn't.
+/// **A successful copy means [saved], however they then close the sheet.** The ✕
+/// is not evidence that the key was lost — someone who copies the key, switches
+/// to a chat app to send it, and comes back to tidy up has done everything right.
+/// Telling *them* "that invite is gone, issue another" is not a harmless mistake:
+/// they believe us, issue another, and the fresh mint invalidates the key their
+/// housemate is already holding.
 enum InviteRevealResult { saved, dismissed }
 
 /// The hero. A secret shown once, and honest about it.
@@ -48,6 +52,13 @@ class _InviteRevealSheet extends StatefulWidget {
 class _InviteRevealSheetState extends State<_InviteRevealSheet> {
   bool _copied = false;
   bool _copyFailed = false;
+
+  /// The one question this sheet exists to answer: did the key get out?
+  ///
+  /// Consulted by *every* exit — the ✕ and the back gesture included, not just
+  /// the two buttons that say so out loud.
+  InviteRevealResult get _result =>
+      _copied ? InviteRevealResult.saved : InviteRevealResult.dismissed;
 
   String get _name {
     final n = widget.invite.user.displayName.trim();
@@ -81,7 +92,17 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
   Widget build(BuildContext context) {
     final lyc = context.lyc;
 
-    return Column(
+    return PopScope(
+      // Android's back gesture is the documented way out of a sheet that refuses
+      // scrim-taps and drags. Left to itself it pops `null`, which would read as
+      // "walked away" even from someone who had just copied the key — so it is
+      // intercepted and answered with the truth.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        Navigator.of(context).pop(_result);
+      },
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -131,8 +152,9 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
             ),
             IconButton(
               tooltip: 'Close',
-              onPressed: () =>
-                  Navigator.of(context).pop(InviteRevealResult.dismissed),
+              // Not unconditionally "dismissed": if they copied the key, they
+              // have it, and the ✕ is just how they tidied up.
+              onPressed: () => Navigator.of(context).pop(_result),
               icon: Icon(Icons.close_rounded, size: 20, color: lyc.muted),
             ),
           ],
@@ -263,6 +285,7 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
           ],
         ),
       ],
+      ),
     );
   }
 }

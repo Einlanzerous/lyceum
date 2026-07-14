@@ -1,21 +1,5 @@
 import 'package:http/http.dart' as http;
 
-/// Why a request came back 401.
-///
-/// [removed] is not something the server tells us — a removed account and an
-/// expired session both simply stop resolving. It is inferred from whether we
-/// were holding a token at all, and the copy for each is written to be true
-/// either way. (Mirrors `SessionEndReason` in `web/src/api/http.ts`.)
-enum SessionEndReason {
-  /// We held a token and the server rejected it.
-  expired,
-
-  /// We held no token and were rejected anyway — which means the server
-  /// enforces auth and this device's account is gone (or enforcement was just
-  /// switched on under an auth-off client).
-  removed,
-}
-
 /// The one place a credential is attached to an outgoing request (LYCM-804).
 ///
 /// The web client had to rewrite eighteen bare `fetch()` calls to get here
@@ -26,16 +10,23 @@ enum SessionEndReason {
 class AuthClient extends http.BaseClient {
   AuthClient(this._inner, this._token, this._onUnauthorized);
 
+
   final http.Client _inner;
 
   /// Read live, per request — not captured at construction. Signing in must
   /// authenticate the requests already queued behind it.
   final String Function() _token;
 
-  /// Fires when the server rejects us. The app surfaces the "you've been signed
-  /// out" sheet; the request still fails normally so the caller's own error path
-  /// runs and nothing else has to know about sessions.
-  final void Function(SessionEndReason) _onUnauthorized;
+  /// Fires when the server rejects us, with whether we were actually *holding* a
+  /// credential at the time. The request still fails normally afterwards, so the
+  /// caller's own error path runs and nothing else has to know about sessions.
+  ///
+  /// The distinction is the whole point. A rejected token means a session we had
+  /// has stopped working, and the person deserves to be told. A rejection with no
+  /// token means only that this server wants a sign-in and we never did one —
+  /// which is not an event, it is just Tuesday on a device that has never signed
+  /// in. Announcing "you've been signed out" there is a lie with an alarm on it.
+  final void Function({required bool hadToken}) _onUnauthorized;
 
   /// A depth counter, not a flag.
   ///
@@ -76,9 +67,7 @@ class AuthClient extends http.BaseClient {
     final res = await _inner.send(request);
 
     if (res.statusCode == 401 && _suppressDepth == 0) {
-      _onUnauthorized(
-        t.isNotEmpty ? SessionEndReason.expired : SessionEndReason.removed,
-      );
+      _onUnauthorized(hadToken: t.isNotEmpty);
     }
     return res;
   }

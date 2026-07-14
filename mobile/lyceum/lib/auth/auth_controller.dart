@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_providers.dart';
 import '../api/models.dart';
 import '../prefs/prefs.dart';
-import 'auth_client.dart';
 import 'device_label.dart';
 import 'session_store.dart';
 
@@ -25,15 +24,18 @@ class AuthState {
   const AuthState({
     this.status = AuthStatus.unknown,
     this.user,
-    this.endedReason,
+    this.sessionEnded = false,
   });
 
   final AuthStatus status;
   final Account? user;
 
-  /// Set when a session we were using stopped resolving; drives the
-  /// "you've been signed out" sheet. Cleared once that sheet is dismissed.
-  final SessionEndReason? endedReason;
+  /// A session this device was *using* stopped resolving. Drives the "you've been
+  /// signed out" sheet, and is cleared once that sheet is dismissed.
+  ///
+  /// Never set for a device that was simply never signed in — see
+  /// [AuthController.unauthorized].
+  final bool sessionEnded;
 
   bool get isSignedIn => status == AuthStatus.signedIn;
   bool get isOwner => user?.isOwner ?? false;
@@ -45,13 +47,12 @@ class AuthState {
   AuthState copyWith({
     AuthStatus? status,
     Account? user,
-    SessionEndReason? endedReason,
+    bool? sessionEnded,
     bool clearUser = false,
-    bool clearEnded = false,
   }) => AuthState(
     status: status ?? this.status,
     user: clearUser ? null : (user ?? this.user),
-    endedReason: clearEnded ? null : (endedReason ?? this.endedReason),
+    sessionEnded: sessionEnded ?? this.sessionEnded,
   );
 }
 
@@ -81,6 +82,10 @@ class AuthController extends Notifier<AuthState> {
     final me = await auth.suppressUnauthorized(client.fetchMe);
 
     if (me == null) {
+      // The token we were holding (if any) is dead — the server just said so.
+      // Keeping it would leave "signed out" and "holds a credential" both true at
+      // once, and [enforcedProvider] reads exactly that distinction.
+      await ref.read(sessionTokenProvider.notifier).clear();
       state = const AuthState(status: AuthStatus.signedOut);
       return;
     }
@@ -136,17 +141,30 @@ class AuthController extends Notifier<AuthState> {
     state = state.copyWith(user: user);
   }
 
-  /// A session we were using stopped resolving.
+  /// The server refused us. [hadToken] says whether we were holding a credential
+  /// at the time, and that decides whether anything actually *ended*.
   ///
-  /// No-op once already signed out, so a burst of 401s (a shelf render fires one
-  /// per cover) raises the sheet exactly once.
-  Future<void> sessionEnded(SessionEndReason reason) async {
+  /// Holding a token that stops working is an event: a session expired, or was
+  /// revoked from another device, or the owner removed the account. The person is
+  /// mid-something and deserves the sheet.
+  ///
+  /// Holding *no* token and being refused is not an event. It means this server
+  /// wants a sign-in and this device has never done one — a fresh install that
+  /// booted offline and retried once the network came back, or an auth-off server
+  /// whose operator has just switched enforcement on. Both are ordinary. Raising
+  /// "the library owner removed this account, your reading positions were cleared"
+  /// at someone who never had an account is a lie, and an alarming one; they get
+  /// the front door instead, quietly, which is exactly what they need.
+  ///
+  /// Either way it no-ops once already signed out, so the burst of 401s a shelf
+  /// render produces (one per cover) is handled exactly once.
+  Future<void> unauthorized({required bool hadToken}) async {
     if (state.status == AuthStatus.signedOut) return;
     await ref.read(sessionTokenProvider.notifier).clear();
-    state = AuthState(status: AuthStatus.signedOut, endedReason: reason);
+    state = AuthState(status: AuthStatus.signedOut, sessionEnded: hadToken);
   }
 
-  void clearEnded() => state = state.copyWith(clearEnded: true);
+  void clearEnded() => state = state.copyWith(sessionEnded: false);
 
   /// Carry the pre-accounts local name onto the account, once.
   ///

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/session_store.dart';
 import '../prefs/prefs.dart';
 
 /// Trim and strip trailing slashes — identical to the web
@@ -25,14 +26,27 @@ class ServerUrlController extends Notifier<String> {
     return normalizeServerUrl(_kCompileDefault);
   }
 
+  /// Point the app at a library.
+  ///
+  /// **A session belongs to the library that issued it.** Pointing the app
+  /// somewhere else therefore drops the token: it is meaningless to the new
+  /// server, and keeping it does active harm — [enforcedProvider] reads "we hold
+  /// a token" as "this server enforces auth", so a leftover credential from the
+  /// old library makes a brand-new *auth-off* one look enforced. Settings would
+  /// then offer a Sign out button which, tapped, bounces the reader to a front
+  /// door that issues no invites and cannot be got past, with their own shelf on
+  /// the other side of it.
   Future<void> set(String url) async {
     final normalized = normalizeServerUrl(url);
+    if (normalized == state) return; // re-saving the same address is a no-op
+
     final prefs = ref.read(prefsProvider);
     if (normalized.isEmpty) {
       await prefs.remove(_kServerKey);
     } else {
       await prefs.setString(_kServerKey, normalized);
     }
+    await ref.read(sessionTokenProvider.notifier).clear();
     state = normalized;
   }
 

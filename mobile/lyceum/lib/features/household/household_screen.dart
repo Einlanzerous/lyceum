@@ -75,15 +75,41 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
     }
   }
 
+  /// Collect who to invite, then mint the key **here**, not inside the sheet.
+  ///
+  /// The sheet can be swiped away or scrim-tapped, and a home server on a slow
+  /// LAN leaves a real window in which to do it. If the `POST` lived in the sheet,
+  /// dismissing it mid-flight would land the response on a dead widget: the
+  /// account would exist on the server, its one-time plaintext key would be
+  /// dropped on the floor, and nobody would be shown the recovery path — because
+  /// from the screen's point of view nothing was ever created.
+  ///
+  /// So the sheet only gathers an email and a name. Whatever it hands back, the
+  /// screen mints from — and the screen is still there to show the reveal.
   Future<void> _openInviteForm() async {
-    setState(() => _inviting = true);
-    final invite = await showLycSheet<Invite>(
+    final who = await showLycSheet<({String email, String name})>(
       context: context,
       builder: (context) => const _InviteForm(),
     );
-    if (!mounted) return;
-    setState(() => _inviting = false);
-    if (invite != null) await _reveal(invite);
+    if (who == null || !mounted) return;
+
+    setState(() => _inviting = true);
+    try {
+      final invite = await ref
+          .read(lyceumClientProvider)
+          .inviteMember(email: who.email, displayName: who.name);
+      if (mounted) await _reveal(invite);
+    } on ApiException catch (e) {
+      _toast(
+        e.isDuplicate
+            ? 'Someone on this server already uses that email.'
+            : e.message,
+      );
+    } catch (e) {
+      _toast('$e');
+    } finally {
+      if (mounted) setState(() => _inviting = false);
+    }
   }
 
   void _toast(String message) {
@@ -137,7 +163,7 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
                   child: FilledButton.icon(
                     onPressed: _inviting ? null : _openInviteForm,
                     icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-                    label: const Text('Invite someone'),
+                    label: Text(_inviting ? 'Creating…' : 'Invite someone'),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -310,18 +336,19 @@ class _MemberCard extends StatelessWidget {
   }
 }
 
-class _InviteForm extends ConsumerStatefulWidget {
+/// Gathers who to invite. Deliberately does no network work of its own — see
+/// [_HouseholdScreenState._openInviteForm]. A sheet that can be swiped away is no
+/// place to be holding the only copy of a credential.
+class _InviteForm extends StatefulWidget {
   const _InviteForm();
 
   @override
-  ConsumerState<_InviteForm> createState() => _InviteFormState();
+  State<_InviteForm> createState() => _InviteFormState();
 }
 
-class _InviteFormState extends ConsumerState<_InviteForm> {
+class _InviteFormState extends State<_InviteForm> {
   final _email = TextEditingController();
   final _name = TextEditingController();
-  bool _submitting = false;
-  String? _error;
 
   @override
   void dispose() {
@@ -330,33 +357,10 @@ class _InviteFormState extends ConsumerState<_InviteForm> {
     super.dispose();
   }
 
-  Future<void> _create() async {
+  void _submit() {
     final email = _email.text.trim();
-    if (email.isEmpty || _submitting) return;
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      final invite = await ref
-          .read(lyceumClientProvider)
-          .inviteMember(email: email, displayName: _name.text.trim());
-      if (mounted) Navigator.of(context).pop(invite);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.isDuplicate
-            ? 'Someone on this server already uses that email.'
-            : e.message;
-        _submitting = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _submitting = false;
-      });
-    }
+    if (email.isEmpty) return;
+    Navigator.of(context).pop((email: email, name: _name.text.trim()));
   }
 
   @override
@@ -372,8 +376,9 @@ class _InviteFormState extends ConsumerState<_InviteForm> {
           controller: _email,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          enabled: !_submitting,
+          autofocus: true,
           onChanged: (_) => setState(() {}),
+          onSubmitted: (_) => _submit(),
           decoration: const InputDecoration(
             labelText: 'Email',
             hintText: 'theo@home.lan',
@@ -383,7 +388,7 @@ class _InviteFormState extends ConsumerState<_InviteForm> {
         TextField(
           controller: _name,
           textCapitalization: TextCapitalization.words,
-          enabled: !_submitting,
+          onSubmitted: (_) => _submit(),
           decoration: const InputDecoration(
             labelText: 'Name',
             hintText: 'Theo (optional)',
@@ -394,31 +399,20 @@ class _InviteFormState extends ConsumerState<_InviteForm> {
           "They'll get a one-time key to paste on their device. It's shown once.",
           style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.dim),
         ),
-        if (_error != null) ...[
-          const SizedBox(height: 12),
-          LycNotice(
-            tone: LycTone.error,
-            icon: Icons.error_outline_rounded,
-            child: Text(
-              _error!,
-              style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
-            ),
-          ),
-        ],
         const SizedBox(height: 18),
         Row(
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Cancel'),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: FilledButton(
-                onPressed: _email.text.trim().isEmpty || _submitting ? null : _create,
-                child: Text(_submitting ? 'Creating…' : 'Create invite'),
+                onPressed: _email.text.trim().isEmpty ? null : _submit,
+                child: const Text('Create invite'),
               ),
             ),
           ],

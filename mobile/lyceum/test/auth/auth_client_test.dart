@@ -5,16 +5,22 @@ import 'package:lyceum/auth/auth_client.dart';
 
 void main() {
   /// Build an AuthClient whose inner transport always answers [status], and
-  /// record what it saw.
-  ({AuthClient client, List<String?> authHeaders, List<SessionEndReason> fired})
-  harness(String token, {int status = 200}) {
+  /// record what it saw. `fired` collects the `hadToken` of each 401 reaction.
+  ({AuthClient client, List<String?> authHeaders, List<bool> fired}) harness(
+    String token, {
+    int status = 200,
+  }) {
     final authHeaders = <String?>[];
-    final fired = <SessionEndReason>[];
+    final fired = <bool>[];
     final inner = MockClient((req) async {
       authHeaders.add(req.headers['Authorization']);
       return http.Response('', status);
     });
-    final client = AuthClient(inner, () => token, fired.add);
+    final client = AuthClient(
+      inner,
+      () => token,
+      ({required hadToken}) => fired.add(hadToken),
+    );
     return (client: client, authHeaders: authHeaders, fired: fired);
   }
 
@@ -41,7 +47,7 @@ void main() {
           return http.Response('', 200);
         }),
         () => token,
-        (_) {},
+        ({required hadToken}) {},
       );
 
       await client.get(Uri.parse('http://lib.test/library'));
@@ -60,16 +66,18 @@ void main() {
   });
 
   group('401', () {
-    test('a rejected token we held reads as expired', () async {
+    test('reports that we were holding a credential when one was rejected', () async {
       final h = harness('lyc_stale', status: 401);
       await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(h.fired, [SessionEndReason.expired]);
+      expect(h.fired, [true]);
     });
 
-    test('a 401 with no token held reads as removed', () async {
+    test('reports that we were holding none when we were not', () async {
+      // The distinction the controller turns into "was this an *event*?" — see
+      // AuthController.unauthorized. Nothing ends for a device with no session.
       final h = harness('', status: 401);
       await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(h.fired, [SessionEndReason.removed]);
+      expect(h.fired, [false]);
     });
 
     test('a success never fires it', () async {
@@ -102,7 +110,7 @@ void main() {
         () => h.client.get(Uri.parse('http://lib.test/auth/me')),
       );
       await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(h.fired, [SessionEndReason.expired]);
+      expect(h.fired, [true]);
     });
 
     test('overlapping suppressed calls do not re-arm each other', () async {
@@ -131,7 +139,7 @@ void main() {
         throwsStateError,
       );
       await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(h.fired, [SessionEndReason.expired]);
+      expect(h.fired, [true]);
     });
   });
 }

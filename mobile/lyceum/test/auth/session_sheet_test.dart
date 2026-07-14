@@ -8,7 +8,6 @@ import 'package:http/testing.dart';
 import 'package:lyceum/api/api_providers.dart';
 import 'package:lyceum/api/server_store.dart';
 import 'package:lyceum/app.dart';
-import 'package:lyceum/auth/auth_client.dart';
 import 'package:lyceum/auth/auth_controller.dart';
 import 'package:lyceum/auth/session_store.dart';
 import 'package:lyceum/prefs/prefs.dart';
@@ -76,7 +75,7 @@ void main() {
     // A 401 arrives from somewhere in the app — a cover, a sync, a page turn.
     await container
         .read(authControllerProvider.notifier)
-        .sessionEnded(SessionEndReason.expired);
+        .unauthorized(hadToken: true);
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -90,7 +89,7 @@ void main() {
 
     await container
         .read(authControllerProvider.notifier)
-        .sessionEnded(SessionEndReason.expired);
+        .unauthorized(hadToken: true);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Sign in'));
@@ -99,22 +98,7 @@ void main() {
     // The bounce happens on dismissal, not on the 401 — a 401 mid-chapter puts a
     // calm sheet over the page rather than yanking the book away.
     expect(find.text("You've been handed a key."), findsOneWidget);
-    expect(container.read(authControllerProvider).endedReason, isNull);
-  });
-
-  testWidgets('a removed account gets its own copy', (tester) async {
-    final container = await pumpApp(tester);
-
-    await container
-        .read(authControllerProvider.notifier)
-        .sessionEnded(SessionEndReason.removed);
-    await tester.pumpAndSettle();
-
-    expect(find.text('This device was signed out.'), findsOneWidget);
-    expect(
-      find.textContaining('The library owner removed this account.'),
-      findsOneWidget,
-    );
+    expect(container.read(authControllerProvider).sessionEnded, isFalse);
   });
 
   testWidgets('the front door is what a signed-out device sees', (tester) async {

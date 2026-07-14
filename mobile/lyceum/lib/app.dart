@@ -76,7 +76,7 @@ class _SessionGateState extends ConsumerState<_SessionGate> {
   @override
   Widget build(BuildContext context) {
     ref.listen(authControllerProvider, (prev, next) {
-      if (next.endedReason == null || _showing) return;
+      if (!next.sessionEnded || _showing) return;
 
       // Not `context`: this widget sits above the router's Navigator, so its own
       // context has none in scope and showModalBottomSheet would throw — at the
@@ -85,7 +85,7 @@ class _SessionGateState extends ConsumerState<_SessionGate> {
       if (navContext == null) return;
 
       _showing = true;
-      showSessionEndedSheet(navContext, next.endedReason!).whenComplete(() {
+      showSessionEndedSheet(navContext).whenComplete(() {
         _showing = false;
         ref.read(authControllerProvider.notifier).clearEnded();
       });

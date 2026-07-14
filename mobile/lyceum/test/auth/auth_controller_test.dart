@@ -7,7 +7,6 @@ import 'package:http/testing.dart';
 import 'package:lyceum/api/api_providers.dart';
 import 'package:lyceum/api/client.dart';
 import 'package:lyceum/api/server_store.dart';
-import 'package:lyceum/auth/auth_client.dart';
 import 'package:lyceum/auth/auth_controller.dart';
 import 'package:lyceum/auth/session_store.dart';
 import 'package:lyceum/prefs/prefs.dart';
@@ -84,7 +83,7 @@ void main() {
       final auth = h.container.read(authControllerProvider);
       expect(auth.status, AuthStatus.signedOut);
       // Crucially: no sheet. Nobody was signed out — they were never signed in.
-      expect(auth.endedReason, isNull);
+      expect(auth.sessionEnded, isFalse);
     });
   });
 
@@ -119,7 +118,7 @@ void main() {
       );
 
       final auth = h.container.read(authControllerProvider);
-      expect(auth.endedReason, isNull, reason: 'a bad invite is not a session ending');
+      expect(auth.sessionEnded, isFalse, reason: 'a bad invite is not a session ending');
       expect(h.store.token, isEmpty);
     });
   });
@@ -262,7 +261,7 @@ void main() {
 
       final auth = h.container.read(authControllerProvider);
       expect(auth.status, AuthStatus.signedOut);
-      expect(auth.endedReason, isNull, reason: 'no alarm sheet — they asked for this');
+      expect(auth.sessionEnded, isFalse, reason: 'no alarm sheet — they asked for this');
       expect(h.store.token, isEmpty);
     });
   });
@@ -277,32 +276,120 @@ void main() {
       final notifier = h.container.read(authControllerProvider.notifier);
 
       await notifier.load(); // resolves to signedOut
-      final reasons = <SessionEndReason?>[];
+      final seen = <bool>[];
       h.container.listen(
         authControllerProvider,
-        (_, next) => reasons.add(next.endedReason),
+        (_, next) => seen.add(next.sessionEnded),
       );
 
-      await notifier.sessionEnded(SessionEndReason.expired);
-      await notifier.sessionEnded(SessionEndReason.expired);
+      await notifier.unauthorized(hadToken: true);
+      await notifier.unauthorized(hadToken: true);
 
-      expect(reasons, isEmpty, reason: 'already signed out — nothing to end');
+      expect(seen, isEmpty, reason: 'already signed out — nothing to end');
     });
 
-    test('clears the credential and records why', () async {
+    test('a rejected credential clears it and raises the sheet', () async {
       final h = await build(handler: (_) async => json(owner), initialToken: 'lyc_live');
       final notifier = h.container.read(authControllerProvider.notifier);
       await notifier.load();
 
-      await notifier.sessionEnded(SessionEndReason.expired);
+      await notifier.unauthorized(hadToken: true);
 
       final auth = h.container.read(authControllerProvider);
       expect(auth.status, AuthStatus.signedOut);
-      expect(auth.endedReason, SessionEndReason.expired);
+      expect(auth.sessionEnded, isTrue);
       expect(h.store.token, isEmpty);
 
       notifier.clearEnded();
-      expect(h.container.read(authControllerProvider).endedReason, isNull);
+      expect(h.container.read(authControllerProvider).sessionEnded, isFalse);
+    });
+
+    test('a device that was never signed in is NOT told it was signed out', () async {
+      // The false alarm. A fresh install with a saved server address boots while
+      // offline, so load() throws and status stays `unknown`. The network comes
+      // back, the reader taps Retry, and /library 401s — with no token held.
+      //
+      // Announcing "the library owner removed this account, your reading
+      // positions were cleared" to someone who has never had an account is a lie
+      // with an alarm attached. They get the front door, quietly.
+      final h = await build(handler: (_) async => http.Response('nope', 401));
+      final notifier = h.container.read(authControllerProvider.notifier);
+
+      expect(
+        h.container.read(authControllerProvider).status,
+        AuthStatus.unknown,
+        reason: 'boot never resolved',
+      );
+
+      await notifier.unauthorized(hadToken: false);
+
+      final auth = h.container.read(authControllerProvider);
+      expect(auth.status, AuthStatus.signedOut, reason: 'front door, yes');
+      expect(auth.sessionEnded, isFalse, reason: 'but no alarm — nothing ended');
+    });
+
+    test('an auth-off server that switches enforcement on sends us to the door', () async {
+      // Signed in against LYCEUM_AUTH=false (served as the owner, holding no
+      // token). The operator flips enforcement on and restarts. The next request
+      // 401s. Nothing was "removed" — the door simply grew a lock.
+      final h = await build(handler: (_) async => json(owner));
+      final notifier = h.container.read(authControllerProvider.notifier);
+      await notifier.load();
+      expect(h.container.read(authControllerProvider).isSignedIn, isTrue);
+      expect(h.container.read(enforcedProvider), isFalse);
+
+      await notifier.unauthorized(hadToken: false);
+
+      final auth = h.container.read(authControllerProvider);
+      expect(auth.status, AuthStatus.signedOut, reason: 'not stranded on a dead shelf');
+      expect(auth.sessionEnded, isFalse, reason: 'no removal claim we cannot back');
+    });
+  });
+
+  group('the session belongs to the library that issued it', () {
+    test('load drops a token the server has just rejected', () async {
+      // Otherwise "signed out" and "holds a credential" are both true at once —
+      // and enforcedProvider reads exactly that distinction.
+      final h = await build(
+        handler: (_) async => http.Response('nope', 401),
+        initialToken: 'lyc_dead',
+      );
+
+      await h.container.read(authControllerProvider.notifier).load();
+
+      expect(h.store.token, isEmpty);
+      expect(h.container.read(enforcedProvider), isFalse);
+    });
+
+    test('pointing the app at another server drops the old session', () async {
+      // The stranding bug. Signed in to server A; switch to auth-off server B.
+      // B ignores the meaningless bearer and answers /auth/me as the owner — so
+      // without this, the leftover token from A makes B look like it enforces
+      // auth. Settings would then offer "Sign out", and tapping it bounces the
+      // reader to a front door that issues no invites and cannot be passed.
+      final h = await build(
+        handler: (_) async => json(owner),
+        initialToken: 'lyc_from_server_a',
+      );
+      await h.container.read(authControllerProvider.notifier).load();
+      expect(h.container.read(enforcedProvider), isTrue);
+
+      await h.container.read(serverUrlProvider.notifier).set('http://other.test');
+
+      expect(h.store.token, isEmpty);
+      expect(h.container.read(enforcedProvider), isFalse);
+    });
+
+    test('re-saving the same address is not a sign-out', () async {
+      final h = await build(
+        handler: (_) async => json(owner),
+        initialToken: 'lyc_live',
+      );
+      await h.container.read(authControllerProvider.notifier).load();
+
+      await h.container.read(serverUrlProvider.notifier).set('http://lib.test/');
+
+      expect(h.store.token, 'lyc_live', reason: 'same server, normalized — no-op');
     });
   });
 }

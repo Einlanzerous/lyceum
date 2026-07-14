@@ -58,14 +58,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         // 401 arriving mid-chapter should put a calm sheet over the page, not
         // yank the book out from under someone. The bounce happens when they
         // dismiss it.
-        if (auth.endedReason != null) return null;
+        if (auth.sessionEnded) return null;
         return loc == '/sign-in' ? null : '/sign-in';
       }
       if (loc == '/sign-in' && auth.isSignedIn) return '/';
 
       // Household is the owner's alone. A member who somehow lands here is sent
       // home rather than shown a permission error — the UI never offered it.
-      if (loc == '/household' && !auth.isOwner) return '/';
+      // Gated on isSignedIn, since an unresolved session has no owner flag to
+      // read and `unknown` is otherwise let through everywhere else.
+      if (loc == '/household' && auth.isSignedIn && !auth.isOwner) return '/';
 
       return null;
     },

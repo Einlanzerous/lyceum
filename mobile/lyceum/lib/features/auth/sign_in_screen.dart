@@ -171,6 +171,27 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                             upgrade: upgrade,
                             hasToken: _hasToken,
                           ),
+                          const SizedBox(height: 6),
+                          // Always reachable, not just when the server is
+                          // unreachable. Sign-in is the *only* public route, so
+                          // Settings — and with it the server address — cannot be
+                          // opened from here. Someone who points the app at a
+                          // second, perfectly reachable library and has no invite
+                          // for it would otherwise be sealed out of their own
+                          // shelf, with the only escape being to clear app data.
+                          Center(
+                            child: TextButton(
+                              onPressed: () => setState(
+                                () => _showServerSettings = !_showServerSettings,
+                              ),
+                              child: Text(
+                                _showServerSettings
+                                    ? 'Hide server address'
+                                    : 'Change server address',
+                                style: TextStyle(fontSize: 12, color: lyc.dim),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
