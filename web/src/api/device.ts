@@ -73,3 +73,52 @@ export function getDeviceId(): string {
 export function resetDeviceIdCache(): void {
   cached = null
 }
+
+/**
+ * A human-readable name for this device, guessed from the user agent (LYCM-801).
+ *
+ * The sign-in screen shows this pre-filled with a "change" affordance rather than
+ * asking for it. Making the front door a two-field form to populate a list most
+ * people will look at once is a bad trade; a guess they can correct keeps the
+ * door single-field *and* keeps the devices list meaningful — "Chrome on Windows"
+ * is enough to recognise the laptop you left at work, which is the only reason
+ * that list exists.
+ *
+ * This is a label, not an identity: getDeviceId above remains what /sync keys on.
+ */
+export function inferDeviceLabel(): string {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+
+  const os = /iPhone/.test(ua)
+    ? 'iPhone'
+    : /iPad/.test(ua)
+      ? 'iPad'
+      : /Android/.test(ua)
+        ? 'Android'
+        : /Windows/.test(ua)
+          ? 'Windows'
+          : /Mac OS X|Macintosh/.test(ua)
+            ? 'Mac'
+            : /CrOS/.test(ua)
+              ? 'Chromebook'
+              : /Linux/.test(ua)
+                ? 'Linux'
+                : ''
+
+  // Order matters: Edge and Opera both also claim "Chrome", and Chrome also
+  // claims "Safari".
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : ''
+
+  if (browser && os) return `${browser} on ${os}`
+  return browser || os || 'This device'
+}

@@ -13,8 +13,8 @@ import {
   refetchCover,
   replaceCover,
   deleteBook,
-  coverUrl,
 } from '@/api/client'
+import { coverSrc, invalidateCover } from '@/api/coverSrc'
 import type { Book } from '@/api/types'
 
 /** Human labels for the backend's stable flag codes. */
@@ -56,9 +56,11 @@ async function load(): Promise<void> {
 
 onMounted(load)
 
-function coverSrc(b: Book): string {
+function coverSrcFor(b: Book): string {
   const bust = coverBust.value[b.id]
-  return coverUrl(b.id) + (bust ? `?v=${bust}` : '')
+  // The bytes can change under a stable id (replace / re-fetch), so bust both
+  // the browser cache and the native blob cache.
+  return coverSrc(b.id) + (bust ? `?v=${bust}` : '')
 }
 
 /** Remove a row from the list once it leaves the queue (approve/delete). */
@@ -94,7 +96,8 @@ function onRefetch(b: Book): Promise<void> {
   return run(b.id, 'refetch cover', async () => {
     await refetchCover(b.id)
     coverBust.value = { ...coverBust.value, [b.id]: Date.now() }
-    b.cover_url = coverUrl(b.id)
+    invalidateCover(b.id)
+    b.cover_url = coverSrc(b.id)
   })
 }
 
@@ -105,7 +108,8 @@ function onUpload(b: Book, ev: Event): Promise<void> {
   return run(b.id, 'upload cover', async () => {
     await replaceCover(b.id, file)
     coverBust.value = { ...coverBust.value, [b.id]: Date.now() }
-    b.cover_url = coverUrl(b.id)
+    invalidateCover(b.id)
+    b.cover_url = coverSrc(b.id)
     input.value = '' // allow re-selecting the same file
   })
 }
@@ -150,7 +154,7 @@ function onDelete(b: Book): Promise<void> {
     <ul v-else class="rev__list">
       <li v-for="b in books" :key="b.id" class="card">
         <div class="card__cover">
-          <img v-if="b.cover_url" :src="coverSrc(b)" :alt="`Cover of ${b.title}`" />
+          <img v-if="b.cover_url" :src="coverSrcFor(b)" :alt="`Cover of ${b.title}`" />
           <div v-else class="card__cover-empty">No cover</div>
         </div>
 

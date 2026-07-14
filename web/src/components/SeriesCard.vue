@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { coverUrl } from '@/api/client'
+import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { SeriesGroup } from '@/library/series'
 
@@ -12,7 +12,7 @@ defineEmits<{ (e: 'toggle'): void }>()
 
 const count = computed(() => props.series.members.length)
 const cover = computed(() =>
-  props.series.coverBook.cover_url ? coverUrl(props.series.coverBook.id) : '',
+  props.series.coverBook.cover_url ? coverSrc(props.series.coverBook.id) : '',
 )
 const progressPct = computed(() => Math.round(props.series.progress * 100))
 const progressLabel = computed(() => formatProgress(props.series.progress))

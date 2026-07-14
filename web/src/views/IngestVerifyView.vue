@@ -4,10 +4,11 @@ import { RouterLink } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useIngestStore, type QueueFilter } from '@/stores/ingest'
 import type { Candidate, Edition } from '@/api/ingest'
-import { useProfile } from '@/profile'
+import { useAuthStore } from '@/stores/auth'
 
 const store = useIngestStore()
-const { initial } = useProfile()
+const auth = useAuthStore()
+const initial = computed(() => auth.initial)
 const {
   batch,
   batches,

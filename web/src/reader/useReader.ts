@@ -11,7 +11,7 @@ import { onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import ePub, { type Book, type Rendition } from 'epubjs'
 import type { Contents, Location } from 'epubjs'
 import type { NavItem } from 'epubjs'
-import { bookFileUrl } from '@/api/client'
+import { apiFetch } from '@/api/http'
 import { clampProgress } from '@/api/progress'
 import { useTheme } from '@/theme'
 import { FONT_SIZE_DEFAULT, fontSizeCss, stepFontSize, themeStyles } from './theme'
@@ -177,7 +177,10 @@ export function useReader(
       return
     }
     try {
-      const res = await fetch(bookFileUrl(bookId))
+      // Through apiFetch, not bare fetch: the EPUB is a gated route now (LYCM-801)
+      // and the Wails shell calls it cross-origin, where only the bearer header
+      // travels. epub.js never touches the network — it is handed the bytes.
+      const res = await apiFetch(`/books/${bookId}/file`)
       if (!res.ok) throw new Error(`could not load book (${res.status})`)
       const buffer = await res.arrayBuffer()
 

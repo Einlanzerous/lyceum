@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { coverUrl } from '@/api/client'
+import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { Book } from '@/api/types'
 import TileMenu from '@/components/TileMenu.vue'
@@ -20,7 +20,7 @@ const progressLabel = computed(() =>
   hasProgress.value ? formatProgress(props.book.progress as number) : '',
 )
 const cover = computed(() =>
-  props.book.cover_url && !coverFailed.value ? coverUrl(props.book.id) : '',
+  props.book.cover_url && !coverFailed.value ? coverSrc(props.book.id) : '',
 )
 
 // contextmenu fires on desktop right-click AND Android long-press, so one
