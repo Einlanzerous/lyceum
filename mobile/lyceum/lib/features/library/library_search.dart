@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
+import '../../widgets/cover_image.dart';
 import 'shelf.dart';
 
 /// Full-screen search that opens above the shelf on demand (LYCM-63), the mobile
@@ -91,11 +92,9 @@ class LibrarySearchDelegate extends SearchDelegate<void> {
               width: 34,
               height: 50,
               child: b.hasCover
-                  ? Image.network(
-                      coverUrlOf(b.id),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          ColoredBox(color: lyc.surfaceRaised),
+                  ? CoverImage(
+                      url: coverUrlOf(b.id),
+                      fallback: ColoredBox(color: lyc.surfaceRaised),
                     )
                   : ColoredBox(color: lyc.surfaceRaised),
             ),

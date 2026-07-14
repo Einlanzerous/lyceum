@@ -6,6 +6,7 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
+import '../../widgets/cover_image.dart';
 import 'book_card.dart';
 import 'shelf.dart';
 
@@ -66,11 +67,9 @@ class SeriesTile extends ConsumerWidget {
                       fit: StackFit.expand,
                       children: [
                         if (series.coverBook.hasCover)
-                          Image.network(
-                            client.coverUrl(series.coverBook.id),
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                _SeriesFallback(name: series.name),
+                          CoverImage(
+                            url: client.coverUrl(series.coverBook.id),
+                            fallback: _SeriesFallback(name: series.name),
                           )
                         else
                           _SeriesFallback(name: series.name),
@@ -350,11 +349,9 @@ class _MemberRow extends StatelessWidget {
                 width: 34,
                 height: 50,
                 child: coverUrl != null
-                    ? Image.network(
-                        coverUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            ColoredBox(color: lyc.surfaceRaised),
+                    ? CoverImage(
+                        url: coverUrl!,
+                        fallback: ColoredBox(color: lyc.surfaceRaised),
                       )
                     : ColoredBox(color: lyc.surfaceRaised),
               ),

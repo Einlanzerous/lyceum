@@ -105,6 +105,122 @@ class Position {
   };
 }
 
+// --- Accounts (LYCM-801/804) -------------------------------------------------
+
+/// A person with an account on this server. Carries no token material — a token
+/// is returned exactly once, by the call that mints it.
+class Account {
+  const Account({
+    required this.id,
+    required this.email,
+    required this.displayName,
+    required this.isOwner,
+  });
+
+  final int id;
+  final String email;
+  final String displayName;
+  final bool isOwner;
+
+  /// The avatar letter. Generated locally — no gravatar, no network, works
+  /// offline. Falls back to the "Reader" initial for an account with no name.
+  String get initial {
+    final name = displayName.trim();
+    return (name.isNotEmpty ? name[0] : 'R').toUpperCase();
+  }
+
+  factory Account.fromJson(Map<String, dynamic> json) => Account(
+    id: (json['id'] as num).toInt(),
+    email: (json['email'] as String?) ?? '',
+    displayName: (json['display_name'] as String?) ?? '',
+    isOwner: (json['is_owner'] as bool?) ?? false,
+  );
+}
+
+/// One signed-in device belonging to the caller (`GET /auth/sessions`).
+///
+/// [current] is marked *server-side* (it hashes the token the request rode in
+/// on), so the client must never try to guess it by matching labels — two phones
+/// can carry the same one.
+class DeviceSession {
+  const DeviceSession({
+    required this.id,
+    required this.deviceLabel,
+    required this.createdAt,
+    required this.lastSeenAt,
+    required this.current,
+  });
+
+  final int id;
+  final String deviceLabel;
+  final DateTime? createdAt;
+
+  /// Null when the session has never been used since it was minted.
+  final DateTime? lastSeenAt;
+  final bool current;
+
+  factory DeviceSession.fromJson(Map<String, dynamic> json) => DeviceSession(
+    id: (json['id'] as num).toInt(),
+    deviceLabel: (json['device_label'] as String?) ?? '',
+    createdAt: DateTime.tryParse((json['created_at'] as String?) ?? ''),
+    lastSeenAt: DateTime.tryParse((json['last_seen_at'] as String?) ?? ''),
+    current: (json['current'] as bool?) ?? false,
+  );
+}
+
+/// A household member as the owner sees them (`GET /admin/users`) — the account
+/// plus enough metadata to tell an active housemate from one who was invited and
+/// never showed up.
+class Member {
+  const Member({
+    required this.account,
+    required this.lastSeenAt,
+    required this.inviteExpiresAt,
+    required this.sessionCount,
+  });
+
+  final Account account;
+
+  /// Null when they have never signed in on any device.
+  final DateTime? lastSeenAt;
+
+  /// Null unless an unredeemed invite is outstanding.
+  final DateTime? inviteExpiresAt;
+  final int sessionCount;
+
+  int get id => account.id;
+  String get displayName => account.displayName;
+  bool get isOwner => account.isOwner;
+
+  /// An invite was issued and never redeemed. A member with *both* an
+  /// outstanding invite and a sign-in (re-invited for a second device) is
+  /// active, not pending — so the sign-in wins.
+  bool get isPending => inviteExpiresAt != null && lastSeenAt == null;
+
+  factory Member.fromJson(Map<String, dynamic> json) => Member(
+    account: Account.fromJson(json),
+    lastSeenAt: DateTime.tryParse((json['last_seen_at'] as String?) ?? ''),
+    inviteExpiresAt: DateTime.tryParse(
+      (json['invite_expires_at'] as String?) ?? '',
+    ),
+    sessionCount: (json['session_count'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// A freshly minted invite. [token] is plaintext and **unrecoverable** — the
+/// server hashes it and this is the only time it exists in the clear.
+class Invite {
+  const Invite({required this.user, required this.token});
+
+  final Account user;
+  final String token;
+
+  factory Invite.fromJson(Map<String, dynamic> json) => Invite(
+    user: Account.fromJson(json['user'] as Map<String, dynamic>),
+    token: (json['invite_token'] as String?) ?? '',
+  );
+}
+
 /// Physical-library inventory row (ISBN-keyed). Included for completeness;
 /// the first release focuses on the digital shelf.
 class InventoryItem {

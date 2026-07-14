@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../prefs/profile.dart';
+import '../../auth/auth_controller.dart';
 import '../../prefs/reading_font.dart';
 import '../../prefs/theme_controller.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/segmented_control.dart';
 import '../library/library_controller.dart';
+import 'account_section.dart';
 import 'server_settings.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -41,9 +42,19 @@ class SettingsScreen extends ConsumerWidget {
             Text('Settings', style: Theme.of(context).textTheme.headlineLarge),
             const SizedBox(height: 28),
 
-            // Profile.
-            const _Group(title: 'Profile', child: _ProfileEditor()),
-            const SizedBox(height: 20),
+            // Account. Replaces the LYCM-700 local "Profile" label: the name now
+            // lives on the server and travels with the person, not the handset.
+            if (ref.watch(authControllerProvider).user != null) ...[
+              const _Group(title: 'Account', child: AccountSection()),
+              const SizedBox(height: 20),
+            ],
+
+            // Your devices — only where sessions exist to revoke. An auth-off
+            // server has none.
+            if (ref.watch(enforcedProvider)) ...[
+              const _Group(title: 'Your devices', child: DevicesSection()),
+              const SizedBox(height: 20),
+            ],
 
             // Connection (always shown — Android always needs a server).
             _Group(
@@ -118,87 +129,6 @@ class SettingsScreen extends ConsumerWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _ProfileEditor extends ConsumerStatefulWidget {
-  const _ProfileEditor();
-  @override
-  ConsumerState<_ProfileEditor> createState() => _ProfileEditorState();
-}
-
-class _ProfileEditorState extends ConsumerState<_ProfileEditor> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: ref.read(profileNameProvider));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final lyc = context.lyc;
-    final initial = ref.watch(profileInitialProvider);
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 23,
-          backgroundColor: lyc.brass,
-          child: Text(
-            initial,
-            style: TextStyle(
-              color: lyc.onBrass,
-              fontFamily: kDisplayFont,
-              fontWeight: FontWeight.w700,
-              fontSize: 18,
-            ),
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: TextField(
-            controller: _controller,
-            maxLength: 40,
-            textInputAction: TextInputAction.done,
-            textCapitalization: TextCapitalization.words,
-            // Persist live so nothing is lost if the user leaves without blur.
-            onChanged: (v) => ref.read(profileNameProvider.notifier).set(v),
-            buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
-            style: TextStyle(
-              fontFamily: kDisplayFont,
-              fontWeight: FontWeight.w800,
-              fontSize: 20,
-              color: lyc.text,
-            ),
-            decoration: InputDecoration(
-              filled: false,
-              isDense: true,
-              hintText: 'Reader',
-              hintStyle: TextStyle(
-                fontFamily: kDisplayFont,
-                fontWeight: FontWeight.w800,
-                fontSize: 20,
-                color: lyc.dim,
-              ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 4),
-              enabledBorder: const UnderlineInputBorder(
-                borderSide: BorderSide(color: Colors.transparent),
-              ),
-              focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: lyc.brass, width: 1.5),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
