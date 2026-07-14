@@ -31,17 +31,21 @@ String memberSeenAt(DateTime? at, {DateTime? now}) {
 }
 
 /// How long an outstanding invite has left. Invites live 7 days.
+///
+/// Rounded throughout, never truncated. `Duration.inDays` floors, so an invite
+/// minted three seconds ago has 6 days 23:59:57 left and would announce itself as
+/// **"expires in 6 days"** — on a row sitting directly beneath a reveal sheet
+/// that says "Expires in 7 days". The same reasoning covers the hours: 50 minutes
+/// left is "expires in 1 hour", which is truer than "expires in 0 hours".
 String inviteExpiresIn(DateTime? at, {DateTime? now}) {
   if (at == null) return '';
   final left = at.difference(now ?? DateTime.now());
   if (left.isNegative) return 'expired';
   if (left.inHours < 24) {
-    // Rounded, not floored: an invite with 50 minutes left says "expires in 1
-    // hour", which is truer than "expires in 0 hours".
     final hours = (left.inMinutes / 60).round().clamp(1, 23);
     return 'expires in $hours ${hours == 1 ? 'hour' : 'hours'}';
   }
-  final days = left.inDays;
+  final days = (left.inHours / 24).round();
   return 'expires in $days ${days == 1 ? 'day' : 'days'}';
 }
 

@@ -270,7 +270,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             // itself rather than in a toolbar — an invite always arrives via the
             // clipboard, out of a chat message or a terminal, and long-press →
             // "Paste" is a lot of ceremony for the one thing anyone does here.
-            suffixIcon: _hasToken
+            // No green tick next to a red banner: the key that was just refused
+            // is not "good to go", and saying so twice in one field is the kind
+            // of small incoherence that makes people distrust the rest.
+            suffixIcon: rejected
+                ? null
+                : _hasToken
                 ? Icon(Icons.check_rounded, size: 18, color: lyc.success)
                 : IconButton(
                     onPressed: _submitting ? null : _paste,

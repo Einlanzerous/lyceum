@@ -41,6 +41,12 @@ String readerBootstrapScript({
             '${jsonEncode(sessionToken)});';
 
   return
+  // 0) Surface anything the page throws. The reader is a WebView of the SPA, and
+  //    a rejected promise in there is otherwise a silent spinner that never ends
+  //    — the failure mode is indistinguishable from a slow book.
+  'window.addEventListener("unhandledrejection",function(e){try{var r=e.reason||{};'
+      'console.error("[reader] unhandled: "+(r.message||String(r))+(r.status?" (status "+r.status+")":""));'
+      '}catch(_){}});'
   // 1) Session, device id, theme and font into the page's localStorage — all
   //    before the SPA's deferred module script boots and reads them.
   'try{'

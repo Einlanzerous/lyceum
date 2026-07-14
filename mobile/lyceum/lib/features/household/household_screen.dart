@@ -16,6 +16,31 @@ final membersProvider = FutureProvider<List<Member>>(
   (ref) => ref.watch(lyceumClientProvider).listMembers(),
 );
 
+/// A household row's second line — the only place the difference between a
+/// housemate, an invite nobody redeemed, and someone who has signed out
+/// everywhere is visible.
+///
+/// [now] is injectable so the boundaries can be tested.
+String memberSubtitle(Member m, {DateTime? now}) {
+  if (m.isOwner) return '${m.account.email} · ${deviceCount(m.sessionCount)}';
+
+  if (m.isPending) {
+    return 'Invite pending · ${inviteExpiresIn(m.inviteExpiresAt, now: now)} · '
+        'never signed in';
+  }
+
+  // Somebody who signed out of every device they had. The server derives
+  // last_seen_at from their sessions, so revoking the last one takes the
+  // timestamp with it — which is how this row came to read
+  // "Active · 0 devices · never signed in": three claims, two of them false, and
+  // all three at odds with one another. We genuinely cannot say when they were
+  // last here, so we don't guess — we say the one thing we know.
+  if (m.sessionCount == 0) return 'No devices signed in';
+
+  return 'Active · ${deviceCount(m.sessionCount)} · '
+      '${memberSeenAt(m.lastSeenAt, now: now)}';
+}
+
 /// The owner's view of the household (LYCM-804). Owner only — a member is never
 /// offered this, and the router sends them home if they somehow arrive.
 class HouseholdScreen extends ConsumerStatefulWidget {
@@ -212,20 +237,6 @@ class _MemberCard extends StatelessWidget {
   final VoidCallback onReinvite;
   final VoidCallback onRemove;
 
-  /// The row's second line — the only place the difference between a housemate
-  /// and an invite nobody redeemed is visible.
-  String _subtitle() {
-    if (member.isOwner) {
-      return '${member.account.email} · ${deviceCount(member.sessionCount)}';
-    }
-    if (member.isPending) {
-      return 'Invite pending · ${inviteExpiresIn(member.inviteExpiresAt)} · '
-          'never signed in';
-    }
-    return 'Active · ${deviceCount(member.sessionCount)} · '
-        '${memberSeenAt(member.lastSeenAt)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final lyc = context.lyc;
@@ -290,7 +301,7 @@ class _MemberCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      _subtitle(),
+                      memberSubtitle(member),
                       style: TextStyle(fontSize: 12, height: 1.4, color: lyc.dim),
                     ),
                   ],

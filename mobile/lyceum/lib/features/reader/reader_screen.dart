@@ -47,6 +47,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      // The page is the SPA, and anything it throws is otherwise invisible from
+      // out here — a rejected promise reads as a book that is merely slow.
+      ..setOnConsoleMessage(
+        (msg) => debugPrint('[lyceum-reader] ${msg.level.name}: ${msg.message}'),
+      )
       ..setBackgroundColor(dark ? const Color(0xFF171717) : const Color(0xFFF7F5F0))
       ..setNavigationDelegate(
         NavigationDelegate(

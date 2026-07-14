@@ -56,6 +56,19 @@ void main() {
       expect(inviteExpiresIn(ahead(const Duration(days: 7)), now: now), 'expires in 7 days');
     });
 
+    test('an invite minted seconds ago still says 7 days, not 6', () {
+      // Duration.inDays floors. A 7-day invite three seconds old has 6d 23:59:57
+      // left, and the household row announced "expires in 6 days" directly
+      // beneath a reveal sheet reading "Expires in 7 days". Caught on a phone.
+      expect(
+        inviteExpiresIn(
+          ahead(const Duration(days: 7) - const Duration(seconds: 3)),
+          now: now,
+        ),
+        'expires in 7 days',
+      );
+    });
+
     test('singular reads properly', () {
       expect(inviteExpiresIn(ahead(const Duration(days: 1, hours: 2)), now: now), 'expires in 1 day');
     });
