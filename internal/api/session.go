@@ -351,18 +351,101 @@ func (a *API) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
 	}{toUserJSON(u), invite})
 }
 
-// handleAdminUserList returns every account. Owner only.
+// memberJSON is a household-list row: the account plus enough to tell an active
+// housemate from one who was invited and never showed up.
+type memberJSON struct {
+	userJSON
+	// LastSeenAt is null when they have never signed in on any device — which is
+	// what the list renders as "never signed in".
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	// InviteExpiresAt is null unless an unredeemed invite is outstanding, which is
+	// what makes the row show as "invite pending".
+	InviteExpiresAt *time.Time `json:"invite_expires_at"`
+	// SessionCount backs the row's "2 devices".
+	SessionCount int `json:"session_count"`
+}
+
+// handleAdminUserList returns every account with its household metadata. Owner only.
 func (a *API) handleAdminUserList(w http.ResponseWriter, r *http.Request) {
-	users, err := a.store.ListUsers(r.Context())
+	members, err := a.store.ListMembers(r.Context())
 	if err != nil {
-		serverError(w, "list users", err)
+		serverError(w, "list members", err)
 		return
 	}
-	out := make([]userJSON, 0, len(users))
-	for _, u := range users {
-		out = append(out, toUserJSON(u))
+	out := make([]memberJSON, 0, len(members))
+	for _, m := range members {
+		out = append(out, memberJSON{
+			userJSON:        toUserJSON(m.User),
+			LastSeenAt:      m.LastSeenAt,
+			InviteExpiresAt: m.InviteExpiresAt,
+			SessionCount:    m.SessionCount,
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// sessionJSON is one signed-in device. It never carries token material — a
+// session is revoked by row id, not by presenting the secret again.
+type sessionJSON struct {
+	ID         int64      `json:"id"`
+	DeviceName string     `json:"device_label"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	Current    bool       `json:"current"`
+}
+
+// handleSessionList returns the caller's own signed-in devices.
+//
+// This is the one real risk in a password-free model: a session does not expire,
+// so a lost or lent device stays signed in forever unless its owner can see it
+// and cut it off. Hence the list.
+func (a *API) handleSessionList(w http.ResponseWriter, r *http.Request) {
+	sessions, err := a.store.ListSessions(r.Context(), userFrom(r.Context()).ID, sessionToken(r))
+	if err != nil {
+		serverError(w, "list sessions", err)
+		return
+	}
+	out := make([]sessionJSON, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, sessionJSON{
+			ID: s.ID, DeviceName: s.Label, CreatedAt: s.CreatedAt,
+			LastSeenAt: s.LastUsedAt, Current: s.Current,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSessionRevoke signs one of the caller's own devices out. The store scopes
+// the delete to the caller, so a member cannot cut off someone else's device by
+// guessing an id — it simply reports 404.
+func (a *API) handleSessionRevoke(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
+	}
+	switch err := a.store.RevokeSession(r.Context(), userFrom(r.Context()).ID, id); {
+	case errors.Is(err, store.ErrNotFound):
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	case err != nil:
+		serverError(w, "revoke session", err)
+		return
+	}
+	// Revoking the credential this very request rode in on is a sign-out; drop the
+	// cookie too, or the browser keeps sending a token that no longer resolves.
+	if sessionToken(r) != "" {
+		if cur, err := a.store.ListSessions(r.Context(), userFrom(r.Context()).ID, sessionToken(r)); err == nil {
+			var stillHere bool
+			for _, s := range cur {
+				stillHere = stillHere || s.Current
+			}
+			if !stillHere {
+				clearSessionCookie(w, r)
+			}
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleAdminUserInvite mints a fresh invite for an existing member — a second

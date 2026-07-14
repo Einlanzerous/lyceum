@@ -83,6 +83,9 @@ type Store interface {
 	UserByToken(ctx context.Context, plaintext string) (store.User, error)
 	RedeemInvite(ctx context.Context, plaintext, deviceLabel string) (store.User, string, error)
 	RevokeToken(ctx context.Context, plaintext string) error
+	ListSessions(ctx context.Context, userID int64, currentPlaintext string) ([]store.Session, error)
+	RevokeSession(ctx context.Context, userID, id int64) error
+	ListMembers(ctx context.Context) ([]store.Member, error)
 }
 
 // API bundles the dependencies the handlers need.
@@ -204,6 +207,12 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
 	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
 	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
+
+	// Your devices. A password-free session never expires, so the only real risk
+	// is a lost or lent device staying signed in forever — this is how its owner
+	// sees it and cuts it off.
+	mux.HandleFunc("GET /auth/sessions", a.requireUser(a.handleSessionList))
+	mux.HandleFunc("DELETE /auth/sessions/{id}", a.requireUser(a.handleSessionRevoke))
 
 	// Household administration (LYCM-801). Owner only. POST /admin/users is the
 	// hook Purser's `lyceum` connector calls (SERV-38).

@@ -355,9 +355,13 @@ func (s *Store) RedeemInvite(ctx context.Context, plaintext, deviceLabel string)
 	if err != nil {
 		return User{}, "", err
 	}
+	// last_used_at is stamped now, not left NULL until the first authenticated
+	// request: redeeming an invite *is* signing in. Without this, someone who just
+	// joined reads as "never signed in" on the household list until they happen to
+	// make another call.
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_tokens (user_id, kind, token_hash, label)
-		 VALUES ($1, 'session', $2, $3)`,
+		`INSERT INTO user_tokens (user_id, kind, token_hash, label, last_used_at)
+		 VALUES ($1, 'session', $2, $3, now())`,
 		userID, hashToken(session), nullString(deviceLabel)); err != nil {
 		return User{}, "", fmt.Errorf("store: mint session: %w", err)
 	}
@@ -397,4 +401,109 @@ func (s *Store) CountTokens(ctx context.Context, userID int64, kind string) (int
 		return 0, fmt.Errorf("store: count tokens: %w", err)
 	}
 	return n, nil
+}
+
+// Session is one device signed in as a user — a row the person can actually see
+// and revoke. It never carries token material.
+type Session struct {
+	ID         int64
+	Label      string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	Current    bool // the credential the asking request itself presented
+}
+
+// ListSessions returns the user's signed-in devices, most recently used first.
+//
+// currentPlaintext is the token the caller presented, so the list can mark which
+// row is "this device" — without that, a person revoking a session has no way to
+// tell which one they are about to sign themselves out of.
+func (s *Store) ListSessions(ctx context.Context, userID int64, currentPlaintext string) ([]Session, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, COALESCE(label, ''), created_at, last_used_at,
+		        token_hash = $2 AS current
+		   FROM user_tokens
+		  WHERE user_id = $1 AND kind = 'session'
+		    AND (expires_at IS NULL OR expires_at > now())
+		  ORDER BY COALESCE(last_used_at, created_at) DESC, id DESC`,
+		userID, hashToken(currentPlaintext))
+	if err != nil {
+		return nil, fmt.Errorf("store: list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Session
+	for rows.Next() {
+		var sess Session
+		if err := rows.Scan(&sess.ID, &sess.Label, &sess.CreatedAt, &sess.LastUsedAt, &sess.Current); err != nil {
+			return nil, fmt.Errorf("store: scan session: %w", err)
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+// RevokeSession signs one of the user's devices out by row id. It is scoped to
+// userID, so a member cannot revoke someone else's device by guessing an id —
+// the row simply isn't found. Returns ErrNotFound when the session is gone or
+// was never theirs.
+func (s *Store) RevokeSession(ctx context.Context, userID, id int64) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM user_tokens WHERE id = $1 AND user_id = $2 AND kind = 'session'`,
+		id, userID)
+	if err != nil {
+		return fmt.Errorf("store: revoke session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Member is a user plus the household-list metadata the owner needs to tell an
+// active housemate from one who was invited and never showed up.
+type Member struct {
+	User
+	// LastSeenAt is the most recent use of any of their sessions; nil means they
+	// have never signed in on any device.
+	LastSeenAt *time.Time
+	// InviteExpiresAt is when their outstanding invite lapses, or nil when they
+	// have no invite pending (either redeemed, expired, or never issued).
+	InviteExpiresAt *time.Time
+	// SessionCount is how many devices they are signed in on.
+	SessionCount int
+}
+
+// ListMembers returns every account with its household-list metadata, owner
+// first. The two extra columns are computed in one pass rather than a query per
+// row.
+func (s *Store) ListMembers(ctx context.Context) ([]Member, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT u.id, u.email, u.display_name, u.is_owner, u.created_at,
+		        (SELECT max(t.last_used_at) FROM user_tokens t
+		          WHERE t.user_id = u.id AND t.kind = 'session') AS last_seen_at,
+		        (SELECT min(t.expires_at) FROM user_tokens t
+		          WHERE t.user_id = u.id AND t.kind = 'invite'
+		            AND t.used_at IS NULL
+		            AND (t.expires_at IS NULL OR t.expires_at > now())) AS invite_expires_at,
+		        (SELECT count(*) FROM user_tokens t
+		          WHERE t.user_id = u.id AND t.kind = 'session'
+		            AND (t.expires_at IS NULL OR t.expires_at > now())) AS session_count
+		   FROM users u
+		  ORDER BY u.is_owner DESC, u.id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list members: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Member
+	for rows.Next() {
+		var m Member
+		if err := rows.Scan(&m.ID, &m.Email, &m.DisplayName, &m.IsOwner, &m.CreatedAt,
+			&m.LastSeenAt, &m.InviteExpiresAt, &m.SessionCount); err != nil {
+			return nil, fmt.Errorf("store: scan member: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }

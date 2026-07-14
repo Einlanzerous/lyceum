@@ -495,3 +495,125 @@ func TestOwnerRenameIsNotStale(t *testing.T) {
 		t.Fatalf("display_name = %q after rename, want Renamed (the owner memo went stale)", u.DisplayName)
 	}
 }
+
+// --- Devices & household metadata (the surfaces the design handoff assumes) ---
+
+// TestSessionListAndRevoke: a session never expires, so the only real risk in a
+// password-free model is a lost device staying signed in forever. The devices
+// list is how its owner sees it and cuts it off.
+func TestSessionListAndRevoke(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+	owner := ownerID(ctx, t, s)
+
+	laptop := signIn(t, s, srv, owner)
+	phone := signIn(t, s, srv, owner)
+
+	// Listed from the laptop, exactly one row is "this device".
+	sessions := decode[[]sessionJSON](t, do(t, http.MethodGet, srv.URL+"/auth/sessions", laptop, nil))
+	if len(sessions) != 2 {
+		t.Fatalf("got %d devices, want 2", len(sessions))
+	}
+	var current, other sessionJSON
+	for _, sess := range sessions {
+		if sess.Current {
+			current = sess
+		} else {
+			other = sess
+		}
+	}
+	if current.ID == 0 || other.ID == 0 {
+		t.Fatalf("expected exactly one current device, got %+v", sessions)
+	}
+
+	// Revoking the *other* device kills it and leaves this one alone.
+	path := srv.URL + "/auth/sessions/" + strconv.FormatInt(other.ID, 10)
+	if resp := do(t, http.MethodDelete, path, laptop, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke other device = %d, want 204", resp.StatusCode)
+	}
+	if resp := do(t, http.MethodGet, srv.URL+"/auth/me", phone, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked device still works: %d, want 401", resp.StatusCode)
+	}
+	if resp := do(t, http.MethodGet, srv.URL+"/auth/me", laptop, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoking one device killed the other: %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestSessionRevokeIsScopedToOwner: a member must not be able to sign someone
+// else's device out by guessing a row id.
+func TestSessionRevokeIsScopedToOwner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ownerToken := signIn(t, s, srv, ownerID(ctx, t, s))
+	maraToken := signIn(t, s, srv, mara.ID)
+
+	ownerSessions := decode[[]sessionJSON](t, do(t, http.MethodGet, srv.URL+"/auth/sessions", ownerToken, nil))
+	victim := ownerSessions[0].ID
+
+	path := srv.URL + "/auth/sessions/" + strconv.FormatInt(victim, 10)
+	if resp := do(t, http.MethodDelete, path, maraToken, nil); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("mara revoking the owner's device = %d, want 404", resp.StatusCode)
+	}
+	if resp := do(t, http.MethodGet, srv.URL+"/auth/me", ownerToken, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("the owner's device was revoked by a member: %d", resp.StatusCode)
+	}
+}
+
+// TestHouseholdListMetadata backs the household rows: an invited-but-absent
+// housemate ("invite pending · expires in 6 days · never signed in") must be
+// distinguishable from an active one ("Active · 1 device · last seen today").
+func TestHouseholdListMetadata(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+	ownerToken := signIn(t, s, srv, ownerID(ctx, t, s))
+
+	// Theo is invited and never shows up.
+	do(t, http.MethodPost, srv.URL+"/admin/users", ownerToken,
+		map[string]string{"email": "theo@example.com", "display_name": "Theo"})
+	// Mara is invited and signs in.
+	resp := do(t, http.MethodPost, srv.URL+"/admin/users", ownerToken,
+		map[string]string{"email": "mara@example.com", "display_name": "Mara"})
+	mara := decode[struct {
+		User        userJSON `json:"user"`
+		InviteToken string   `json:"invite_token"`
+	}](t, resp)
+	do(t, http.MethodPost, srv.URL+"/auth/session", "",
+		map[string]string{"token": mara.InviteToken, "device_label": "Pixel 8"})
+
+	members := decode[[]memberJSON](t, do(t, http.MethodGet, srv.URL+"/admin/users", ownerToken, nil))
+	if len(members) != 3 {
+		t.Fatalf("got %d members, want 3", len(members))
+	}
+	if !members[0].IsOwner {
+		t.Fatalf("owner must sort first, got %+v", members[0])
+	}
+
+	byEmail := map[string]memberJSON{}
+	for _, m := range members {
+		byEmail[m.Email] = m
+	}
+
+	theo := byEmail["theo@example.com"]
+	if theo.InviteExpiresAt == nil {
+		t.Fatal("Theo has no invite_expires_at; the row can't show 'invite pending · expires in N days'")
+	}
+	if theo.LastSeenAt != nil || theo.SessionCount != 0 {
+		t.Fatalf("Theo never signed in but reads as seen=%v devices=%d", theo.LastSeenAt, theo.SessionCount)
+	}
+
+	m := byEmail["mara@example.com"]
+	if m.LastSeenAt == nil || m.SessionCount != 1 {
+		t.Fatalf("Mara signed in on one device but reads as seen=%v devices=%d", m.LastSeenAt, m.SessionCount)
+	}
+	if m.InviteExpiresAt != nil {
+		t.Fatal("Mara's invite was redeemed; it must no longer read as pending")
+	}
+}
