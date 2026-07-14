@@ -39,7 +39,8 @@ func TestReplaceOnRestamp(t *testing.T) {
 
 	// A reading position must survive the in-place replace.
 	if _, err := s.UpsertPositionLWW(ctx, store.ReadingPosition{
-		BookID: b1.ID, DeviceID: "dev-1", CFI: "/6/4!/2", Progress: 0.42,
+		BookID: b1.ID, UserID: ownerID(ctx, t, s),
+		DeviceID: "dev-1", CFI: "/6/4!/2", Progress: 0.42,
 		UpdatedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("seed position: %v", err)
@@ -71,7 +72,7 @@ func TestReplaceOnRestamp(t *testing.T) {
 	}
 
 	// Reading position preserved (same book id).
-	pos, err := s.GetFurthestPosition(ctx, b1.ID)
+	pos, err := s.GetFurthestPosition(ctx, b1.ID, ownerID(ctx, t, s))
 	if err != nil {
 		t.Fatalf("position lost after replace: %v", err)
 	}

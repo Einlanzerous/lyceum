@@ -81,6 +81,50 @@ make wails-windows     # → wrappers/wails/build/bin/Lyceum.exe   (needs the Wa
 Android is a separate native Flutter app under [`mobile/`](mobile/lyceum)
 (LYCM-700), not a web-shell wrapper.
 
+## Accounts (LYCM-801)
+
+Lyceum supports a household: several people share one shelf but keep their own
+reading positions, so one person finishing a book doesn't show everyone else as
+finished. There are no passwords — sign-in is by one-time invite.
+
+**Enforcement is off by default** (`LYCEUM_AUTH=false`). While it is off the
+reader core is open and every request is served as the owner, exactly as before
+accounts existed — the clients don't send credentials yet. Turn it on once they
+ship a sign-in screen.
+
+- **The owner** is the account that adopts all pre-accounts reading history, and
+  the only one who can invite or remove people. Set `LYCEUM_OWNER_EMAIL` /
+  `LYCEUM_OWNER_NAME`; the row itself is seeded by migration 0011.
+- **First boot** prints a one-time sign-in invite for the owner. Redeem it once
+  (`POST /auth/session`) to get the long-lived session token the client carries as
+  `Authorization: Bearer`. `lyceum mint-token` issues another if it's lost.
+- **Adding someone** — `POST /admin/users {email, display_name}` returns *their*
+  one-time invite. (This is also the hook Purser provisions through.) Invites
+  expire after 7 days. The `/admin` routes are refused entirely while
+  `LYCEUM_AUTH=false`, since a server that can't tell who is asking shouldn't be
+  minting credentials — use `lyceum mint-token` on the host to bootstrap.
+- **Two ways to present a session** — `Authorization: Bearer <token>` for native
+  clients, or the `lyceum_session` cookie that sign-in also sets. The cookie is
+  not optional garnish: the shelf loads covers with plain `<img src>` tags, which
+  cannot carry a header.
+
+Two token namespaces exist and are never interchangeable: **session tokens** (in
+the database, guard the reader core, belong to people) and the **service tokens**
+below (`LYCEUM_API_TOKENS`, scoped, belong to programs). A service token cannot
+read a library; a session cannot drive a Kindle delivery.
+
+| Route | |
+|---|---|
+| `POST /auth/session` | redeem an invite → `{user, session_token}` |
+| `DELETE /auth/session` | sign out this device only |
+| `GET` / `PATCH /auth/me` | current account; rename yourself |
+| `POST` / `GET /admin/users` | invite a member (returns a one-time token) / list |
+| `POST /admin/users/{id}/invite` | re-invite (a second device, or a lost token) |
+| `DELETE /admin/users/{id}` | remove a member (the owner can't be removed) |
+
+Reading positions are keyed `(book, user, device)`, so two people can read the
+same book on the same shared tablet without colliding.
+
 ## Ecosystem & Agent Integration (LYCM-400)
 
 Phase 4 adds two integrations on top of the core, both gated by static bearer

@@ -65,6 +65,13 @@ type config struct {
 	binderyBaseURL string // LYCEUM_BINDERY_BASE_URL — e.g. http://localhost:8787
 	binderyAPIKey  string // LYCEUM_BINDERY_API_KEY — Bindery Settings → Security
 
+	// Accounts (LYCM-801). userAuth gates the reader core behind a session token.
+	// It defaults OFF: the clients don't sign in yet, and turning it on before
+	// they do would lock out every existing install. Flip it once they ship.
+	userAuth   bool   // LYCEUM_AUTH — require a signed-in user on the reader core
+	ownerEmail string // LYCEUM_OWNER_EMAIL — identity of the owner account
+	ownerName  string // LYCEUM_OWNER_NAME — the owner's display name
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -93,6 +100,10 @@ func loadConfig() config {
 
 		binderyBaseURL: os.Getenv("LYCEUM_BINDERY_BASE_URL"),
 		binderyAPIKey:  os.Getenv("LYCEUM_BINDERY_API_KEY"),
+
+		userAuth:   envBool("LYCEUM_AUTH", false),
+		ownerEmail: os.Getenv("LYCEUM_OWNER_EMAIL"),
+		ownerName:  os.Getenv("LYCEUM_OWNER_NAME"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -160,7 +171,12 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	if err != nil {
 		log.Fatalf("parse LYCEUM_API_TOKENS: %v", err)
 	}
-	opts := []api.Option{api.WithAuth(auth)}
+	opts := []api.Option{api.WithAuth(auth), api.WithUserAuth(cfg.userAuth)}
+	if cfg.userAuth {
+		log.Printf("auth: reader core requires a signed-in user")
+	} else {
+		log.Printf("config: user auth disabled (LYCEUM_AUTH); the reader core is open and every request is served as the owner")
+	}
 
 	if cfg.coverFetch {
 		opts = append(opts, api.WithCoverFetcher(newCoverFetcher(cfg)))
@@ -257,6 +273,10 @@ func main() {
 		runSetSeries(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "mint-token" {
+		runMintToken(os.Args[2:])
+		return
+	}
 
 	cfg := loadConfig()
 
@@ -271,6 +291,11 @@ func main() {
 	}
 
 	st := store.New(pool, cfg.dataDir)
+
+	// Accounts (LYCM-801): migration 0011 seeds the owner row; this lands the
+	// operator's configured identity on it and prints a first sign-in invite when
+	// nobody can get in yet.
+	bootstrapOwner(ctx, st, cfg)
 
 	opts, cleanup := buildAPIOptions(cfg, st)
 	defer cleanup()

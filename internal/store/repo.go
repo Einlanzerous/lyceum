@@ -65,11 +65,14 @@ type Device struct {
 	LastSeen *time.Time
 }
 
-// ReadingPosition is a per-device bookmark within a book. The pair
-// (BookID, DeviceID) is unique: a device has at most one position per book.
+// ReadingPosition is one user's bookmark within a book, on one device. The
+// triple (BookID, UserID, DeviceID) is unique: a person has at most one position
+// per book per device, and two people reading the same book on a shared device
+// each keep their own (LYCM-801).
 type ReadingPosition struct {
 	ID        int64
 	BookID    int64
+	UserID    int64
 	DeviceID  string
 	CFI       string
 	Progress  float64
@@ -241,27 +244,27 @@ func (s *Store) GetBookByHash(ctx context.Context, hash string) (Book, error) {
 	return b, nil
 }
 
-const positionColumns = `id, book_id, device_id, cfi, COALESCE(progress, 0), updated_at`
+const positionColumns = `id, book_id, user_id, device_id, cfi, COALESCE(progress, 0), updated_at`
 
 func scanPosition(row pgx.Row) (ReadingPosition, error) {
 	var p ReadingPosition
-	err := row.Scan(&p.ID, &p.BookID, &p.DeviceID, &p.CFI, &p.Progress, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.BookID, &p.UserID, &p.DeviceID, &p.CFI, &p.Progress, &p.UpdatedAt)
 	return p, err
 }
 
 // UpsertPosition inserts a reading position, or updates the existing one for
-// the same (BookID, DeviceID) pair. updated_at is refreshed to now() on every
-// call. The stored row is returned.
+// the same (BookID, UserID, DeviceID) triple. updated_at is refreshed to now()
+// on every call. The stored row is returned.
 func (s *Store) UpsertPosition(ctx context.Context, p ReadingPosition) (ReadingPosition, error) {
 	saved, err := scanPosition(s.pool.QueryRow(ctx,
-		`INSERT INTO reading_positions (book_id, device_id, cfi, progress, updated_at)
-		 VALUES ($1, $2, $3, $4, now())
-		 ON CONFLICT (book_id, device_id) DO UPDATE
+		`INSERT INTO reading_positions (book_id, user_id, device_id, cfi, progress, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, now())
+		 ON CONFLICT (book_id, user_id, device_id) DO UPDATE
 		   SET cfi = EXCLUDED.cfi,
 		       progress = EXCLUDED.progress,
 		       updated_at = now()
 		 RETURNING `+positionColumns,
-		p.BookID, p.DeviceID, p.CFI, p.Progress))
+		p.BookID, p.UserID, p.DeviceID, p.CFI, p.Progress))
 	if err != nil {
 		return ReadingPosition{}, fmt.Errorf("store: upsert position: %w", err)
 	}
@@ -269,42 +272,44 @@ func (s *Store) UpsertPosition(ctx context.Context, p ReadingPosition) (ReadingP
 }
 
 // UpsertPositionLWW inserts a reading position, or reconciles it against the
-// existing row for the same (BookID, DeviceID) pair using last-write-wins:
-// the incoming row only replaces the stored one when its UpdatedAt is greater
-// than or equal to the stored updated_at. The unchanged (older) write is a
-// no-op. Either way the current winning row is returned. Unlike UpsertPosition,
-// this honours the client-supplied UpdatedAt rather than stamping now(), so the
-// /sync endpoint can resolve cross-device conflicts by the clients' own clocks.
+// existing row for the same (BookID, UserID, DeviceID) triple using
+// last-write-wins: the incoming row only replaces the stored one when its
+// UpdatedAt is greater than or equal to the stored updated_at. The unchanged
+// (older) write is a no-op. Either way the current winning row is returned.
+// Unlike UpsertPosition, this honours the client-supplied UpdatedAt rather than
+// stamping now(), so the /sync endpoint can resolve cross-device conflicts by
+// the clients' own clocks.
 func (s *Store) UpsertPositionLWW(ctx context.Context, p ReadingPosition) (ReadingPosition, error) {
 	saved, err := scanPosition(s.pool.QueryRow(ctx,
-		`INSERT INTO reading_positions (book_id, device_id, cfi, progress, updated_at)
-		 VALUES ($1, $2, $3, $4, $5)
-		 ON CONFLICT (book_id, device_id) DO UPDATE
+		`INSERT INTO reading_positions (book_id, user_id, device_id, cfi, progress, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (book_id, user_id, device_id) DO UPDATE
 		   SET cfi = EXCLUDED.cfi,
 		       progress = EXCLUDED.progress,
 		       updated_at = EXCLUDED.updated_at
 		   WHERE EXCLUDED.updated_at >= reading_positions.updated_at
 		 RETURNING `+positionColumns,
-		p.BookID, p.DeviceID, p.CFI, p.Progress, p.UpdatedAt))
+		p.BookID, p.UserID, p.DeviceID, p.CFI, p.Progress, p.UpdatedAt))
 	switch {
 	case err == nil:
 		return saved, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		// The WHERE guard rejected a stale write (incoming updated_at older than
 		// the stored row): the existing row wins. Return it unchanged.
-		return s.GetPosition(ctx, p.BookID, p.DeviceID)
+		return s.GetPosition(ctx, p.BookID, p.UserID, p.DeviceID)
 	default:
 		return ReadingPosition{}, fmt.Errorf("store: upsert position (lww): %w", err)
 	}
 }
 
-// GetPosition returns the reading position for a specific book and device, or
-// ErrNotFound.
-func (s *Store) GetPosition(ctx context.Context, bookID int64, deviceID string) (ReadingPosition, error) {
+// GetPosition returns one user's reading position for a book on a specific
+// device, or ErrNotFound.
+func (s *Store) GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (ReadingPosition, error) {
 	p, err := scanPosition(s.pool.QueryRow(ctx,
 		`SELECT `+positionColumns+`
-		 FROM reading_positions WHERE book_id = $1 AND device_id = $2`,
-		bookID, deviceID))
+		 FROM reading_positions
+		 WHERE book_id = $1 AND user_id = $2 AND device_id = $3`,
+		bookID, userID, deviceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReadingPosition{}, ErrNotFound
 	}
@@ -315,17 +320,22 @@ func (s *Store) GetPosition(ctx context.Context, bookID int64, deviceID string) 
 }
 
 // GetFurthestPosition returns the reading position with the greatest progress
-// for a book across all devices (ties broken by recency), or ErrNotFound when
-// the book has no positions. This is the cross-device resume/display anchor:
-// ordering by progress rather than write time means a device that saved an
-// earlier spot more recently — e.g. a still-open reader that flushed a
-// pre-pagination progress=0 on navigation — can't clobber the furthest read on
-// another device (LYCM sync fix).
-func (s *Store) GetFurthestPosition(ctx context.Context, bookID int64) (ReadingPosition, error) {
+// for a book across all of one user's devices (ties broken by recency), or
+// ErrNotFound when that user has never opened the book. This is the resume and
+// progress-display anchor: ordering by progress rather than write time means a
+// device that saved an earlier spot more recently — e.g. a still-open reader
+// that flushed a pre-pagination progress=0 on navigation — can't clobber the
+// furthest read on another device (LYCM sync fix).
+//
+// Since LYCM-801 the sweep is scoped to one user: housemates share the shelf but
+// not each other's bookmarks, so one person finishing a book does not show the
+// next person as finished (LYCM-802 will surface who read what, deliberately).
+func (s *Store) GetFurthestPosition(ctx context.Context, bookID, userID int64) (ReadingPosition, error) {
 	p, err := scanPosition(s.pool.QueryRow(ctx,
 		`SELECT `+positionColumns+`
-		 FROM reading_positions WHERE book_id = $1
-		 ORDER BY COALESCE(progress, 0) DESC, updated_at DESC, id DESC LIMIT 1`, bookID))
+		 FROM reading_positions WHERE book_id = $1 AND user_id = $2
+		 ORDER BY COALESCE(progress, 0) DESC, updated_at DESC, id DESC LIMIT 1`,
+		bookID, userID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReadingPosition{}, ErrNotFound
 	}

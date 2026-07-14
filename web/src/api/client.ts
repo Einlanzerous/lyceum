@@ -6,6 +6,7 @@
 
 import type { Book, Position, PositionInput } from './types'
 import { apiUrl } from './base'
+import { apiFetch } from './http'
 
 /**
  * Error thrown for any non-2xx response (except GET /sync 404, which maps to
@@ -44,21 +45,21 @@ export function bookFileUrl(id: number): string {
 
 /** GET /library — every book in the collection. */
 export async function listLibrary(): Promise<Book[]> {
-  const res = await fetch(apiUrl('/library'))
+  const res = await apiFetch('/library')
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book[]
 }
 
 /** GET /books/{id} — a single book's wire shape (cover, progress, finished). */
 export async function getBook(id: number): Promise<Book> {
-  const res = await fetch(apiUrl(`/books/${id}`))
+  const res = await apiFetch(`/books/${id}`)
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
 
 /** PUT /books/{id}/finished — mark a book read (true) or unread (false). */
 export async function setBookFinished(id: number, finished: boolean): Promise<void> {
-  const res = await fetch(apiUrl(`/books/${id}/finished`), {
+  const res = await apiFetch(`/books/${id}/finished`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ finished }),
@@ -73,7 +74,7 @@ export async function setBookFinished(id: number, finished: boolean): Promise<vo
 export async function uploadBook(file: File): Promise<Book> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(apiUrl('/upload'), { method: 'POST', body: form })
+  const res = await apiFetch('/upload', { method: 'POST', body: form })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
@@ -85,7 +86,7 @@ export async function uploadBook(file: File): Promise<Book> {
  */
 export async function getPosition(bookId: number, deviceId: string): Promise<Position | null> {
   const params = new URLSearchParams({ book_id: String(bookId), device_id: deviceId })
-  const res = await fetch(apiUrl(`/sync?${params.toString()}`))
+  const res = await apiFetch(`/sync?${params.toString()}`)
   if (res.status === 404) return null
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Position
@@ -97,7 +98,7 @@ export async function getPosition(bookId: number, deviceId: string): Promise<Pos
  */
 export async function putPosition(pos: PositionInput): Promise<Position> {
   const body: Position = { ...pos, updated_at: pos.updated_at ?? new Date().toISOString() }
-  const res = await fetch(apiUrl('/sync'), {
+  const res = await apiFetch('/sync', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -113,7 +114,7 @@ export async function putPosition(pos: PositionInput): Promise<Position> {
  */
 export function putPositionKeepalive(pos: PositionInput): void {
   const body: Position = { ...pos, updated_at: pos.updated_at ?? new Date().toISOString() }
-  void fetch(apiUrl('/sync'), {
+  void apiFetch('/sync', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -125,21 +126,21 @@ export function putPositionKeepalive(pos: PositionInput): void {
 
 /** GET /ingest/review — books held for review, each with its detected flags. */
 export async function listPendingReview(): Promise<Book[]> {
-  const res = await fetch(apiUrl('/ingest/review'))
+  const res = await apiFetch('/ingest/review')
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book[]
 }
 
 /** POST /books/{id}/approve — publish a pending book to the shelf. */
 export async function approveBook(id: number): Promise<Book> {
-  const res = await fetch(apiUrl(`/books/${id}/approve`), { method: 'POST' })
+  const res = await apiFetch(`/books/${id}/approve`, { method: 'POST' })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
 
 /** PATCH /books/{id} — correct a book's title/author. Title is required. */
 export async function updateBook(id: number, title: string, author: string): Promise<Book> {
-  const res = await fetch(apiUrl(`/books/${id}`), {
+  const res = await apiFetch(`/books/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, author }),
@@ -152,20 +153,20 @@ export async function updateBook(id: number, title: string, author: string): Pro
 export async function replaceCover(id: number, file: File): Promise<Book> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(apiUrl(`/books/${id}/cover`), { method: 'POST', body: form })
+  const res = await apiFetch(`/books/${id}/cover`, { method: 'POST', body: form })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
 
 /** POST /books/{id}/cover/refetch — re-fetch a cover from the art source. */
 export async function refetchCover(id: number): Promise<Book> {
-  const res = await fetch(apiUrl(`/books/${id}/cover/refetch`), { method: 'POST' })
+  const res = await apiFetch(`/books/${id}/cover/refetch`, { method: 'POST' })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book
 }
 
 /** DELETE /books/{id} — remove a book (used to reject a pending ingest). */
 export async function deleteBook(id: number): Promise<void> {
-  const res = await fetch(apiUrl(`/books/${id}`), { method: 'DELETE' })
+  const res = await apiFetch(`/books/${id}`, { method: 'DELETE' })
   if (!res.ok) throw await readError(res)
 }

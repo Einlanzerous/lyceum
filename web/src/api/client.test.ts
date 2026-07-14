@@ -82,7 +82,10 @@ describe('uploadBook', () => {
   it('surfaces a 409 duplicate as an ApiError', async () => {
     mockFetch(() => textResponse(409, 'book already exists'))
     const file = new File(['x'], 'dupe.epub')
-    await expect(uploadBook(file)).rejects.toMatchObject({ status: 409, message: 'book already exists' })
+    await expect(uploadBook(file)).rejects.toMatchObject({
+      status: 409,
+      message: 'book already exists',
+    })
   })
 })
 
@@ -177,11 +180,24 @@ describe('putPositionKeepalive', () => {
 describe('ingest QC review (LYCM-58)', () => {
   it('listPendingReview GETs /ingest/review and returns Book[]', async () => {
     const pending: Book[] = [
-      { id: 3, title: 'Held', author: '', cover_url: '', review_state: 'pending', review_flags: ['no_isbn'] },
+      {
+        id: 3,
+        title: 'Held',
+        author: '',
+        cover_url: '',
+        review_state: 'pending',
+        review_flags: ['no_isbn'],
+      },
     ]
     const fetchFn = mockFetch(() => jsonResponse(200, pending))
     await expect(listPendingReview()).resolves.toEqual(pending)
-    expect(fetchFn).toHaveBeenCalledWith('/ingest/review')
+    // Every request now goes through apiFetch, which attaches the session
+    // (Authorization when this device holds a token, and always the cookie via
+    // credentials: 'include') — so no call site sees a bare fetch(url) any more.
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/ingest/review',
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
   it('approveBook POSTs to the approve route', async () => {
@@ -190,7 +206,10 @@ describe('ingest QC review (LYCM-58)', () => {
       return jsonResponse(200, { id: 3, title: 'Held', author: '', cover_url: '' })
     })
     await approveBook(3)
-    expect(fetchFn).toHaveBeenCalledWith('/books/3/approve', expect.objectContaining({ method: 'POST' }))
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/books/3/approve',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 
   it('updateBook PATCHes title/author as JSON', async () => {
@@ -213,7 +232,10 @@ describe('ingest QC review (LYCM-58)', () => {
     })
     const file = new File([new Uint8Array([1])], 'c.png', { type: 'image/png' })
     await expect(replaceCover(3, file)).resolves.toMatchObject({ cover_url: '/books/3/cover' })
-    expect(fetchFn).toHaveBeenCalledWith('/books/3/cover', expect.objectContaining({ method: 'POST' }))
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/books/3/cover',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 
   it('refetchCover POSTs to the refetch route and surfaces a 404', async () => {

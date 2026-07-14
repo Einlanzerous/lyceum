@@ -6,6 +6,7 @@
 import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import UpdateBanner from '@/components/UpdateBanner.vue'
+import SessionEndedDialog from '@/components/SessionEndedDialog.vue'
 import { checkForUpdate } from '@/update/useUpdate'
 
 onMounted(() => {
@@ -17,5 +18,8 @@ onMounted(() => {
   <main class="app-main">
     <UpdateBanner />
     <RouterView />
+    <!-- A 401 can land mid-chapter. Global, so it lands over whatever you were
+         doing rather than teleporting you away from it. -->
+    <SessionEndedDialog />
   </main>
 </template>

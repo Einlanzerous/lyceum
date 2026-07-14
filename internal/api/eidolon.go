@@ -26,13 +26,25 @@ type locationJSON struct {
 // handleEidolonLocation returns the active reading location for a book: the
 // latest synced CFI/progress plus the resolved chapter href, for Project
 // Eidolon's local TTS (LYCM-403).
+//
+// This route authenticates with a *service* token (eidolon:read), which names no
+// person, so since accounts landed (LYCM-801) it reports the **owner's** reading
+// location. That is what the TTS use case wants — Eidolon narrates the book the
+// owner is reading. If a housemate ever wants their own narration, bind the
+// service token to a user rather than widening this to "whoever read furthest".
 func (a *API) handleEidolonLocation(w http.ResponseWriter, r *http.Request) {
 	b, ok := a.lookupBook(w, r)
 	if !ok {
 		return
 	}
 
-	pos, err := a.store.GetFurthestPosition(r.Context(), b.ID)
+	owner, err := a.store.GetOwner(r.Context())
+	if err != nil {
+		serverError(w, "load owner", err)
+		return
+	}
+
+	pos, err := a.store.GetFurthestPosition(r.Context(), b.ID, owner.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "no reading position", http.StatusNotFound)
 		return

@@ -214,7 +214,7 @@ func TestSyncPutInvalidCFI(t *testing.T) {
 	}
 
 	// Nothing should have been stored.
-	if _, err := s.GetPosition(context.Background(), book.ID, "device-a"); err != store.ErrNotFound {
+	if _, err := s.GetPosition(context.Background(), book.ID, ownerID(context.Background(), t, s), "device-a"); err != store.ErrNotFound {
 		t.Fatalf("expected no stored position, got %v", err)
 	}
 }

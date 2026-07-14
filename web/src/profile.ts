@@ -1,43 +1,46 @@
-// Local profile identity — just a display name. Lyceum is a single-user,
-// self-hosted server with no accounts, so this is a persisted local label
-// shown at the top of Settings and used as the library avatar's initial.
-// (The old hard-coded "R" avatar was a placeholder for this — "Reader".)
-
-import { computed, ref, watch } from 'vue'
+// What's left of the LYCM-700 local "Profile".
+//
+// Before accounts (LYCM-801) this was Lyceum's entire notion of identity: a
+// display name in localStorage, never sent to the server, whose first letter was
+// the library avatar. It is not identity any more — the account is (stores/auth).
+//
+// One job remains. Someone who has been reading for months has a name sitting in
+// this browser, and the first time their server turns accounts on they have to
+// sign in on a device they already own. "You've been reading as Ada" should stay
+// true across that step — so the auth store reads the old label once, sends it up
+// as the account's display name, and clears it. After that the name lives on the
+// server and follows the person to every device.
 
 const STORAGE_KEY = 'lyceum.profileName'
-const DEFAULT_NAME = 'Reader'
 
-function initialName(): string {
+/**
+ * Read *and consume* the pre-accounts local display name, or '' when there isn't
+ * one.
+ *
+ * Clearing on read is what makes the fold-in happen exactly once. If it lingered,
+ * a name the person later changed on the server could be quietly reverted by the
+ * stale local label the next time they signed in on this browser.
+ */
+export function takeLegacyProfileName(): string {
   try {
-    return (localStorage.getItem(STORAGE_KEY) ?? '').trim()
+    const name = (localStorage.getItem(STORAGE_KEY) ?? '').trim()
+    localStorage.removeItem(STORAGE_KEY)
+    return name
   } catch {
-    // localStorage unavailable (e.g. private mode).
+    // localStorage unavailable (private mode): nothing to carry over.
     return ''
   }
 }
 
-// Empty is allowed (unset) — the avatar/label fall back to the default.
-const name = ref<string>(initialName())
-
-watch(name, (value) => {
+/**
+ * Peek without consuming, so the sign-in screen can greet a returning reader by
+ * name ("You've been reading as Ada") *before* they have signed in — the point at
+ * which the name is still the only thing we know about them.
+ */
+export function peekLegacyProfileName(): string {
   try {
-    localStorage.setItem(STORAGE_KEY, value)
+    return (localStorage.getItem(STORAGE_KEY) ?? '').trim()
   } catch {
-    // best-effort persistence
-  }
-})
-
-// First letter for the avatar, falling back to the default's initial.
-const initial = computed(() => (name.value.trim()[0] ?? DEFAULT_NAME[0]!).toUpperCase())
-
-export function useProfile() {
-  return {
-    name,
-    initial,
-    defaultName: DEFAULT_NAME,
-    set(value: string): void {
-      name.value = value.trim()
-    },
+    return ''
   }
 }

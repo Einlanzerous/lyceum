@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { coverUrl } from '@/api/client'
+import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import { memberStatus, resumeIndex, type MemberStatus, type SeriesGroup } from '@/library/series'
 import type { Book } from '@/api/types'
@@ -18,7 +18,7 @@ const STATUS_LABEL: Record<MemberStatus, string> = {
 }
 
 function coverFor(b: Book): string {
-  return b.cover_url ? coverUrl(b.id) : ''
+  return b.cover_url ? coverSrc(b.id) : ''
 }
 function pct(b: Book): number {
   return Math.round((b.progress ?? 0) * 100)

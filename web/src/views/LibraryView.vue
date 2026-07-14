@@ -7,11 +7,12 @@ import SeriesDrawer from '@/components/SeriesDrawer.vue'
 import SortControl from '@/components/SortControl.vue'
 import LibrarySearch from '@/components/LibrarySearch.vue'
 import { useLibraryStore } from '@/stores/library'
-import { coverUrl, listPendingReview } from '@/api/client'
+import { listPendingReview } from '@/api/client'
+import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import { isNativeShell } from '@/api/base'
 import { useServer } from '@/api/useServer'
-import { useProfile } from '@/profile'
+import AccountMenu from '@/components/AccountMenu.vue'
 import ServerSettings from '@/components/ServerSettings.vue'
 import { loadSort, saveSort, sortBooks, type SortDir, type SortKey } from '@/library/sort'
 import { buildShelf, pinnedBookId } from '@/library/series'
@@ -19,7 +20,6 @@ import { useGridColumns } from '@/library/useColumns'
 import type { Book } from '@/api/types'
 
 const store = useLibraryStore()
-const { initial } = useProfile()
 const { books, loading, error } = storeToRefs(store)
 
 // In the native shells the library can't load until a backend is configured
@@ -194,9 +194,7 @@ function onSetFinished(id: number, finished: boolean): void {
           title="Review ingests held for quality check"
           >⚑ Review<span v-if="reviewCount" class="lib__badge">{{ reviewCount }}</span></RouterLink
         >
-        <RouterLink to="/settings" class="lib__avatar" aria-label="Settings" title="Settings">{{
-          initial
-        }}</RouterLink>
+        <AccountMenu />
       </div>
     </header>
 
@@ -345,7 +343,7 @@ function onSetFinished(id: number, finished: boolean): void {
     <div v-else class="lib__list">
       <RouterLink v-for="book in listBooks" :key="book.id" :to="`/reader/${book.id}`" class="row">
         <div class="row__thumb" :class="{ 'row__thumb--fallback': !book.cover_url }">
-          <img v-if="book.cover_url" :src="coverUrl(book.id)" :alt="''" loading="lazy" />
+          <img v-if="book.cover_url" :src="coverSrc(book.id)" :alt="''" loading="lazy" />
           <span v-else>{{ book.title.charAt(0) }}</span>
         </div>
         <div class="row__meta">

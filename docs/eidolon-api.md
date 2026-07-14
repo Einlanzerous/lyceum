@@ -21,7 +21,14 @@ If no tokens are configured the integration surface is closed (every request
 
 ## GET /eidolon/books/{id}/location  (LYCM-403)
 
-Current reading location for a book — the latest synced position across devices.
+Current reading location for a book — the furthest synced position across devices.
+
+**Whose location?** Since accounts landed (LYCM-801) reading positions belong to
+a person, but this route authenticates with a *service* token (`eidolon:read`),
+which names no one. It therefore reports the **owner's** position — Eidolon
+narrates the book the owner is reading. If a housemate ever wants their own
+narration, bind the service token to a user rather than widening this to
+"whoever read furthest", which would leak one person's place to another.
 
 ```json
 {

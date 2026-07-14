@@ -70,6 +70,26 @@ func truncate(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		`TRUNCATE ingest_candidates, ingest_batches, reading_positions, devices, inventory, books RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
+	// users is deliberately NOT truncated: migration 0011 seeds exactly one owner
+	// and the schema insists on it. Clear the members and every credential
+	// instead, so each case starts from a lone, token-less owner (LYCM-801).
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM user_tokens; DELETE FROM users WHERE NOT is_owner`); err != nil {
+		t.Fatalf("reset users: %v", err)
+	}
+}
+
+// ownerID is the account migration 0011 seeds. With user auth off (the default
+// in these tests, since New is called without WithUserAuth) every request is
+// served as the owner, so tests that seed or assert reading positions directly
+// through the store must use this id to line up with what the handlers see.
+func ownerID(ctx context.Context, t *testing.T, s *store.Store) int64 {
+	t.Helper()
+	owner, err := s.GetOwner(ctx)
+	if err != nil {
+		t.Fatalf("GetOwner: %v", err)
+	}
+	return owner.ID
 }
 
 // pngBytes is a minimal payload whose magic bytes make http content sniffing
@@ -236,9 +256,11 @@ func TestLibraryListing(t *testing.T) {
 	withCover := seedBook(t, s, "hash-cover", "The Republic", "Plato", pngBytes)
 	noCover := seedBook(t, s, "hash-nocover", "Meditations", "Marcus Aurelius", nil)
 
-	// Give one book a reading position so progress surfaces.
+	// Give one book a reading position so progress surfaces. It must belong to the
+	// owner: with user auth off, that is who the handlers serve.
 	if _, err := s.UpsertPosition(ctx, store.ReadingPosition{
-		BookID: withCover.ID, DeviceID: "kobo-1", CFI: "/6/4!/2", Progress: 0.37,
+		BookID: withCover.ID, UserID: ownerID(ctx, t, s),
+		DeviceID: "kobo-1", CFI: "/6/4!/2", Progress: 0.37,
 	}); err != nil {
 		t.Fatalf("UpsertPosition: %v", err)
 	}

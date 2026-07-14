@@ -4,7 +4,7 @@
 // inventory / the library. Every URL is resolved through apiUrl() like the rest
 // of the client (same-origin on web, remote backend in the native shells).
 
-import { apiUrl } from './base'
+import { apiFetch } from './http'
 import { readError } from './client'
 
 /** One candidate match for a scanned ISBN (a resolved book edition). */
@@ -61,13 +61,13 @@ export interface ScanInput {
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(path))
+  const res = await apiFetch(path)
   if (!res.ok) throw await readError(res)
   return (await res.json()) as T
 }
 
 async function sendJSON<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+  const res = await apiFetch(path, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -124,7 +124,7 @@ export function confirmCandidate(
 
 /** POST /ingest/candidates/{id}/skip — drop a candidate from review. */
 export async function skipCandidate(candidateId: number): Promise<void> {
-  const res = await fetch(apiUrl(`/ingest/candidates/${candidateId}/skip`), { method: 'POST' })
+  const res = await apiFetch(`/ingest/candidates/${candidateId}/skip`, { method: 'POST' })
   if (!res.ok) throw await readError(res)
 }
 
