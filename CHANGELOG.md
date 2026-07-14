@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/Einlanzerous/lyceum/compare/v1.3.3...v1.4.0) (2026-07-14)
+
+
+### Features
+
+* **auth:** household accounts — users, sessions, per-user reading positions (LYCM-801) ([#43](https://github.com/Einlanzerous/lyceum/issues/43)) ([37b6a9d](https://github.com/Einlanzerous/lyceum/commit/37b6a9da8c2b73394305cd8a600966297251a717))
+* **mobile:** Flutter parity for household accounts (LYCM-86) ([cbb30cf](https://github.com/Einlanzerous/lyceum/commit/cbb30cf7f10cfb7835cecaa57b8f4ee8539dd94d))
+
 ## [1.3.3](https://github.com/Einlanzerous/lyceum/compare/v1.3.2...v1.3.3) (2026-07-13)
 
 
