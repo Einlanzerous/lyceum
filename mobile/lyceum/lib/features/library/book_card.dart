@@ -6,6 +6,7 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
+import '../../widgets/cover_image.dart';
 import 'library_controller.dart';
 
 String _pct(double v) => '${(v * 100).round()}%';
@@ -88,10 +89,9 @@ class BookCard extends ConsumerWidget {
                       // cover, with the card aspect matched to the source: covers
                       // fill edge-to-edge and any residual aspect difference crops
                       // the sides, never the top banner / bottom author bar.
-                      Image.network(
-                        client.coverUrl(book.id),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => _FallbackCover(book: book),
+                      CoverImage(
+                        url: client.coverUrl(book.id),
+                        fallback: _FallbackCover(book: book),
                       )
                     else
                       _FallbackCover(book: book),
@@ -164,11 +164,9 @@ class BookListTile extends ConsumerWidget {
                 width: 38,
                 height: 56,
                 child: book.hasCover
-                    ? Image.network(
-                        client.coverUrl(book.id),
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            _FallbackCover(book: book, compact: true),
+                    ? CoverImage(
+                        url: client.coverUrl(book.id),
+                        fallback: _FallbackCover(book: book, compact: true),
                       )
                     : _FallbackCover(book: book, compact: true),
               ),

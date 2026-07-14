@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../api/server_store.dart';
-import '../../prefs/profile.dart';
+import '../../auth/auth_controller.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../widgets/brand_mark.dart';
 import '../settings/server_settings.dart';
@@ -70,7 +70,9 @@ class _TopBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final lyc = context.lyc;
-    final initial = ref.watch(profileInitialProvider);
+    // The avatar letter now comes from the account, not a local label — so it is
+    // the same letter on every device this person signs in on.
+    final initial = ref.watch(authControllerProvider).initial;
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
       decoration: BoxDecoration(

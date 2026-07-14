@@ -5,10 +5,13 @@ import 'package:go_router/go_router.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../api/api_providers.dart';
+import '../../api/device.dart';
 import '../../api/server_store.dart';
+import '../../auth/session_store.dart';
 import '../../prefs/reading_font.dart';
 import '../../prefs/theme_controller.dart';
 import '../../theme/lyceum_colors.dart';
+import 'reader_bridge.dart';
 
 /// Full-screen reader. Loads the backend's own epub.js reader page in a
 /// WebView, so EPUB-CFI generation and `/sync` stay byte-identical with the
@@ -26,6 +29,8 @@ class ReaderScreen extends ConsumerStatefulWidget {
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   late final WebViewController _controller;
   late final String _origin;
+  late final String _sessionToken;
+  late final String _deviceId;
   bool _loading = true;
   String? _error;
 
@@ -34,12 +39,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     super.initState();
     final client = ref.read(lyceumClientProvider);
     _origin = ref.read(serverUrlProvider);
+    _sessionToken = ref.read(sessionTokenProvider);
+    _deviceId = ref.read(deviceIdProvider);
     final readerUrl = client.readerUrl(widget.bookId);
     final dark = ref.read(themeControllerProvider) == LyceumThemeMode.dark;
     final font = ref.read(readingFontProvider);
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      // The page is the SPA, and anything it throws is otherwise invisible from
+      // out here — a rejected promise reads as a book that is merely slow.
+      ..setOnConsoleMessage(
+        (msg) => debugPrint('[lyceum-reader] ${msg.level.name}: ${msg.message}'),
+      )
       ..setBackgroundColor(dark ? const Color(0xFF171717) : const Color(0xFFF7F5F0))
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -115,23 +127,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   Future<void> _injectBridge(bool dark, ReadingFont font) async {
-    final theme = dark ? 'dark' : 'light';
     try {
       await _controller.runJavaScript(
-        // 1) Push the app's theme/font into the reader's localStorage.
-        "try{localStorage.setItem('lyceum.theme','$theme');"
-        "localStorage.setItem('lyceum.readingFont','${font.name}');}catch(e){}"
-        // 2) Install a one-time hook: whenever the SPA navigates away from a
-        //    /reader route (e.g. its "Library" pill), notify the native side so
-        //    we pop back to the native library instead of rendering the web
-        //    shelf inside the WebView.
-        "(function(){if(window.__lyceumNavHook)return;window.__lyceumNavHook=true;"
-        "var notify=function(){try{if(!location.pathname.startsWith('/reader')){"
-        "LyceumNav.postMessage('exit');}}catch(e){}};"
-        "window.addEventListener('popstate',notify);"
-        "var w=function(o){return function(){var r=o.apply(this,arguments);notify();return r;};};"
-        "history.pushState=w(history.pushState);"
-        "history.replaceState=w(history.replaceState);})();",
+        readerBootstrapScript(
+          sessionToken: _sessionToken,
+          deviceId: _deviceId,
+          dark: dark,
+          font: font,
+        ),
       );
     } catch (_) {
       // localStorage not ready yet on this callback — the onPageFinished pass

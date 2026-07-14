@@ -42,6 +42,8 @@ dependencies:
   uuid: ^4.5.3
   # In-app ISBN barcode scanning (LYCM-602): ML Kit-backed EAN-13 decode + torch.
   mobile_scanner: ^7.2.0
+  flutter_secure_storage: ^10.3.1
+  device_info_plus: ^13.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

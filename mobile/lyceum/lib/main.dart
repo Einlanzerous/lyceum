@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'auth/session_store.dart';
 import 'prefs/prefs.dart';
 
 Future<void> main() async {
@@ -14,10 +15,20 @@ Future<void> main() async {
     SystemUiMode.edgeToEdge,
     overlays: SystemUiOverlay.values,
   );
+
+  // Both stores are read before the first frame so every provider downstream can
+  // stay synchronous — and so the app never flashes the front door at somebody
+  // who is, in fact, already signed in.
   final prefs = await SharedPreferences.getInstance();
+  const tokenStore = SecureTokenStore();
+  final token = await tokenStore.read();
+
   runApp(
     ProviderScope(
-      overrides: [prefsProvider.overrideWithValue(prefs)],
+      overrides: [
+        prefsProvider.overrideWithValue(prefs),
+        initialSessionTokenProvider.overrideWithValue(token),
+      ],
       child: const LyceumApp(),
     ),
   );
