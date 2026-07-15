@@ -129,8 +129,12 @@ export function useReader(
 
   function recomputePage(): void {
     const b = book.value
-    if (!b || totalPages.value <= 0 || !lastPosition?.cfi) return
-    const pct = b.locations.percentageFromCfi(lastPosition.cfi)
+    // cfi.value tracks the current position on every relocate, including the
+    // initial resume jump — unlike lastPosition, which stays null until we have
+    // real (non-zero) progress. Keying off it lets the page number settle as
+    // soon as the locations index exists.
+    if (!b || totalPages.value <= 0 || !cfi.value) return
+    const pct = b.locations.percentageFromCfi(cfi.value)
     page.value = Math.min(totalPages.value, Math.max(1, Math.round(pct * totalPages.value)))
   }
 
@@ -257,8 +261,13 @@ export function useReader(
         .then(() => b.locations.generate(LOCATION_GRANULARITY))
         .then(() => {
           totalPages.value = b.locations.length()
-          if (lastPosition?.cfi) {
-            progress.value = clampProgress(b.locations.percentageFromCfi(lastPosition.cfi))
+          // Correct the progress bar once locations exist. On a mid-book resume
+          // the initial relocate reports percentage 0 (pre-pagination), so the
+          // bar sits at 0% until this runs. Key off cfi.value (always set by the
+          // resume jump) rather than lastPosition, which is still null here
+          // because that spurious 0 never cleared the persist guard.
+          if (cfi.value) {
+            progress.value = clampProgress(b.locations.percentageFromCfi(cfi.value))
             recomputePage()
           }
         })
