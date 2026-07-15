@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,15 +36,28 @@ class _CameraCapture extends ConsumerStatefulWidget {
   ConsumerState<_CameraCapture> createState() => _CameraCaptureState();
 }
 
-class _CameraCaptureState extends ConsumerState<_CameraCapture> {
+class _CameraCaptureState extends ConsumerState<_CameraCapture>
+    with SingleTickerProviderStateMixin {
   final MobileScannerController _controller = MobileScannerController(
     formats: const [BarcodeFormat.ean13],
     detectionSpeed: DetectionSpeed.noDuplicates,
     detectionTimeoutMs: 400,
   );
 
+  // Scan-feedback toast — drops in from the top so it never covers the Send
+  // button at the bottom (LYCM-75). Flutter SnackBars only rise from the bottom,
+  // so this is a small self-managed overlay instead.
+  late final AnimationController _toastCtl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  String? _toastText;
+  Timer? _toastTimer;
+
   @override
   void dispose() {
+    _toastTimer?.cancel();
+    _toastCtl.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -72,14 +87,12 @@ class _CameraCaptureState extends ConsumerState<_CameraCapture> {
   }
 
   void _toast(String text) {
-    final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        duration: const Duration(milliseconds: 900),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    _toastTimer?.cancel();
+    setState(() => _toastText = text);
+    _toastCtl.forward(from: 0);
+    _toastTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) _toastCtl.reverse();
+    });
   }
 
   Future<void> _manualEntry() async {
@@ -178,7 +191,59 @@ class _CameraCaptureState extends ConsumerState<_CameraCapture> {
               ),
             ),
           ),
+
+        // Scan feedback, dropping in from the top (clear of the Send button).
+        Positioned(
+          top: 60,
+          left: 16,
+          right: 16,
+          child: _TopToast(animation: _toastCtl, text: _toastText),
+        ),
       ],
+    );
+  }
+}
+
+/// A transient message that slides + fades in from the top of the scanner, used
+/// for scan feedback ("Added …", "Already scanned", "Not a book barcode").
+class _TopToast extends StatelessWidget {
+  const _TopToast({required this.animation, required this.text});
+
+  final Animation<double> animation;
+  final String? text;
+
+  @override
+  Widget build(BuildContext context) {
+    if (text == null) return const SizedBox.shrink();
+    final lyc = context.lyc;
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.7),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: lyc.bg.withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: lyc.borderStrong),
+              ),
+              child: Text(
+                text!,
+                style: TextStyle(
+                  color: lyc.text,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

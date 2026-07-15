@@ -107,6 +107,34 @@ describe('ingest store', () => {
     expect(store.reviewable.map((c) => c.id)).toEqual([2])
   })
 
+  it('reResolve adds the corrected ISBN, drops the no-match row, and selects the replacement', async () => {
+    const full = mkBatch([cand(1, 'no_match'), cand(2, 'ready')])
+    const afterResolve = mkBatch([cand(2, 'ready'), cand(3, 'ready')]) // 1 skipped, 3 added
+    vi.mocked(api.getBatch).mockResolvedValueOnce(full).mockResolvedValueOnce(afterResolve)
+    vi.mocked(api.addCandidate).mockResolvedValue(cand(3, 'ready'))
+    vi.mocked(api.skipCandidate).mockResolvedValue()
+
+    const store = useIngestStore()
+    await store.openBatch(1)
+    expect(store.selected?.id).toBe(1)
+
+    await store.reResolve(1, ' 9780306406157 ')
+
+    expect(api.addCandidate).toHaveBeenCalledWith(1, '9780306406157', 'manual')
+    expect(api.skipCandidate).toHaveBeenCalledWith(1)
+    expect(store.selected?.id).toBe(3) // the freshly re-resolved candidate
+  })
+
+  it('reResolve ignores a blank ISBN', async () => {
+    vi.mocked(api.getBatch).mockResolvedValue(mkBatch([cand(1, 'no_match')]))
+    const store = useIngestStore()
+    await store.openBatch(1)
+
+    await store.reResolve(1, '   ')
+    expect(api.addCandidate).not.toHaveBeenCalled()
+    expect(api.skipCandidate).not.toHaveBeenCalled()
+  })
+
   it('records an error when a batch fails to load', async () => {
     vi.mocked(api.getBatch).mockRejectedValue(new Error('boom'))
     const store = useIngestStore()

@@ -23,20 +23,38 @@ const {
   error,
 } = storeToRefs(store)
 
-// Series assignment inputs for the selected candidate (reset when selection moves).
+// Series assignment inputs for the selected candidate.
 const seriesName = ref('')
 const seriesIndex = ref<number | null>(null)
-// Add-by-title / manual-ISBN entry (the scanner-free desktop paths).
-const titleQuery = ref('')
-const manualIsbn = ref('')
+// Sticky series carry-over (LYCM-75): a run of books in one series keeps the
+// series name and an auto-incrementing index across confirms, instead of the
+// selection resetting them each time.
+let stickySeries = ''
+let stickyIndex: number | null = null
+
+// Add-book modal: a single combined field (title search or ISBN) reached from
+// the "＋" button on the batch, replacing the always-on add bar (LYCM-75).
+const showAdd = ref(false)
+const addQuery = ref('')
+// Inline re-resolve field on a no-match card.
+const reIsbn = ref('')
 
 onMounted(() => {
   void store.loadBatches()
 })
 
 watch(selected, (c) => {
-  seriesName.value = c?.series ?? ''
-  seriesIndex.value = c?.series_index ?? null
+  reIsbn.value = ''
+  if (c?.series) {
+    // A candidate with its own saved series wins; show its values.
+    seriesName.value = c.series
+    seriesIndex.value = c.series_index ?? null
+  } else {
+    // Otherwise inherit the sticky series carried over from the last confirm so
+    // consecutive books in a series don't lose the assignment.
+    seriesName.value = stickySeries
+    seriesIndex.value = stickyIndex
+  }
 })
 
 const scannedCount = computed(() => store.candidates.length)
@@ -79,7 +97,14 @@ function subtitle(c: Candidate): string {
 }
 
 async function onConfirm(): Promise<void> {
-  await store.confirm(seriesName.value.trim(), seriesIndex.value ?? 0)
+  const name = seriesName.value.trim()
+  const idx = seriesIndex.value
+  // Carry the series onto the next book before confirm() advances the selection
+  // (which re-fills the inputs from the sticky state); auto-increment the index
+  // so a series is numbered as you go.
+  stickySeries = name
+  stickyIndex = name && idx != null ? idx + 1 : idx
+  await store.confirm(name, idx ?? 0)
 }
 async function onPick(editionId: string): Promise<void> {
   await store.pick(editionId)
@@ -87,24 +112,56 @@ async function onPick(editionId: string): Promise<void> {
 async function onConfirmAll(): Promise<void> {
   await store.confirmAllReady()
 }
-async function onAddTitle(edition: Edition): Promise<void> {
-  const code = edition.isbn13 || edition.id
-  await store.addByIsbn(code, 'title')
-  titleQuery.value = ''
-  store.clearSearch()
+async function onReResolve(): Promise<void> {
+  const c = selected.value
+  if (!c) return
+  await store.reResolve(c.id, reIsbn.value)
 }
-async function onAddManual(): Promise<void> {
-  const code = manualIsbn.value.trim()
-  if (!code) return
-  await store.addByIsbn(code, 'manual')
-  manualIsbn.value = ''
+
+// --- Add-book modal: one field, title-search or ISBN ---
+
+/**
+ * True when the input is unambiguously an ISBN (10 or 13 digits, ignoring
+ * hyphens/spaces, a trailing X allowed) rather than a title to search. Title
+ * and ISBN inputs don't collide in practice, so one field can serve both.
+ */
+function looksLikeIsbn(q: string): boolean {
+  const s = q.replace(/[\s-]/g, '')
+  return /^\d{9}[\dxX]$/.test(s) || /^\d{13}$/.test(s)
+}
+
+function openAdd(): void {
+  addQuery.value = ''
+  store.clearSearch()
+  showAdd.value = true
+}
+function closeAdd(): void {
+  showAdd.value = false
+  addQuery.value = ''
+  store.clearSearch()
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-function onSearchInput(): void {
+function onAddInput(): void {
   clearTimeout(searchTimer)
-  const q = titleQuery.value
+  const q = addQuery.value
+  if (looksLikeIsbn(q)) {
+    // An ISBN — skip the title search; Enter (or a nudge) adds it directly.
+    store.clearSearch()
+    return
+  }
   searchTimer = setTimeout(() => void store.runSearch(q), 250)
+}
+async function onAddSubmit(): Promise<void> {
+  const q = addQuery.value.trim()
+  if (!looksLikeIsbn(q)) return
+  await store.addByIsbn(q, 'manual')
+  closeAdd()
+}
+async function onPickResult(edition: Edition): Promise<void> {
+  const code = edition.isbn13 || edition.id
+  await store.addByIsbn(code, 'title')
+  closeAdd()
 }
 
 function relTime(iso: string): string {
@@ -198,51 +255,28 @@ function relTime(iso: string): string {
         </div>
       </div>
 
-      <!-- Scanner-free add: title search + manual ISBN -->
-      <div class="ing__add">
-        <div class="ing__add-title">
-          <input
-            v-model="titleQuery"
-            class="ing__input"
-            type="text"
-            placeholder="Add by title…"
-            @input="onSearchInput"
-          />
-          <ul v-if="search.length" class="ing__results">
-            <li v-for="e in search" :key="e.id">
-              <button class="ing__result" :disabled="busy" @click="onAddTitle(e)">
-                <span class="ing__result-title">{{ e.title }}</span>
-                <span class="ing__result-meta"
-                  >{{ e.author }}{{ e.year ? ` · ${e.year}` : '' }}</span
-                >
-              </button>
-            </li>
-          </ul>
-        </div>
-        <form class="ing__add-isbn" @submit.prevent="onAddManual">
-          <input
-            v-model="manualIsbn"
-            class="ing__input"
-            type="text"
-            inputmode="numeric"
-            placeholder="or enter an ISBN"
-          />
-          <button class="btn btn--ghost" type="submit" :disabled="busy">Add</button>
-        </form>
-      </div>
-
       <div class="ing__split">
         <!-- Queue -->
         <div class="ing__queue">
-          <div class="ing__chips">
+          <div class="ing__queue-head">
+            <div class="ing__chips">
+              <button
+                v-for="f in filters"
+                :key="f.key"
+                class="chip"
+                :class="{ 'chip--on': filter === f.key, [`chip--${f.key}`]: true }"
+                @click="store.setFilter(f.key)"
+              >
+                {{ f.label }} {{ f.n }}
+              </button>
+            </div>
             <button
-              v-for="f in filters"
-              :key="f.key"
-              class="chip"
-              :class="{ 'chip--on': filter === f.key, [`chip--${f.key}`]: true }"
-              @click="store.setFilter(f.key)"
+              class="ing__add-btn"
+              title="Add a book to this batch"
+              aria-label="Add a book to this batch"
+              @click="openAdd"
             >
-              {{ f.label }} {{ f.n }}
+              ＋
             </button>
           </div>
           <div class="ing__list">
@@ -400,10 +434,24 @@ function relTime(iso: string): string {
               </div>
             </div>
 
-            <!-- No match: fallback -->
+            <!-- No match: re-resolve inline with a corrected ISBN -->
             <div v-else-if="selected.status === 'no_match'" class="fallback">
-              No DRM edition resolved for this scan. Re-enter a corrected ISBN below, or upload the
-              EPUB directly from the library.
+              <p class="fallback__lead">
+                No DRM edition resolved for this scan. If the scanned code was wrong, re-resolve it
+                with a corrected ISBN — or skip it and upload the EPUB directly from the library.
+              </p>
+              <form class="fallback__form" @submit.prevent="onReResolve">
+                <input
+                  v-model="reIsbn"
+                  class="ing__input"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="Corrected ISBN"
+                />
+                <button class="btn btn--brass" type="submit" :disabled="busy || !reIsbn.trim()">
+                  Re-resolve
+                </button>
+              </form>
             </div>
 
             <!-- Action bar -->
@@ -421,6 +469,49 @@ function relTime(iso: string): string {
               </button>
             </div>
           </template>
+        </div>
+      </div>
+
+      <!-- Add-book modal: single combined field, back-arrow nav (LYCM-75) -->
+      <div
+        v-if="showAdd"
+        class="addm__scrim"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeAdd"
+      >
+        <div class="addm">
+          <div class="addm__head">
+            <button class="addm__back" title="Back" aria-label="Back" @click="closeAdd">←</button>
+            <h2 class="addm__title">Add a book to this batch</h2>
+          </div>
+          <form class="addm__search" @submit.prevent="onAddSubmit">
+            <input
+              v-model="addQuery"
+              class="ing__input"
+              type="text"
+              autofocus
+              placeholder="Search by title, or paste an ISBN…"
+              @input="onAddInput"
+            />
+          </form>
+          <p class="addm__hint">
+            {{
+              looksLikeIsbn(addQuery)
+                ? 'Looks like an ISBN — press Enter to add it.'
+                : 'Type a title to search, or paste an ISBN.'
+            }}
+          </p>
+          <ul v-if="search.length" class="addm__results">
+            <li v-for="e in search" :key="e.id">
+              <button class="ing__result" :disabled="busy" @click="onPickResult(e)">
+                <span class="ing__result-title">{{ e.title }}</span>
+                <span class="ing__result-meta"
+                  >{{ e.author }}{{ e.year ? ` · ${e.year}` : '' }}</span
+                >
+              </button>
+            </li>
+          </ul>
         </div>
       </div>
     </template>
@@ -598,22 +689,6 @@ function relTime(iso: string): string {
   gap: 11px;
 }
 
-/* add bar */
-.ing__add {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-.ing__add-title {
-  position: relative;
-  flex: 1;
-  min-width: 260px;
-}
-.ing__add-isbn {
-  display: flex;
-  gap: 8px;
-}
 .ing__input {
   width: 100%;
   padding: 10px 13px;
@@ -625,21 +700,6 @@ function relTime(iso: string): string {
 }
 .ing__input--num {
   width: 64px;
-}
-.ing__results {
-  position: absolute;
-  z-index: 20;
-  left: 0;
-  right: 0;
-  margin: 6px 0 0;
-  padding: 6px;
-  list-style: none;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  box-shadow: var(--shadow-pop);
-  max-height: 320px;
-  overflow: auto;
 }
 .ing__result {
   width: 100%;
@@ -682,11 +742,34 @@ function relTime(iso: string): string {
   flex-direction: column;
   min-height: 0;
 }
+.ing__queue-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 16px 12px;
+}
 .ing__chips {
   display: flex;
   gap: 8px;
-  padding: 16px 16px 12px;
+  flex: 1;
   flex-wrap: wrap;
+}
+.ing__add-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: 700 18px/1 var(--font-ui);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.ing__add-btn:hover {
+  border-color: var(--brass);
+  color: var(--brass-bright);
 }
 .chip {
   padding: 6px 12px;
@@ -1005,6 +1088,79 @@ function relTime(iso: string): string {
   border: 1px solid color-mix(in srgb, var(--error) 28%, transparent);
   font: 400 13px/1.6 var(--font-ui);
   color: var(--muted);
+}
+.fallback__lead {
+  margin: 0 0 12px;
+}
+.fallback__form {
+  display: flex;
+  gap: 8px;
+  max-width: 420px;
+}
+
+/* add-book modal */
+.addm__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(8, 8, 7, 0.7);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 84px 24px 24px;
+}
+.addm {
+  width: 520px;
+  max-width: 100%;
+  padding: 20px 22px 22px;
+  border-radius: 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+}
+.addm__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.addm__back {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  font: 700 18px/1 var(--font-ui);
+  cursor: pointer;
+}
+.addm__back:hover {
+  border-color: var(--brass);
+  color: var(--brass-bright);
+}
+.addm__title {
+  font: 800 18px var(--font-display);
+  margin: 0;
+}
+.addm__search {
+  margin: 0;
+}
+.addm__hint {
+  margin: 8px 2px 0;
+  font: 400 12px var(--font-ui);
+  color: var(--dim);
+}
+.addm__results {
+  margin: 12px 0 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 340px;
+  overflow: auto;
 }
 
 .detail__actions {

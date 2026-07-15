@@ -41,6 +41,18 @@ void main() {
       expect(normalizeIsbn('1234567890123'), isNull);
     });
 
+    test('rejects a valid-checksum EAN-13 outside the Bookland range', () {
+      // 5901234567893 is a well-formed EAN-13 (valid checksum) but a product
+      // barcode, not an ISBN — the price/product code that shares a back cover
+      // with the ISBN must not be accepted as a book (LYCM-75).
+      expect(normalizeIsbn('5901234567893'), isNull);
+    });
+
+    test('accepts a 979-prefixed ISBN-13', () {
+      // 9791234567896 — Bookland 979 range, valid EAN-13 checksum.
+      expect(normalizeIsbn('9791234567896'), '9791234567896');
+    });
+
     test('rejects junk and wrong-length input', () {
       expect(normalizeIsbn(''), isNull);
       expect(normalizeIsbn('not an isbn'), isNull);
