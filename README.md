@@ -169,8 +169,14 @@ recorded before any digital file exists.
 - **Acquire** — the `argosy-acquisition` **Bindery** container grabs DRM-free
   EPUBs for owned titles and imports them to `/data/media/books`, where the
   watcher ingests them. The `ISBN → request a grab` step is behind an `Acquirer`
-  seam (logging no-op by default); a live Bindery client is wired via
-  `WithAcquirer` once that stack is configured.
+  seam. Set both `LYCEUM_BINDERY_BASE_URL` and `LYCEUM_BINDERY_API_KEY` and the
+  live Bindery client is wired in at boot (the log prints `bindery acquirer
+  enabled`). Leave *either* unset and the seam falls back to a logging no-op:
+  `find_digital` requests still move the inventory row to `wanted`, but nothing
+  is ever grabbed — so a deploy that forgets the vars looks healthy while
+  acquiring nothing. The boot log calls this out (`no-op acquirer`); watch for
+  it. The Bindery side lives in
+  [`argosy-acquisition`](../../construct-server/services/argosy-acquisition).
 
 ## Roadmap (Switchyard epics)
 
