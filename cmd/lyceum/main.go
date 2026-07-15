@@ -205,6 +205,8 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 		log.Printf("bindery acquirer enabled (base=%s)", cfg.binderyBaseURL)
 	} else if cfg.binderyBaseURL != "" || cfg.binderyAPIKey != "" {
 		log.Printf("config: Bindery acquirer needs both LYCEUM_BINDERY_BASE_URL and LYCEUM_BINDERY_API_KEY; using no-op acquirer")
+	} else {
+		log.Printf("config: no Bindery acquirer configured (LYCEUM_BINDERY_BASE_URL/LYCEUM_BINDERY_API_KEY unset); find_digital marks inventory `wanted` but grabs nothing")
 	}
 
 	if cfg.smtp.Host == "" || cfg.smtp.From == "" {
