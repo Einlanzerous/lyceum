@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/Einlanzerous/lyceum/compare/v1.4.0...v1.5.0) (2026-07-16)
+
+
+### Features
+
+* **ingest:** scan/verify UX polish — top toast, add-book modal, sticky series, re-resolve, Bookland guard (LYCM-75) ([#48](https://github.com/Einlanzerous/lyceum/issues/48)) ([55eefe3](https://github.com/Einlanzerous/lyceum/commit/55eefe3a526334b3b7406e74c831231d21faeec7))
+
+
+### Bug Fixes
+
+* **reader:** correct progress on open when resuming mid-book (LYCM-87) ([#47](https://github.com/Einlanzerous/lyceum/issues/47)) ([daf9b0e](https://github.com/Einlanzerous/lyceum/commit/daf9b0e8e703e8369121957cae3a8b5f145231dc))
+
 ## [1.4.0](https://github.com/Einlanzerous/lyceum/compare/v1.3.3...v1.4.0) (2026-07-14)
 
 
