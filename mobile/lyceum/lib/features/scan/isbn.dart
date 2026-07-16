@@ -9,19 +9,25 @@ library;
 ///
 /// It tolerates hyphens, spaces, and an "ISBN"/"urn:isbn:" prefix (everything
 /// non-significant is stripped), accepts a valid ISBN-10 (converting it to 13),
-/// and validates the EAN-13 checksum. A back-cover book barcode is an EAN-13 in
-/// the 978/979 Bookland range, so a scanned EAN-13 that passes the checksum is
-/// taken as the ISBN-13 directly.
+/// and validates the EAN-13 checksum. A book barcode is an EAN-13 in the 978/979
+/// Bookland range, so a scanned EAN-13 is accepted only when it both passes the
+/// checksum and carries that prefix — this rejects the price/product barcode
+/// (LYCM-75) that shares the back cover with the ISBN (converted ISBN-10s are
+/// always 978, so they pass unchanged).
 String? normalizeIsbn(String raw) {
   final s = _clean(raw);
   switch (s.length) {
     case 10:
       if (_valid10(s)) return _to13(s);
     case 13:
-      if (_valid13(s)) return s;
+      if (_valid13(s) && _isBookland(s)) return s;
   }
   return null;
 }
+
+/// Whether an EAN-13 is in the Bookland range (978/979) — i.e. an ISBN rather
+/// than some other product barcode that merely passes the EAN-13 checksum.
+bool _isBookland(String s) => s.startsWith('978') || s.startsWith('979');
 
 /// Whether [raw] normalizes to a valid ISBN.
 bool isValidIsbn(String raw) => normalizeIsbn(raw) != null;

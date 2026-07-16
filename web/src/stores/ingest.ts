@@ -186,6 +186,23 @@ export const useIngestStore = defineStore('ingest', {
       })
     },
 
+    /**
+     * Re-resolve a no-match candidate: add the corrected ISBN as a fresh
+     * candidate (which re-runs resolution) and drop the stale no-match row,
+     * then select the replacement. (LYCM-75)
+     */
+    async reResolve(oldId: number, isbn: string): Promise<void> {
+      if (!this.batch) return
+      const code = isbn.trim()
+      if (!code) return
+      await this.run(async () => {
+        const added = await addCandidate(this.batch!.id, code, 'manual')
+        await skipCandidate(oldId)
+        await this.refresh()
+        this.selectedId = added.id
+      })
+    },
+
     /** Run the add-by-title search. */
     async runSearch(query: string): Promise<void> {
       if (!query.trim()) {
