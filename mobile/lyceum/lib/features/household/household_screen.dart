@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../api/api_providers.dart';
 import '../../api/client.dart';
 import '../../api/models.dart';
+import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
+import '../../auth/invite_token.dart';
 import '../../auth/relative_time.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
@@ -60,7 +62,12 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
   /// second act rather than a shrug.
   Future<void> _reveal(Invite invite) async {
     ref.invalidate(membersProvider);
-    final result = await showInviteReveal(context, invite);
+    // Offer the key as a scannable QR too, pointing at this library's sign-in
+    // route (LYCM-88). Empty server URL (shouldn't happen once signed in) simply
+    // omits the QR.
+    final serverUrl = ref.read(serverUrlProvider);
+    final signInUrl = serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token);
+    final result = await showInviteReveal(context, invite, signInUrl: signInUrl);
     if (!mounted || result == InviteRevealResult.saved) return;
 
     final name = invite.user.displayName.trim().isEmpty

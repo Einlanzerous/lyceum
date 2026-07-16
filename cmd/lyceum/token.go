@@ -5,8 +5,12 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net/url"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/mdp/qrterminal/v3"
 
 	"github.com/magos/lyceum/internal/store"
 )
@@ -66,6 +70,36 @@ func runMintToken(args []string) {
 	if _, err := os.Stdout.WriteString(invite + "\n"); err != nil {
 		log.Fatalf("write token: %v", err)
 	}
+	printInviteQR(cfg.publicURL, invite)
+}
+
+// signInURL builds the scannable `<publicURL>/sign-in?token=…` redemption link
+// for an invite, or "" when no public URL is configured (LYCM-88).
+func signInURL(base, token string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/sign-in?token=" + url.QueryEscape(token)
+}
+
+// printInviteQR renders an ASCII QR of the sign-in link to stderr so an invite
+// can be carried to a phone by camera instead of by hand. The raw token stays on
+// stdout for machines; this is purely the human convenience. No-op when
+// LYCEUM_PUBLIC_URL is unset. Half-block rendering keeps it scannable on both
+// light and dark terminals.
+func printInviteQR(publicURL, token string) {
+	link := signInURL(publicURL, token)
+	if link == "" {
+		return
+	}
+	log.Printf("or scan to sign in (%s):", link)
+	qrterminal.GenerateWithConfig(link, qrterminal.Config{
+		Level:      qrterminal.M,
+		Writer:     os.Stderr,
+		HalfBlocks: true,
+		QuietZone:  2,
+	})
 }
 
 // bootstrapOwner brings the owner account in line with the configured identity
@@ -115,4 +149,5 @@ func bootstrapOwner(ctx context.Context, st *store.Store, cfg config) {
 	log.Printf("auth: first-boot sign-in invite for %s — %s", owner.Email, invite)
 	log.Printf("auth: redeem it once in the app (Settings -> Sign in). It expires in %s and is "+
 		"not shown again; `lyceum mint-token` issues another.", store.InviteTTL)
+	printInviteQR(cfg.publicURL, invite)
 }
