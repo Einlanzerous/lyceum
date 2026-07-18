@@ -42,6 +42,24 @@ void main() {
     });
   });
 
+  group('pairing codes', () {
+    test('normalizes case, hyphen, and spaces', () {
+      expect(normalizePairingCode('bk4t-9q2m'), 'BK4T9Q2M');
+      expect(normalizePairingCode(' bk 4t '), 'BK4T');
+    });
+
+    test('drops glyphs outside the alphabet', () {
+      expect(normalizePairingCode('0O1ILU'), '');
+    });
+
+    test('recognises a code but never a token', () {
+      expect(looksLikePairingCode('BK4T-9Q2M'), isTrue);
+      expect(looksLikePairingCode('bk4t9q2m'), isTrue);
+      expect(looksLikePairingCode('lyc_abc123'), isFalse);
+      expect(looksLikePairingCode('BK4T'), isFalse);
+    });
+  });
+
   group('inviteSignInUrl', () {
     test('builds a redemption URL and encodes the token', () {
       expect(

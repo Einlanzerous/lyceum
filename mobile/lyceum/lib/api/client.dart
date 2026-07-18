@@ -15,6 +15,7 @@ class ApiException implements Exception {
   bool get isDuplicate => statusCode == 409;
   bool get isNotFound => statusCode == 404;
   bool get isUnauthorized => statusCode == 401;
+  bool get isTooManyRequests => statusCode == 429;
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -108,6 +109,30 @@ class LyceumClient {
             'token': inviteToken.replaceAll(RegExp(r'\s+'), ''),
             'device_label': deviceLabel,
           }),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    final json = jsonDecode(r.body) as Map<String, dynamic>;
+    return (
+      user: Account.fromJson(json['user'] as Map<String, dynamic>),
+      sessionToken: (json['session_token'] as String?) ?? '',
+    );
+  }
+
+  /// `POST /auth/session` with a short pairing code instead of a token
+  /// (LYCM-88). Same single-use, indistinguishable-401 semantics as
+  /// [redeemInvite]; additionally a **429** means the code path's per-IP rate
+  /// limit was hit — surfaced so the sign-in screen can say "wait a moment".
+  /// Run inside `AuthClient.suppressUnauthorized` like [redeemInvite].
+  Future<({Account user, String sessionToken})> redeemPairingCode(
+    String code, {
+    required String deviceLabel,
+  }) async {
+    final r = await _http
+        .post(
+          _uri('/auth/session'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'code': code, 'device_label': deviceLabel}),
         )
         .timeout(timeout);
     if (r.statusCode != 200) _throw(r);

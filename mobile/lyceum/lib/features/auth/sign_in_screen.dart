@@ -6,6 +6,7 @@ import '../../api/client.dart';
 import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
 import '../../auth/device_label.dart';
+import '../../auth/invite_token.dart';
 import '../../features/library/library_controller.dart';
 import '../../features/settings/server_settings.dart';
 import 'scan_invite_screen.dart';
@@ -30,7 +31,7 @@ class SignInScreen extends ConsumerStatefulWidget {
 /// a rejected key is *your* problem to fix, an unreachable server is not, and
 /// showing the red "bad key" banner for a flat network is a small lie that
 /// sends people hunting for a new invite they don't need.
-enum _Failure { rejected, unreachable }
+enum _Failure { rejected, throttled, unreachable }
 
 class _SignInScreenState extends ConsumerState<SignInScreen> {
   final _invite = TextEditingController();
@@ -74,9 +75,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   void _onInviteChanged() {
-    // Clear the rejection the moment they start fixing it — a red banner that
-    // outlives the key it was about is just nagging.
-    if (_failure == _Failure.rejected) {
+    // Clear a rejection or throttle the moment they start fixing it — a banner
+    // that outlives the key it was about is just nagging.
+    if (_failure == _Failure.rejected || _failure == _Failure.throttled) {
       setState(() => _failure = null);
     } else {
       setState(() {}); // the button and the footnote both track emptiness
@@ -114,17 +115,27 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       _failure = null;
     });
     try {
-      await ref
-          .read(authControllerProvider.notifier)
-          .signIn(_invite.text, deviceLabel: _deviceLabel);
+      // The one field takes either a full invite or the short pairing code
+      // (LYCM-88); route by shape so the person never has to say which they have.
+      final ctrl = ref.read(authControllerProvider.notifier);
+      final raw = _invite.text;
+      if (looksLikePairingCode(raw)) {
+        await ctrl.signInWithCode(normalizePairingCode(raw), deviceLabel: _deviceLabel);
+      } else {
+        await ctrl.signIn(raw, deviceLabel: _deviceLabel);
+      }
       // The router's redirect carries us to the library; the shelf was fetched
       // (and 401'd) before we had a credential, so it needs asking again.
       ref.invalidate(libraryControllerProvider);
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(
-        () => _failure = e.isUnauthorized ? _Failure.rejected : _Failure.unreachable,
-      );
+      setState(() {
+        _failure = e.isUnauthorized
+            ? _Failure.rejected
+            : e.isTooManyRequests
+            ? _Failure.throttled
+            : _Failure.unreachable;
+      });
     } catch (_) {
       // Timeout, DNS, connection refused — the server, not the key.
       if (!mounted) return;
@@ -166,6 +177,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                         children: [
                           if (_failure == _Failure.rejected)
                             const _RejectedBanner()
+                          else if (_failure == _Failure.throttled)
+                            const _ThrottledBanner()
                           else
                             _Headline(
                               upgrade: upgrade,
@@ -274,7 +287,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             color: rejected ? lyc.error : lyc.text,
           ),
           decoration: InputDecoration(
-            hintText: 'lyc_…',
+            hintText: 'lyc_… or code',
             hintStyle: TextStyle(
               fontFamily: 'monospace',
               fontSize: 14,
@@ -444,9 +457,42 @@ class _RejectedBanner extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Invites work once and expire after 7 days — this one may be spent, '
-            'expired, or mistyped. We can\'t tell which. Ask for a fresh invite, '
-            'or check you copied the whole thing.',
+            'Invites and codes work once — this one may be spent, expired, or '
+            'mistyped. We can\'t tell which. Ask for a fresh one, or check you '
+            'copied the whole thing.',
+            style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The 429 banner. Not a bad key — the pairing-code path is rate-limited so its
+/// small keyspace can't be hammered, and this is a caution, not an error.
+class _ThrottledBanner extends StatelessWidget {
+  const _ThrottledBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    return LycNotice(
+      tone: LycTone.warning,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Too many tries.',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: lyc.brassBright,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'For safety we limit how fast codes can be tried. Wait a minute, then '
+            'enter it again — or paste the full invite instead.',
             style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
           ),
         ],
@@ -515,8 +561,8 @@ class _Headline extends StatelessWidget {
           const _Promise('Every bookmark and reading position stays exactly where it is.'),
         ] else
           Text(
-            'Paste the invite a housemate gave you — or the one printed in the '
-            'server log.',
+            'Paste the invite a housemate gave you, or type the short code — or '
+            'tap scan and point at its QR.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
           ),
