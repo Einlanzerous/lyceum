@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/Einlanzerous/lyceum/compare/v1.5.0...v1.6.0) (2026-07-18)
+
+
+### Features
+
+* **auth:** QR cross-device sign-in — scan/display invite instead of pasting (LYCM-88) ([#50](https://github.com/Einlanzerous/lyceum/issues/50)) ([e3ebacb](https://github.com/Einlanzerous/lyceum/commit/e3ebacb514ca1f960790e46eceaf1558e0bab674))
+* **auth:** typeable pairing code for cross-device sign-in (LYCM-88 PR2) ([#53](https://github.com/Einlanzerous/lyceum/issues/53)) ([64e7f34](https://github.com/Einlanzerous/lyceum/commit/64e7f341b48b55d81a764b5c7d170a110ebd8ccc))
+
 ## [1.5.0](https://github.com/Einlanzerous/lyceum/compare/v1.4.0...v1.5.0) (2026-07-16)
 
 
