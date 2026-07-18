@@ -12,14 +12,16 @@
 // names all three possibilities rather than guessing at one and misleading.
 
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/client'
+import { extractInviteToken } from '@/api/invite'
 import { inferDeviceLabel } from '@/api/device'
 import { hasBackend, isNativeShell } from '@/api/base'
 import { peekLegacyProfileName } from '@/profile'
 import { useAuthStore } from '@/stores/auth'
 import ServerSettings from '@/components/ServerSettings.vue'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
@@ -38,7 +40,23 @@ const showServer = ref(false)
 const returningName = ref('')
 onMounted(() => {
   returningName.value = peekLegacyProfileName()
+  void redeemFromUrl()
 })
+
+// A QR scanned by the phone's camera lands here as `/sign-in?token=…`. Redeem it
+// without making the person do anything, then scrub the secret out of the URL bar
+// and history — whether it worked or not, the token has no business lingering
+// there. Success navigates away; a failure drops back to the bare sign-in screen
+// wearing the normal "bad key" banner.
+async function redeemFromUrl(): Promise<void> {
+  const raw = route.query.token
+  if (typeof raw !== 'string') return
+  const parsed = extractInviteToken(raw)
+  await router.replace({ path: '/sign-in' })
+  if (!parsed) return
+  token.value = parsed
+  await submit()
+}
 const isUpgrade = computed(() => returningName.value !== '')
 
 const canSubmit = computed(() => token.value.trim().length > 0 && !submitting.value)

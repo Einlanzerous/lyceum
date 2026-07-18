@@ -8,6 +8,7 @@ import '../../auth/auth_controller.dart';
 import '../../auth/device_label.dart';
 import '../../features/library/library_controller.dart';
 import '../../features/settings/server_settings.dart';
+import 'scan_invite_screen.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/brand_mark.dart';
@@ -90,6 +91,19 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     if (text.isEmpty || !mounted) return;
     _invite.text = text.trim();
     _invite.selection = TextSelection.collapsed(offset: _invite.text.length);
+  }
+
+  /// Scan the invite QR a signed-in device is showing (LYCM-88). The scanner
+  /// hands back the parsed `lyc_…` token; fill the field and redeem it straight
+  /// away, since scanning is an unambiguous "yes, this one".
+  Future<void> _scan() async {
+    final token = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const ScanInviteScreen()),
+    );
+    if (token == null || token.isEmpty || !mounted) return;
+    _invite.text = token;
+    _invite.selection = TextSelection.collapsed(offset: _invite.text.length);
+    _submit();
   }
 
   Future<void> _submit() async {
@@ -277,10 +291,23 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 ? null
                 : _hasToken
                 ? Icon(Icons.check_rounded, size: 18, color: lyc.success)
-                : IconButton(
-                    onPressed: _submitting ? null : _paste,
-                    icon: Icon(Icons.content_paste_rounded, size: 18, color: lyc.brass),
-                    tooltip: 'Paste',
+                // Scan sits beside paste: a QR shown on another device is the
+                // frictionless path, the clipboard the fallback for a key that
+                // arrived as text.
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: _submitting ? null : _scan,
+                        icon: Icon(Icons.qr_code_scanner_rounded, size: 18, color: lyc.brass),
+                        tooltip: 'Scan invite QR',
+                      ),
+                      IconButton(
+                        onPressed: _submitting ? null : _paste,
+                        icon: Icon(Icons.content_paste_rounded, size: 18, color: lyc.brass),
+                        tooltip: 'Paste',
+                      ),
+                    ],
                   ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(LycRadii.card),

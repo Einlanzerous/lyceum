@@ -72,6 +72,11 @@ type config struct {
 	ownerEmail string // LYCEUM_OWNER_EMAIL — identity of the owner account
 	ownerName  string // LYCEUM_OWNER_NAME — the owner's display name
 
+	// Cross-device sign-in (LYCM-88): the library's public web origin, used to
+	// turn an invite into a scannable `<publicURL>/sign-in?token=…` QR. Optional;
+	// when unset, mint-token just prints the raw token as before.
+	publicURL string // LYCEUM_PUBLIC_URL — e.g. http://192.168.1.9:8080
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -104,6 +109,7 @@ func loadConfig() config {
 		userAuth:   envBool("LYCEUM_AUTH", false),
 		ownerEmail: os.Getenv("LYCEUM_OWNER_EMAIL"),
 		ownerName:  os.Getenv("LYCEUM_OWNER_NAME"),
+		publicURL:  os.Getenv("LYCEUM_PUBLIC_URL"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{

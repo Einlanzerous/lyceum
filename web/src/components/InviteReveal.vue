@@ -11,6 +11,7 @@
 
 import { ref } from 'vue'
 import type { Invite } from '@/api/auth'
+import InviteQr from './InviteQr.vue'
 
 const props = defineProps<{
   /** The freshly minted invite, or null once it has been let go. */
@@ -97,6 +98,8 @@ async function copyAndClose(): Promise<void> {
           <span><i aria-hidden="true"></i>Works once</span>
           <span><i aria-hidden="true"></i>One device</span>
         </div>
+
+        <InviteQr :token="invite.invite_token" />
 
         <div v-if="copyFailed" class="warn warn--soft">
           Couldn't reach the clipboard — this browser blocks it on an insecure origin. Select the

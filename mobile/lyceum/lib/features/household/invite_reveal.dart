@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../api/models.dart';
 import '../../theme/lyceum_colors.dart';
@@ -25,10 +26,16 @@ import '../../widgets/lyc_sheet.dart';
 enum InviteRevealResult { saved, dismissed }
 
 /// The hero. A secret shown once, and honest about it.
+///
+/// [signInUrl] is the scannable `<origin>/sign-in?token=…` link the caller builds
+/// from the configured server (LYCM-88); when present, the key is also offered as
+/// a QR. Passed in rather than read here so this sheet stays a plain,
+/// provider-free widget.
 Future<InviteRevealResult> showInviteReveal(
   BuildContext context,
-  Invite invite,
-) async {
+  Invite invite, {
+  String? signInUrl,
+}) async {
   final result = await showLycSheet<InviteRevealResult>(
     context: context,
     // Not dismissible by drag or scrim tap. A stray swipe here throws away the
@@ -36,14 +43,15 @@ Future<InviteRevealResult> showInviteReveal(
     // (The back gesture still works — Android's contract — and lands as
     // `dismissed`, which is exactly the recovery path.)
     dismissible: false,
-    builder: (context) => _InviteRevealSheet(invite: invite),
+    builder: (context) => _InviteRevealSheet(invite: invite, signInUrl: signInUrl),
   );
   return result ?? InviteRevealResult.dismissed;
 }
 
 class _InviteRevealSheet extends StatefulWidget {
-  const _InviteRevealSheet({required this.invite});
+  const _InviteRevealSheet({required this.invite, this.signInUrl});
   final Invite invite;
+  final String? signInUrl;
 
   @override
   State<_InviteRevealSheet> createState() => _InviteRevealSheetState();
@@ -91,6 +99,7 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
   @override
   Widget build(BuildContext context) {
     final lyc = context.lyc;
+    final signInUrl = widget.signInUrl;
 
     return PopScope(
       // Android's back gesture is the documented way out of a sheet that refuses
@@ -211,6 +220,12 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
           ),
         ),
 
+        // The same key as a QR, so $_name can scan it from their phone's camera
+        // instead of copying text across devices (LYCM-88). The caller encodes
+        // the sign-in URL served by this library, so a stock camera app can
+        // complete the flow.
+        if (signInUrl != null && signInUrl.isNotEmpty) _InviteQr(url: signInUrl),
+
         const SizedBox(height: 14),
         Wrap(
           spacing: 16,
@@ -285,6 +300,54 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
           ],
         ),
       ],
+      ),
+    );
+  }
+}
+
+/// The invite as a QR on a white quiet-zone tile (LYCM-88). White is not a theme
+/// choice — QR contrast has to survive the app's dark surfaces to stay scannable.
+class _InviteQr extends StatelessWidget {
+  const _InviteQr({required this.url});
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(LycRadii.card),
+              border: Border.all(color: lyc.borderStrong),
+            ),
+            child: QrImageView(
+              data: url,
+              version: QrVersions.auto,
+              size: 176,
+              backgroundColor: Colors.white,
+              // Fixed dark modules on the white tile, independent of app theme.
+              eyeStyle: const QrEyeStyle(
+                eyeShape: QrEyeShape.square,
+                color: Color(0xFF000000),
+              ),
+              dataModuleStyle: const QrDataModuleStyle(
+                dataModuleShape: QrDataModuleShape.square,
+                color: Color(0xFF000000),
+              ),
+            ),
+          ),
+          const SizedBox(height: 9),
+          Text(
+            'Or have them scan this with their camera',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11.5, color: lyc.dim),
+          ),
+        ],
       ),
     );
   }

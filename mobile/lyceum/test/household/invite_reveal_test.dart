@@ -5,6 +5,7 @@ import 'package:lyceum/api/models.dart';
 import 'package:lyceum/features/household/invite_reveal.dart';
 import 'package:lyceum/theme/lyceum_colors.dart';
 import 'package:lyceum/theme/lyceum_theme.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 /// The invite key is plaintext exactly once — the server keeps only a hash. So
 /// the single question this sheet has to answer correctly, on *every* exit, is
@@ -28,7 +29,7 @@ void main() {
   );
 
   /// Drives the reveal and reports how it closed.
-  Future<InviteRevealResult?> open(WidgetTester tester) async {
+  Future<InviteRevealResult?> open(WidgetTester tester, {String? signInUrl}) async {
     InviteRevealResult? result;
     await tester.pumpWidget(
       MaterialApp(
@@ -37,8 +38,11 @@ void main() {
           builder: (context) => Scaffold(
             body: Center(
               child: ElevatedButton(
-                onPressed: () async =>
-                    result = await showInviteReveal(context, invite),
+                onPressed: () async => result = await showInviteReveal(
+                  context,
+                  invite,
+                  signInUrl: signInUrl,
+                ),
                 child: const Text('open'),
               ),
             ),
@@ -68,6 +72,17 @@ void main() {
       find.textContaining("This is the only time you'll see this key."),
       findsOneWidget,
     );
+  });
+
+  testWidgets('renders the key as a QR when given a sign-in URL', (tester) async {
+    await open(tester, signInUrl: 'http://192.168.1.9:8080/sign-in?token=lyc_theOnlyCopy');
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.textContaining('scan this with their camera'), findsOneWidget);
+  });
+
+  testWidgets('omits the QR when no sign-in URL is available', (tester) async {
+    await open(tester);
+    expect(find.byType(QrImageView), findsNothing);
   });
 
   testWidgets('closing with ✕ WITHOUT copying is a dismissal', (tester) async {
