@@ -336,14 +336,34 @@ func (s *Store) RedeemInvite(ctx context.Context, plaintext, deviceLabel string)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	u, session, err := claimInviteAndMintSession(ctx, tx, "token_hash = $1", hashToken(plaintext), deviceLabel)
+	if err != nil {
+		return User{}, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, "", fmt.Errorf("store: commit redeem: %w", err)
+	}
+	return u, session, nil
+}
+
+// claimInviteAndMintSession claims one single-use invite row — whichever the
+// caller's whereExpr selects, bound to a single placeholder $1 = arg — and mints
+// a session for its owner, all inside the caller's transaction. The claim is a
+// conditional UPDATE on used_at, so two devices racing to redeem the same invite
+// (whether by token or by pairing code) cannot both win. Returns ErrNotFound
+// when no unclaimed, unexpired invite matches. The caller commits.
+//
+// whereExpr is a trusted constant supplied at the call site ("token_hash = $1"
+// or "id = $1"), never user input.
+func claimInviteAndMintSession(ctx context.Context, tx pgx.Tx, whereExpr string, arg any, deviceLabel string) (User, string, error) {
 	var userID int64
-	err = tx.QueryRow(ctx,
+	err := tx.QueryRow(ctx,
 		`UPDATE user_tokens SET used_at = now()
-		  WHERE token_hash = $1
+		  WHERE `+whereExpr+`
 		    AND kind = 'invite'
 		    AND used_at IS NULL
 		    AND (expires_at IS NULL OR expires_at > now())
-		 RETURNING user_id`, hashToken(plaintext)).Scan(&userID)
+		 RETURNING user_id`, arg).Scan(&userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, "", ErrNotFound
 	}
@@ -369,9 +389,6 @@ func (s *Store) RedeemInvite(ctx context.Context, plaintext, deviceLabel string)
 	u, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, userID))
 	if err != nil {
 		return User{}, "", fmt.Errorf("store: load redeeming user: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return User{}, "", fmt.Errorf("store: commit redeem: %w", err)
 	}
 	return u, session, nil
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { extractInviteToken, inviteSignInUrl } from './invite'
+import {
+  extractInviteToken,
+  extractPairingCode,
+  inviteSignInUrl,
+  looksLikePairingCode,
+  normalizePairingCode,
+} from './invite'
 
 describe('extractInviteToken', () => {
   it('returns a bare token untouched', () => {
@@ -46,5 +52,30 @@ describe('inviteSignInUrl', () => {
 
   it('does not double a trailing slash on the origin', () => {
     expect(inviteSignInUrl('http://host/', 'lyc_x')).toBe('http://host/sign-in?token=lyc_x')
+  })
+})
+
+describe('pairing codes', () => {
+  it('normalizes case, hyphen, and spaces to the canonical code', () => {
+    expect(normalizePairingCode('bk4t-9q2m')).toBe('BK4T9Q2M')
+    expect(normalizePairingCode(' bk 4t ')).toBe('BK4T')
+  })
+
+  it('drops glyphs outside the alphabet', () => {
+    expect(normalizePairingCode('0O1ILU')).toBe('')
+  })
+
+  it('recognises a code but never a token', () => {
+    expect(looksLikePairingCode('BK4T-9Q2M')).toBe(true)
+    expect(looksLikePairingCode('bk4t9q2m')).toBe(true)
+    expect(looksLikePairingCode('lyc_abc123')).toBe(false)
+    expect(looksLikePairingCode('BK4T')).toBe(false) // too short
+  })
+
+  it('extracts a code from a bare string or a ?code= URL', () => {
+    expect(extractPairingCode('BK4T-9Q2M')).toBe('BK4T9Q2M')
+    expect(extractPairingCode('http://host:8080/sign-in?code=bk4t9q2m')).toBe('BK4T9Q2M')
+    expect(extractPairingCode('http://host/sign-in')).toBeNull()
+    expect(extractPairingCode('nonsense')).toBeNull()
   })
 })

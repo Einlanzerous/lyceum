@@ -60,6 +60,24 @@ class _InviteRevealSheet extends StatefulWidget {
 class _InviteRevealSheetState extends State<_InviteRevealSheet> {
   bool _copied = false;
   bool _copyFailed = false;
+  bool _codeCopied = false;
+
+  /// The pairing code grouped XXXX-XXXX for reading aloud and typing (LYCM-88);
+  /// the sign-in field strips the hyphen back out.
+  String get _groupedCode {
+    final c = widget.invite.pairingCode;
+    return c.length == 8 ? '${c.substring(0, 4)}-${c.substring(4)}' : c;
+  }
+
+  Future<void> _copyCode() async {
+    try {
+      await Clipboard.setData(ClipboardData(text: widget.invite.pairingCode));
+      if (mounted) setState(() => _codeCopied = true);
+    } catch (_) {
+      // The code is short and on screen — unlike the key, a blocked clipboard is
+      // no loss; it can just be read aloud.
+    }
+  }
 
   /// The one question this sheet exists to answer: did the key get out?
   ///
@@ -220,6 +238,16 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
           ),
         ),
 
+        // The type-it-in path: a short code for when scanning and pasting are
+        // both off the table (reading it aloud, say). It expires far sooner than
+        // the key above.
+        const SizedBox(height: 16),
+        _PairingCode(
+          code: _groupedCode,
+          copied: _codeCopied,
+          onCopy: _copyCode,
+        ),
+
         // The same key as a QR, so $_name can scan it from their phone's camera
         // instead of copying text across devices (LYCM-88). The caller encodes
         // the sign-in URL served by this library, so a stock camera app can
@@ -349,6 +377,69 @@ class _InviteQr extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The invite as a short code with a copy affordance (LYCM-88).
+class _PairingCode extends StatelessWidget {
+  const _PairingCode({
+    required this.code,
+    required this.copied,
+    required this.onCopy,
+  });
+
+  final String code;
+  final bool copied;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'OR A SHORT CODE — EXPIRES IN 15 MIN',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.4,
+            color: lyc.dim,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                decoration: BoxDecoration(
+                  color: lyc.bg,
+                  border: Border.all(color: lyc.borderStrong),
+                  borderRadius: BorderRadius.circular(LycRadii.card),
+                ),
+                child: SelectableText(
+                  code,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 3,
+                    color: lyc.text,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            OutlinedButton.icon(
+              onPressed: onCopy,
+              icon: Icon(copied ? Icons.check_rounded : Icons.copy_rounded, size: 16),
+              label: Text(copied ? 'Copied' : 'Copy'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

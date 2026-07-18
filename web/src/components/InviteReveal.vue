@@ -9,7 +9,7 @@
 //
 // It is a key, not a link: single-use, one device, expiring in 7 days.
 
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Invite } from '@/api/auth'
 import InviteQr from './InviteQr.vue'
 
@@ -34,6 +34,25 @@ const emit = defineEmits<{
 
 const copied = ref(false)
 const copyFailed = ref(false)
+const codeCopied = ref(false)
+
+// The pairing code grouped XXXX-XXXX for reading aloud and typing (LYCM-88); the
+// sign-in field strips the hyphen back out.
+const groupedCode = computed(() => {
+  const c = props.invite?.pairing_code ?? ''
+  return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : c
+})
+
+async function copyCode(): Promise<void> {
+  if (!props.invite) return
+  try {
+    await navigator.clipboard.writeText(props.invite.pairing_code)
+    codeCopied.value = true
+  } catch {
+    // Insecure-context clipboard block — the code is short and visible, so unlike
+    // the key it can just be read off the screen. Nothing to recover.
+  }
+}
 
 async function copy(): Promise<void> {
   if (!props.invite) return
@@ -97,6 +116,20 @@ async function copyAndClose(): Promise<void> {
           <span><i aria-hidden="true"></i>Expires in 7 days</span>
           <span><i aria-hidden="true"></i>Works once</span>
           <span><i aria-hidden="true"></i>One device</span>
+        </div>
+
+        <!-- The type-it-in path: a short code for when scanning and pasting are
+             both off the table (reading it aloud, or off the server log). It
+             expires far sooner than the key above. -->
+        <div class="code">
+          <div class="code__label">Or a short code — expires in 15 min</div>
+          <div class="code__row">
+            <code class="code__value">{{ groupedCode }}</code>
+            <button type="button" class="code__copy" @click="copyCode">
+              <span aria-hidden="true">{{ codeCopied ? '✓' : '⧉' }}</span>
+              {{ codeCopied ? 'Copied' : 'Copy' }}
+            </button>
+          </div>
         </div>
 
         <InviteQr :token="invite.invite_token" />
@@ -300,6 +333,48 @@ async function copyAndClose(): Promise<void> {
   background: color-mix(in srgb, var(--success) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
   color: var(--success);
+}
+
+.code {
+  margin-top: 16px;
+}
+.code__label {
+  font: 600 10px var(--font-ui);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 7px;
+}
+.code__row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.code__value {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  font:
+    700 20px/1.2 ui-monospace,
+    monospace;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  user-select: all;
+}
+.code__copy {
+  flex: none;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--reading);
+  font: 700 13px var(--font-ui);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .meta {

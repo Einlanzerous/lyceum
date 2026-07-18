@@ -222,15 +222,21 @@ func toUserJSON(u store.User) userJSON {
 // bound to this device. This is how every client signs in.
 //
 // Body: {"token": "lyc_...", "device_label": "Pixel 8"}
+//
+//	or: {"code": "BK4T9Q2M", "device_label": "Pixel 8"}   (LYCM-88)
+//
 // 200:  {"user": {...}, "session_token": "lyc_..."}
 //
-// The session token is shown here and never again; the client stores it and
-// sends it as `Authorization: Bearer`. A spent, expired, or unknown invite is
-// 401 — indistinguishable on purpose, so probing can't tell a used invite from a
+// A caller presents either a full invite token or the short pairing code that
+// stands for it; both redeem the same underlying invite. The session token is
+// shown here and never again; the client stores it and sends it as
+// `Authorization: Bearer`. A spent, expired, or unknown invite/code is 401 —
+// indistinguishable on purpose, so probing can't tell a used one from a
 // nonexistent one.
 func (a *API) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token       string `json:"token"`
+		Code        string `json:"code"`
 		DeviceLabel string `json:"device_label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -238,9 +244,26 @@ func (a *API) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, session, err := a.store.RedeemInvite(r.Context(), strings.TrimSpace(req.Token), req.DeviceLabel)
+	var (
+		u       store.User
+		session string
+		err     error
+	)
+	if code := strings.TrimSpace(req.Code); code != "" {
+		// The pairing code is brute-forceable in a way the token is not, so this
+		// path — and only this path — is rate-limited per client IP. A 429 is about
+		// request rate, not the code's validity, so it leaks nothing a probe could
+		// use.
+		if !a.pairingLimiter.allow(clientIP(r)) {
+			http.Error(w, "too many attempts, slow down", http.StatusTooManyRequests)
+			return
+		}
+		u, session, err = a.store.RedeemPairingCode(r.Context(), code, req.DeviceLabel)
+	} else {
+		u, session, err = a.store.RedeemInvite(r.Context(), strings.TrimSpace(req.Token), req.DeviceLabel)
+	}
 	if errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "invalid or already-used invite token", http.StatusUnauthorized)
+		http.Error(w, "invalid or already-used invite", http.StatusUnauthorized)
 		return
 	}
 	if err != nil {
@@ -339,16 +362,23 @@ func (a *API) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	invite, err := a.store.MintToken(r.Context(), u.ID, store.TokenInvite, "invite", inviteExpiry())
+	token, code, err := a.store.MintInvite(r.Context(), u.ID, "invite", inviteExpiry())
 	if err != nil {
 		serverError(w, "mint invite", err)
 		return
 	}
+	writeInvite(w, http.StatusCreated, u, token, code)
+}
 
-	writeJSON(w, http.StatusCreated, struct {
+// writeInvite is the one-time reveal payload both invite mint paths return: the
+// account, the full invite token, and the short pairing code that stands for it
+// (LYCM-88). Every field is shown exactly once.
+func writeInvite(w http.ResponseWriter, status int, u store.User, token, code string) {
+	writeJSON(w, status, struct {
 		User        userJSON `json:"user"`
 		InviteToken string   `json:"invite_token"`
-	}{toUserJSON(u), invite})
+		PairingCode string   `json:"pairing_code"`
+	}{toUserJSON(u), token, code})
 }
 
 // memberJSON is a household-list row: the account plus enough to tell an active
@@ -466,15 +496,12 @@ func (a *API) handleAdminUserInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	invite, err := a.store.MintToken(r.Context(), u.ID, store.TokenInvite, "invite", inviteExpiry())
+	token, code, err := a.store.MintInvite(r.Context(), u.ID, "invite", inviteExpiry())
 	if err != nil {
 		serverError(w, "mint invite", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, struct {
-		User        userJSON `json:"user"`
-		InviteToken string   `json:"invite_token"`
-	}{toUserJSON(u), invite})
+	writeInvite(w, http.StatusCreated, u, token, code)
 }
 
 // handleAdminUserDelete removes a member along with their tokens and reading

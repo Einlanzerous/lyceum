@@ -26,6 +26,7 @@ void main() {
       isOwner: false,
     ),
     token: 'lyc_theOnlyCopy',
+    pairingCode: 'BK4T9Q2M',
   );
 
   /// Drives the reveal and reports how it closed.
@@ -72,6 +73,13 @@ void main() {
       find.textContaining("This is the only time you'll see this key."),
       findsOneWidget,
     );
+  });
+
+  testWidgets('shows the pairing code, grouped for reading', (tester) async {
+    await open(tester);
+    // Grouped XXXX-XXXX, not the raw eight characters.
+    expect(find.text('BK4T-9Q2M'), findsOneWidget);
+    expect(find.textContaining('SHORT CODE'), findsOneWidget);
   });
 
   testWidgets('renders the key as a QR when given a sign-in URL', (tester) async {
@@ -174,6 +182,8 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    // The sheet scrolls (key + code + QR); bring the button into view first.
+    await tester.ensureVisible(find.text("I've saved it"));
     await tester.tap(find.text("I've saved it"));
     await tester.pumpAndSettle();
 
@@ -214,6 +224,7 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('Copy & close'));
     await tester.tap(find.text('Copy & close'));
     await tester.pumpAndSettle();
 

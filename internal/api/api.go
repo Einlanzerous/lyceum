@@ -79,9 +79,14 @@ type Store interface {
 	ListUsers(ctx context.Context) ([]store.User, error)
 	UpdateDisplayName(ctx context.Context, id int64, displayName string) (store.User, error)
 	DeleteUser(ctx context.Context, id int64) error
-	MintToken(ctx context.Context, userID int64, kind, label string, expiresAt *time.Time) (string, error)
+	// MintInvite issues a single-use invite plus a short pairing code that stands
+	// for the same invite (LYCM-88), returning both plaintexts once.
+	MintInvite(ctx context.Context, userID int64, label string, expiresAt *time.Time) (token string, code string, err error)
 	UserByToken(ctx context.Context, plaintext string) (store.User, error)
 	RedeemInvite(ctx context.Context, plaintext, deviceLabel string) (store.User, string, error)
+	// RedeemPairingCode exchanges a short pairing code for a session, the
+	// pairing-code analogue of RedeemInvite (LYCM-88).
+	RedeemPairingCode(ctx context.Context, code, deviceLabel string) (store.User, string, error)
 	RevokeToken(ctx context.Context, plaintext string) error
 	ListSessions(ctx context.Context, userID int64, currentPlaintext string) ([]store.Session, error)
 	RevokeSession(ctx context.Context, userID, id int64) error
@@ -113,6 +118,9 @@ type API struct {
 	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
 	ingestQC        bool // hold flagged new ingests for review (LYCM-58); off unless wired
 	userAuth        bool // require a session token on the reader core (LYCM-801)
+
+	// pairingLimiter caps pairing-code sign-in attempts per client IP (LYCM-88).
+	pairingLimiter *ipRateLimiter
 }
 
 // blobCacheControl is the caching policy for the cover and EPUB blob routes.
@@ -189,6 +197,7 @@ func New(s Store, dataDir string, opts ...Option) *API {
 		store: s, dataDir: dataDir, acquirer: logAcquirer{}, resolver: nullResolver{},
 		wantSem:         make(chan struct{}, maxConcurrentWants),
 		normalizeCovers: true,
+		pairingLimiter:  newIPRateLimiter(pairingRateWindow, pairingRateBurst),
 	}
 	for _, opt := range opts {
 		opt(a)

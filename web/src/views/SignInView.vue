@@ -14,7 +14,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '@/api/client'
-import { extractInviteToken } from '@/api/invite'
+import {
+  extractInviteToken,
+  extractPairingCode,
+  looksLikePairingCode,
+  normalizePairingCode,
+} from '@/api/invite'
 import { inferDeviceLabel } from '@/api/device'
 import { hasBackend, isNativeShell } from '@/api/base'
 import { peekLegacyProfileName } from '@/profile'
@@ -30,7 +35,7 @@ const deviceLabel = ref(inferDeviceLabel())
 const editingDevice = ref(false)
 const submitting = ref(false)
 
-type Failure = { kind: 'rejected' } | { kind: 'unreachable' } | null
+type Failure = { kind: 'rejected' } | { kind: 'throttled' } | { kind: 'unreachable' } | null
 const failure = ref<Failure>(null)
 const showServer = ref(false)
 
@@ -43,18 +48,20 @@ onMounted(() => {
   void redeemFromUrl()
 })
 
-// A QR scanned by the phone's camera lands here as `/sign-in?token=…`. Redeem it
-// without making the person do anything, then scrub the secret out of the URL bar
-// and history — whether it worked or not, the token has no business lingering
-// there. Success navigates away; a failure drops back to the bare sign-in screen
-// wearing the normal "bad key" banner.
+// A QR scanned by the phone's camera lands here as `/sign-in?token=…` (or
+// `?code=…`). Redeem it without making the person do anything, then scrub the
+// secret out of the URL bar and history — whether it worked or not, it has no
+// business lingering there. Success navigates away; a failure drops back to the
+// bare sign-in screen wearing the normal "bad key" banner.
 async function redeemFromUrl(): Promise<void> {
-  const raw = route.query.token
-  if (typeof raw !== 'string') return
-  const parsed = extractInviteToken(raw)
+  const rawToken = route.query.token
+  const rawCode = route.query.code
+  let value: string | null = null
+  if (typeof rawToken === 'string') value = extractInviteToken(rawToken)
+  else if (typeof rawCode === 'string') value = extractPairingCode(rawCode)
   await router.replace({ path: '/sign-in' })
-  if (!parsed) return
-  token.value = parsed
+  if (!value) return
+  token.value = value
   await submit()
 }
 const isUpgrade = computed(() => returningName.value !== '')
@@ -67,14 +74,22 @@ async function submit(): Promise<void> {
   submitting.value = true
   failure.value = null
   try {
-    await auth.signIn(token.value, deviceLabel.value)
+    // The one field takes either a full invite or the short pairing code; route
+    // by shape so the person never has to say which they have.
+    const raw = token.value
+    if (looksLikePairingCode(raw)) {
+      await auth.signInWithCode(normalizePairingCode(raw), deviceLabel.value)
+    } else {
+      await auth.signIn(raw, deviceLabel.value)
+    }
     await router.replace('/')
   } catch (err) {
-    // A 401 is the invite being bad. Anything else — most often a dead server on
-    // the native path — is not the person's fault and must not wear the red
-    // "bad key" banner.
-    failure.value =
-      err instanceof ApiError && err.status === 401 ? { kind: 'rejected' } : { kind: 'unreachable' }
+    // A 401 is the credential being bad; a 429 is the pairing-code rate limit.
+    // Anything else — most often a dead server on the native path — is not the
+    // person's fault and must not wear the red "bad key" banner.
+    if (err instanceof ApiError && err.status === 401) failure.value = { kind: 'rejected' }
+    else if (err instanceof ApiError && err.status === 429) failure.value = { kind: 'throttled' }
+    else failure.value = { kind: 'unreachable' }
   } finally {
     submitting.value = false
   }
@@ -94,8 +109,18 @@ async function submit(): Promise<void> {
       <div v-if="failure?.kind === 'rejected'" class="alert" role="alert">
         <div class="alert__title">That key didn't work.</div>
         <p class="alert__body">
-          Invites work once and expire after 7 days — this one may be spent, expired, or mistyped.
-          We can't tell which. Ask for a fresh invite, or check you copied the whole thing.
+          Invites and codes work once — this one may be spent, expired, or mistyped. We can't tell
+          which. Ask for a fresh one, or check you copied the whole thing.
+        </p>
+      </div>
+
+      <!-- Throttled: not a bad key, just too many tries. Calmer than the red
+           banner, and it says the one useful thing — wait, then retry. -->
+      <div v-else-if="failure?.kind === 'throttled'" class="alert alert--soft" role="alert">
+        <div class="alert__title">Too many tries.</div>
+        <p class="alert__body">
+          For safety we limit how fast codes can be tried. Wait a minute, then enter it again — or
+          paste the full invite instead.
         </p>
       </div>
 
@@ -129,7 +154,8 @@ async function submit(): Promise<void> {
         <div class="eyebrow eyebrow--center">The reading room</div>
         <h1 class="door__title">You've been handed a key.</h1>
         <p class="door__lede door__lede--center">
-          Paste the invite a housemate gave you — or the one printed in the server log.
+          Paste the invite a housemate gave you, or type the short code — scan its QR and you skip
+          this entirely.
         </p>
       </template>
 
@@ -146,7 +172,7 @@ async function submit(): Promise<void> {
             v-model="token"
             class="key__input"
             type="text"
-            placeholder="lyc_…"
+            placeholder="lyc_… or code"
             autocomplete="off"
             autocapitalize="off"
             autocorrect="off"
@@ -379,6 +405,18 @@ async function submit(): Promise<void> {
   font: 400 12.5px/1.55 var(--font-ui);
   color: color-mix(in srgb, var(--error) 55%, var(--text));
   margin: 0;
+}
+
+/* Throttled is a caution, not an error: amber, and it doesn't recolour the body. */
+.alert--soft {
+  background: color-mix(in srgb, var(--brass) 12%, transparent);
+  border-color: color-mix(in srgb, var(--brass) 38%, transparent);
+}
+.alert--soft .alert__title {
+  color: var(--brass);
+}
+.alert--soft .alert__body {
+  color: var(--muted);
 }
 
 .field-label {

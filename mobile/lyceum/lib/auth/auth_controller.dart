@@ -113,6 +113,26 @@ class AuthController extends Notifier<AuthState> {
     await adoptLegacyName();
   }
 
+  /// Redeem a short pairing code instead of a token (LYCM-88). Same outcome as
+  /// [signIn]; a 401 (bad/spent/expired) or 429 (rate limited) is thrown to the
+  /// sign-in screen to explain, not fired as an app-wide sign-out.
+  Future<void> signInWithCode(String code, {String? deviceLabel}) async {
+    final client = ref.read(lyceumClientProvider);
+    final auth = ref.read(authClientProvider);
+
+    final label = (deviceLabel ?? '').trim().isNotEmpty
+        ? deviceLabel!.trim()
+        : await inferDeviceLabel();
+
+    final result = await auth.suppressUnauthorized(
+      () => client.redeemPairingCode(code, deviceLabel: label),
+    );
+
+    await ref.read(sessionTokenProvider.notifier).set(result.sessionToken);
+    state = AuthState(status: AuthStatus.signedIn, user: result.user);
+    await adoptLegacyName();
+  }
+
   /// Sign this device out. Others keep working.
   ///
   /// The local token is dropped in a `finally`: if the revoke call fails we still

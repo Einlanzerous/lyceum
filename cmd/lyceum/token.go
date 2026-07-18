@@ -59,7 +59,7 @@ func runMintToken(args []string) {
 	}
 
 	expires := time.Now().Add(store.InviteTTL)
-	invite, err := st.MintToken(ctx, user.ID, store.TokenInvite, *label, &expires)
+	invite, code, err := st.MintInvite(ctx, user.ID, *label, &expires)
 	if err != nil {
 		log.Fatalf("mint invite: %v", err)
 	}
@@ -70,7 +70,20 @@ func runMintToken(args []string) {
 	if _, err := os.Stdout.WriteString(invite + "\n"); err != nil {
 		log.Fatalf("write token: %v", err)
 	}
+	// The short code is the type-it-in path for when scanning or pasting isn't an
+	// option (reading it off this very log into a browser). It expires far sooner
+	// than the token.
+	log.Printf("or type this code within %s: %s", store.PairingTTL, formatPairingCode(code))
 	printInviteQR(cfg.publicURL, invite)
+}
+
+// formatPairingCode groups the code as XXXX-XXXX so it is easier to read aloud
+// and type. The redemption path strips the hyphen back out.
+func formatPairingCode(code string) string {
+	if len(code) == 8 {
+		return code[:4] + "-" + code[4:]
+	}
+	return code
 }
 
 // signInURL builds the scannable `<publicURL>/sign-in?token=…` redemption link
@@ -142,11 +155,12 @@ func bootstrapOwner(ctx context.Context, st *store.Store, cfg config) {
 	}
 
 	expires := time.Now().Add(store.InviteTTL)
-	invite, err := st.MintToken(ctx, owner.ID, store.TokenInvite, "bootstrap", &expires)
+	invite, code, err := st.MintInvite(ctx, owner.ID, "bootstrap", &expires)
 	if err != nil {
 		log.Fatalf("mint owner invite: %v", err)
 	}
 	log.Printf("auth: first-boot sign-in invite for %s — %s", owner.Email, invite)
+	log.Printf("auth: or type this code within %s — %s", store.PairingTTL, formatPairingCode(code))
 	log.Printf("auth: redeem it once in the app (Settings -> Sign in). It expires in %s and is "+
 		"not shown again; `lyceum mint-token` issues another.", store.InviteTTL)
 	printInviteQR(cfg.publicURL, invite)
