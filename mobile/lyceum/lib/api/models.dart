@@ -210,14 +210,22 @@ class Member {
 /// A freshly minted invite. [token] is plaintext and **unrecoverable** — the
 /// server hashes it and this is the only time it exists in the clear.
 class Invite {
-  const Invite({required this.user, required this.token});
+  const Invite({
+    required this.user,
+    required this.token,
+    required this.pairingCode,
+  });
 
   final Account user;
   final String token;
 
+  /// The short, human-typeable code that stands for the same invite (LYCM-88).
+  final String pairingCode;
+
   factory Invite.fromJson(Map<String, dynamic> json) => Invite(
     user: Account.fromJson(json['user'] as Map<String, dynamic>),
     token: (json['invite_token'] as String?) ?? '',
+    pairingCode: (json['pairing_code'] as String?) ?? '',
   );
 }
 

@@ -33,6 +33,8 @@ export interface Member extends User {
 export interface Invite {
   user: User
   invite_token: string
+  /** The short, human-typeable code that stands for the same invite (LYCM-88). */
+  pairing_code: string
 }
 
 /**
@@ -55,6 +57,27 @@ export async function redeemInvite(
       // wrapped, padded, and newline-ridden. Clean it here rather than making a
       // person hunt for the stray space.
       body: JSON.stringify({ token: token.replace(/\s+/g, ''), device_label: deviceLabel }),
+    })
+    if (!res.ok) throw await readError(res)
+    return (await res.json()) as { user: User; session_token: string }
+  })
+}
+
+/**
+ * Redeem a short pairing code for a session — the type-it-in alternative to a
+ * token (LYCM-88). Like redeemInvite, a 401 is expected input (wrong/spent/
+ * expired) and must not trip the app-wide sign-out; a 429 means the code path's
+ * rate limit was hit and is surfaced to the sign-in screen as its own message.
+ */
+export async function redeemPairingCode(
+  code: string,
+  deviceLabel: string,
+): Promise<{ user: User; session_token: string }> {
+  return suppressUnauthorized(async () => {
+    const res = await apiFetch('/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, device_label: deviceLabel }),
     })
     if (!res.ok) throw await readError(res)
     return (await res.json()) as { user: User; session_token: string }

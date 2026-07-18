@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   fetchMe,
   redeemInvite,
+  redeemPairingCode,
   signOut as signOutApi,
   updateDisplayName as renameApi,
   type User,
@@ -96,6 +97,22 @@ export const useAuthStore = defineStore('auth', {
     async signIn(inviteToken: string, deviceLabel?: string): Promise<void> {
       const label = (deviceLabel ?? '').trim() || inferDeviceLabel()
       const { user, session_token } = await redeemInvite(inviteToken, label)
+      setSessionToken(session_token)
+      this.user = user
+      this.status = 'signedIn'
+      this.endedReason = null
+
+      await this.adoptLegacyName()
+    },
+
+    /**
+     * Redeem a short pairing code instead of a token (LYCM-88). Same outcome as
+     * signIn; a 401 (bad/spent/expired) or 429 (rate limited) propagates so the
+     * sign-in screen can explain it.
+     */
+    async signInWithCode(code: string, deviceLabel?: string): Promise<void> {
+      const label = (deviceLabel ?? '').trim() || inferDeviceLabel()
+      const { user, session_token } = await redeemPairingCode(code, label)
       setSessionToken(session_token)
       this.user = user
       this.status = 'signedIn'

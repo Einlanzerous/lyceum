@@ -10,6 +10,7 @@ import * as authApi from '@/api/auth'
 // (LYCM-88) end-to-end from the URL query.
 vi.mock('@/api/auth', () => ({
   redeemInvite: vi.fn(),
+  redeemPairingCode: vi.fn(),
   fetchMe: vi.fn(),
   signOut: vi.fn(),
   updateDisplayName: vi.fn(),
@@ -81,5 +82,43 @@ describe('SignInView QR auto-redeem', () => {
   it('does nothing special without a token in the URL', async () => {
     await mountAt('/sign-in')
     expect(authApi.redeemInvite).not.toHaveBeenCalled()
+    expect(authApi.redeemPairingCode).not.toHaveBeenCalled()
+  })
+
+  it('routes a typed pairing code to the code path, normalized', async () => {
+    vi.mocked(authApi.redeemPairingCode).mockResolvedValue({
+      user: { id: 1, email: 'a@b.c', display_name: 'Ada', is_owner: false },
+      session_token: 'lyc_session',
+    })
+
+    const { wrapper } = await mountAt('/sign-in')
+    await wrapper.find('#invite').setValue('bk4t-9q2m')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(authApi.redeemPairingCode).toHaveBeenCalledWith('BK4T9Q2M', expect.any(String))
+    expect(authApi.redeemInvite).not.toHaveBeenCalled()
+  })
+
+  it('auto-redeems a ?code= URL via the code path', async () => {
+    vi.mocked(authApi.redeemPairingCode).mockResolvedValue({
+      user: { id: 1, email: 'a@b.c', display_name: 'Ada', is_owner: false },
+      session_token: 'lyc_session',
+    })
+
+    await mountAt('/sign-in?code=BK4T-9Q2M')
+
+    expect(authApi.redeemPairingCode).toHaveBeenCalledWith('BK4T9Q2M', expect.any(String))
+  })
+
+  it('shows the throttled notice on a 429', async () => {
+    vi.mocked(authApi.redeemPairingCode).mockRejectedValue(new ApiError(429, 'slow down'))
+
+    const { wrapper } = await mountAt('/sign-in')
+    await wrapper.find('#invite').setValue('BK4T9Q2M')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Too many tries')
   })
 })

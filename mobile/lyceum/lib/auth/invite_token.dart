@@ -36,3 +36,26 @@ String inviteSignInUrl(String origin, String token) {
   final base = origin.trim().replaceAll(RegExp(r'/+$'), '');
   return '$base/sign-in?token=${Uri.encodeQueryComponent(token)}';
 }
+
+// --- Pairing codes (LYCM-88) ---
+
+/// Crockford base32 with the ambiguous glyphs removed — mirrors
+/// store.pairingAlphabet.
+const _pairingAlphabet = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+const _pairingCodeLen = 8;
+
+/// Fold a typed code to its canonical form: upper-cased, non-alphabet stripped.
+String normalizePairingCode(String raw) {
+  final b = StringBuffer();
+  for (final ch in raw.toUpperCase().split('')) {
+    if (_pairingAlphabet.contains(ch)) b.write(ch);
+  }
+  return b.toString();
+}
+
+/// Whether the field holds a pairing code rather than a token, so the one
+/// sign-in input can accept either. A `lyc_` token never looks like a code.
+bool looksLikePairingCode(String raw) {
+  if (raw.contains('lyc_')) return false;
+  return normalizePairingCode(raw).length == _pairingCodeLen;
+}
