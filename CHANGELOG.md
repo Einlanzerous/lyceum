@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/Einlanzerous/lyceum/compare/v1.6.0...v1.7.0) (2026-07-20)
+
+
+### Features
+
+* **auth:** Cloudflare Access SSO sign-in (LYCM-85) ([#56](https://github.com/Einlanzerous/lyceum/issues/56)) ([5bef1ec](https://github.com/Einlanzerous/lyceum/commit/5bef1ec5d2ed94b312d4727f00fe53d2f2fa4b2c))
+
+
+### Bug Fixes
+
+* **mobile-release:** upload AAB to Play closed-testing (alpha) track (LYCM-94) ([#54](https://github.com/Einlanzerous/lyceum/issues/54)) ([fa7cf9b](https://github.com/Einlanzerous/lyceum/commit/fa7cf9b0bce74d3c75ae18f2484571c941f07c8a))
+
 ## [1.6.0](https://github.com/Einlanzerous/lyceum/compare/v1.5.0...v1.6.0) (2026-07-18)
 
 
