@@ -48,6 +48,11 @@ onMounted(() => {
   void redeemFromUrl()
 })
 
+// Cloudflare Access verified this person at the edge, but no Lyceum account
+// carries their email yet (LYCM-803). Naming it turns a dead end into a clear
+// next step — ask the owner to invite exactly this address.
+const ssoNoAccountEmail = computed(() => auth.ssoNoAccountEmail)
+
 // A QR scanned by the phone's camera lands here as `/sign-in?token=…` (or
 // `?code=…`). Redeem it without making the person do anything, then scrub the
 // secret out of the URL bar and history — whether it worked or not, it has no
@@ -111,6 +116,18 @@ async function submit(): Promise<void> {
         <p class="alert__body">
           Invites and codes work once — this one may be spent, expired, or mistyped. We can't tell
           which. Ask for a fresh one, or check you copied the whole thing.
+        </p>
+      </div>
+
+      <!-- Verified by Cloudflare, but no account here yet. Not a bad key — the
+           person is who they say, they just haven't been invited. Amber, and it
+           names the exact address to ask for. -->
+      <div v-else-if="ssoNoAccountEmail && !failure" class="alert alert--soft" role="alert">
+        <div class="alert__title">You're verified, but not invited yet.</div>
+        <p class="alert__body">
+          Cloudflare signed you in as <b>{{ ssoNoAccountEmail }}</b
+          >, but no Lyceum account has that email. Ask whoever runs the library to invite it — then
+          you'll land straight in, no key required.
         </p>
       </div>
 

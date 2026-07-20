@@ -72,6 +72,13 @@ type config struct {
 	ownerEmail string // LYCEUM_OWNER_EMAIL — identity of the owner account
 	ownerName  string // LYCEUM_OWNER_NAME — the owner's display name
 
+	// Cloudflare Access SSO (LYCM-803). Both must be set to enable the browser
+	// auto-sign-in endpoint; either unset leaves it returning sso_disabled. They
+	// are public identifiers (not secrets): the team domain and the Access
+	// application's AUD tag from the Zero Trust dashboard.
+	cfAccessTeamDomain string // CF_ACCESS_TEAM_DOMAIN — e.g. <team>.cloudflareaccess.com
+	cfAccessAUD        string // CF_ACCESS_AUD — Access application audience tag
+
 	// Cross-device sign-in (LYCM-88): the library's public web origin, used to
 	// turn an invite into a scannable `<publicURL>/sign-in?token=…` QR. Optional;
 	// when unset, mint-token just prints the raw token as before.
@@ -110,6 +117,9 @@ func loadConfig() config {
 		ownerEmail: os.Getenv("LYCEUM_OWNER_EMAIL"),
 		ownerName:  os.Getenv("LYCEUM_OWNER_NAME"),
 		publicURL:  os.Getenv("LYCEUM_PUBLIC_URL"),
+
+		cfAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
+		cfAccessAUD:        os.Getenv("CF_ACCESS_AUD"),
 
 		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
@@ -182,6 +192,16 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 		log.Printf("auth: reader core requires a signed-in user")
 	} else {
 		log.Printf("config: user auth disabled (LYCEUM_AUTH); the reader core is open and every request is served as the owner")
+	}
+
+	// Cloudflare Access SSO (LYCM-803): enable browser auto-sign-in only when
+	// both the team domain and the AUD tag are configured. Either missing leaves
+	// the endpoint returning sso_disabled and clients fall back to invite sign-in.
+	if cfg.cfAccessTeamDomain != "" && cfg.cfAccessAUD != "" {
+		opts = append(opts, api.WithCFAccess(api.NewCFAccessVerifier(cfg.cfAccessTeamDomain, cfg.cfAccessAUD)))
+		log.Printf("auth: Cloudflare Access SSO enabled (team=%s)", cfg.cfAccessTeamDomain)
+	} else if cfg.cfAccessTeamDomain != "" || cfg.cfAccessAUD != "" {
+		log.Printf("config: Cloudflare Access SSO needs both CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD; SSO disabled")
 	}
 
 	if cfg.coverFetch {

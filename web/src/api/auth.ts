@@ -85,6 +85,50 @@ export async function redeemPairingCode(
 }
 
 /**
+ * Raised by ssoCloudflare when Cloudflare Access verified the person at the edge
+ * but no Lyceum account carries that email (LYCM-803). It is not a broken
+ * session — it is a real, explainable state: the household owner hasn't invited
+ * this address yet. The sign-in screen names the email so the person knows
+ * exactly what to ask for.
+ */
+export class SSONoAccountError extends Error {
+  email: string
+  constructor(email: string) {
+    super(`no Lyceum account for ${email}`)
+    this.name = 'SSONoAccountError'
+    this.email = email
+  }
+}
+
+/**
+ * Trade the Cloudflare Access identity for a Lyceum session (LYCM-803).
+ *
+ * Behind the Cloudflare edge the tunnel injects a verified `Cf-Access-Jwt-
+ * Assertion` header that this endpoint checks; the browser never sees or sets
+ * it. Returns the session on success, or null when SSO is unavailable — the
+ * feature is off, or the request didn't come through the tunnel (LAN/direct), or
+ * the token didn't verify. Those are all silent fall-throughs to manual sign-in.
+ * A verified-but-unknown email is the one loud case: it throws SSONoAccountError.
+ *
+ * A 401 here is expected (disabled/unverified), so it must not trip the app-wide
+ * "signed out" reaction — hence suppressUnauthorized, as with redeemInvite.
+ */
+export async function ssoCloudflare(): Promise<{ user: User; session_token: string } | null> {
+  return suppressUnauthorized(async () => {
+    const res = await apiFetch('/auth/sso/cloudflare', { method: 'POST' })
+    if (res.ok) {
+      return (await res.json()) as { user: User; session_token: string }
+    }
+    if (res.status === 403) {
+      const body = (await res.json().catch(() => ({}))) as { email?: string }
+      throw new SSONoAccountError(body.email ?? '')
+    }
+    // 401 sso_disabled / unauthorized (or anything else) → no SSO available here.
+    return null
+  })
+}
+
+/**
  * The signed-in account, or null when the server wants a session and we have
  * none. A 200 with no token means the server has enforcement off and is serving
  * us as the owner — which is exactly the pre-accounts behaviour.

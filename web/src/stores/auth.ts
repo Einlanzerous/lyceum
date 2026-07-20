@@ -4,6 +4,8 @@ import {
   redeemInvite,
   redeemPairingCode,
   signOut as signOutApi,
+  ssoCloudflare,
+  SSONoAccountError,
   updateDisplayName as renameApi,
   type User,
 } from '@/api/auth'
@@ -34,6 +36,10 @@ interface AuthState {
   /** Set when a session we *held* stopped working, so we can explain rather than
    *  silently bounce someone mid-chapter to a login screen. */
   endedReason: SessionEndReason | null
+  /** Set when Cloudflare Access verified this person at the edge but no Lyceum
+   *  account carries their email (LYCM-803). The sign-in screen names it so they
+   *  know what to ask the owner for, instead of a bare "bad key". */
+  ssoNoAccountEmail: string | null
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -41,6 +47,7 @@ export const useAuthStore = defineStore('auth', {
     status: 'unknown',
     user: null,
     endedReason: null,
+    ssoNoAccountEmail: null,
   }),
 
   getters: {
@@ -85,6 +92,33 @@ export const useAuthStore = defineStore('auth', {
         await this.adoptLegacyName()
         return
       }
+
+      // No working session. Before falling back to the manual invite screen, try
+      // Cloudflare Access SSO (LYCM-803): behind the CF edge the tunnel has
+      // already verified who this is, so a household member signs in with no
+      // second step. On LAN/direct (no tunnel header) or a server without SSO,
+      // this is a silent no-op and we drop to the front door as before. Only
+      // attempt it when we hold no token — a stale/expired token is a real
+      // sign-out to explain, not a case to paper over with a fresh SSO session.
+      if (!hasStoredSession()) {
+        try {
+          const sso = await ssoCloudflare()
+          if (sso) {
+            setSessionToken(sso.session_token)
+            this.user = sso.user
+            this.status = 'signedIn'
+            this.endedReason = null
+            this.ssoNoAccountEmail = null
+            await this.adoptLegacyName()
+            return
+          }
+        } catch (err) {
+          // Verified at the edge but no account here: carry the email so the
+          // sign-in screen can name it. Any other failure just falls through.
+          if (err instanceof SSONoAccountError) this.ssoNoAccountEmail = err.email
+        }
+      }
+
       this.user = null
       this.status = 'signedOut'
     },
