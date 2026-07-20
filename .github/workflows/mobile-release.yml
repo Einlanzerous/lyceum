@@ -3,7 +3,7 @@ name: mobile-release
 # Builds + ships the native Flutter app (LYCM-700) on the v* tags that
 # release-please cuts.
 # - Android: signed APK attached to the GitHub Release; AAB pushed to the Play
-#   internal track (skipped until PLAY_SERVICE_ACCOUNT_JSON is set).
+#   closed-testing (alpha) track (skipped until PLAY_SERVICE_ACCOUNT_JSON is set).
 # See mobile/lyceum/android/RELEASE.md for the secret/runbook details.
 #
 # Trigger: release-please cuts the tag with an App-minted token from release.yml.
@@ -111,7 +111,7 @@ jobs:
           gh release upload "${{ steps.ver.outputs.tag }}" \
             "lyceum-${{ steps.ver.outputs.name }}.apk" --clobber
 
-      # --- Play internal track: only when the service account secret exists ---
+      # --- Play closed-testing (alpha) track: only when the service account secret exists ---
       - name: gate on Play secret
         id: play
         run: |
@@ -119,14 +119,16 @@ jobs:
       - name: write Play service account
         if: steps.play.outputs.enabled == 'true'
         run: printf '%s' "$PLAY_JSON" > play-service-account.json
-      - name: upload to Play internal track
+      # `alpha` is Play's default "Closed testing" track. If you test on a
+      # *custom-named* closed track instead, put that track's name here.
+      - name: upload to Play closed-testing track
         if: steps.play.outputs.enabled == 'true'
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJson: mobile/lyceum/play-service-account.json
           packageName: dev.dodson.lyceum
           releaseFiles: mobile/lyceum/build/app/outputs/bundle/release/app-release.aab
-          track: internal
+          track: alpha
       - name: note when Play is skipped
         if: steps.play.outputs.enabled != 'true'
         run: echo "::notice::Play upload skipped — PLAY_SERVICE_ACCOUNT_JSON not set (see android/RELEASE.md)."
