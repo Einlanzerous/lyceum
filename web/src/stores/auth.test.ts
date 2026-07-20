@@ -60,6 +60,57 @@ describe('load', () => {
     expect(auth.status).toBe('signedIn')
     expect(getSessionToken()).toBe('')
   })
+
+  it('signs in via Cloudflare Access when /auth/me has no session (LYCM-803)', async () => {
+    // Behind the CF edge: /auth/me has no session, but the tunnel-verified SSO
+    // exchange mints one, so the person never sees the invite screen.
+    const MARA = { id: 2, email: 'mara@home.lan', display_name: 'Mara', is_owner: false }
+    mockFetch((url, init) => {
+      if (url.endsWith('/auth/sso/cloudflare') && init?.method === 'POST') {
+        return json(200, { user: MARA, session_token: 'lyc_sso_session' })
+      }
+      return json(401, {}) // /auth/me
+    })
+    const auth = useAuthStore()
+
+    await auth.load()
+
+    expect(auth.status).toBe('signedIn')
+    expect(auth.user?.email).toBe('mara@home.lan')
+    expect(getSessionToken()).toBe('lyc_sso_session')
+    expect(auth.ssoNoAccountEmail).toBeNull()
+  })
+
+  it('surfaces the email when CF verified someone with no account', async () => {
+    mockFetch((url, init) => {
+      if (url.endsWith('/auth/sso/cloudflare') && init?.method === 'POST') {
+        return json(403, { error: 'sso_no_account', email: 'stranger@home.lan' })
+      }
+      return json(401, {})
+    })
+    const auth = useAuthStore()
+
+    await auth.load()
+
+    expect(auth.status).toBe('signedOut')
+    expect(auth.ssoNoAccountEmail).toBe('stranger@home.lan')
+  })
+
+  it('does not attempt SSO when a held token expired — that is a real sign-out', async () => {
+    // A token we *held* stopped working: explain it, don't silently paper over it
+    // with a fresh SSO session.
+    setSessionToken('lyc_stale')
+    const fetchFn = mockFetch(() => json(401, {}))
+    const auth = useAuthStore()
+
+    await auth.load()
+
+    expect(auth.status).toBe('signedOut')
+    const calledSso = fetchFn.mock.calls.some(([url]) =>
+      String(url).endsWith('/auth/sso/cloudflare'),
+    )
+    expect(calledSso).toBe(false)
+  })
 })
 
 describe('signIn', () => {
@@ -71,7 +122,8 @@ describe('signIn', () => {
     const placeholder = { ...OWNER, display_name: 'Reader' }
 
     const fn = mockFetch((url, init) => {
-      if (url.endsWith('/auth/session')) return json(200, { user: placeholder, session_token: 'lyc_new' })
+      if (url.endsWith('/auth/session'))
+        return json(200, { user: placeholder, session_token: 'lyc_new' })
       if (url.endsWith('/auth/me') && init?.method === 'PATCH') {
         return json(200, { ...OWNER, display_name: 'Ada' })
       }

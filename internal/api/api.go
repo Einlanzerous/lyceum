@@ -75,6 +75,11 @@ type Store interface {
 	// that authenticate them. See session.go.
 	CreateUser(ctx context.Context, email, displayName string) (store.User, error)
 	GetUser(ctx context.Context, id int64) (store.User, error)
+	// GetUserByEmail matches a Cloudflare Access-verified email to an account
+	// (case-insensitive) for SSO sign-in (LYCM-803); MintToken issues the session
+	// that sign-in yields.
+	GetUserByEmail(ctx context.Context, email string) (store.User, error)
+	MintToken(ctx context.Context, userID int64, kind, label string, expiresAt *time.Time) (string, error)
 	GetOwner(ctx context.Context) (store.User, error)
 	ListUsers(ctx context.Context) ([]store.User, error)
 	UpdateDisplayName(ctx context.Context, id int64, displayName string) (store.User, error)
@@ -118,6 +123,11 @@ type API struct {
 	normalizeCovers bool // trim/aspect/downscale stored covers at ingest (LYCM-65)
 	ingestQC        bool // hold flagged new ingests for review (LYCM-58); off unless wired
 	userAuth        bool // require a session token on the reader core (LYCM-801)
+
+	// cfAccess verifies Cloudflare Access JWTs for the browser SSO sign-in
+	// (LYCM-803). nil when CF_ACCESS_* is unconfigured, which disables the
+	// /auth/sso/cloudflare endpoint (it returns sso_disabled).
+	cfAccess *CFAccessVerifier
 
 	// pairingLimiter caps pairing-code sign-in attempts per client IP (LYCM-88).
 	pairingLimiter *ipRateLimiter
@@ -189,6 +199,15 @@ func WithUserAuth(enabled bool) Option {
 	return func(a *API) { a.userAuth = enabled }
 }
 
+// WithCFAccess installs the Cloudflare Access JWT verifier that backs browser
+// SSO sign-in (LYCM-803). When set, POST /auth/sso/cloudflare exchanges a
+// tunnel-injected Cf-Access-Jwt-Assertion for a Lyceum session; without it that
+// route returns sso_disabled and clients fall back to invite/pairing sign-in.
+// main.go installs it only when CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set.
+func WithCFAccess(v *CFAccessVerifier) Option {
+	return func(a *API) { a.cfAccess = v }
+}
+
 // New builds an API over the given store. dataDir is retained for symmetry with
 // the store's blob layout; the handlers serve whatever absolute or relative
 // paths the book rows carry, so it is informational only.
@@ -213,6 +232,11 @@ func (a *API) Handler() *http.ServeMux {
 	// Sign-in (LYCM-801). Redeeming an invite is the one route that must stay
 	// reachable without a session — it is how a client gets one.
 	mux.HandleFunc("POST /auth/session", a.handleAuthSession)
+	// Cloudflare Access SSO (LYCM-803). The browser SPA, sitting behind the CF
+	// edge, calls this on load to trade its tunnel-verified identity for a
+	// session — no second login. Like /auth/session it must stay reachable
+	// without a session; the CF JWT is the credential.
+	mux.HandleFunc("POST /auth/sso/cloudflare", a.handleAuthCFAccess)
 	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
 	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
 	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))

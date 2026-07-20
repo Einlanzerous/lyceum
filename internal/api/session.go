@@ -283,6 +283,86 @@ func (a *API) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	}{toUserJSON(u), session})
 }
 
+// ssoErrorBody is the wire shape for a Cloudflare SSO refusal. The SPA switches
+// on Error: sso_disabled → fall back to invite/pairing silently; sso_no_account
+// → show the named email so the person knows what to ask the owner for.
+type ssoErrorBody struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Email   string `json:"email,omitempty"`
+}
+
+func writeSSOError(w http.ResponseWriter, status int, code, message, email string) {
+	writeJSON(w, status, ssoErrorBody{Error: code, Message: message, Email: email})
+}
+
+// handleAuthCFAccess exchanges a Cloudflare Access JWT for a Lyceum session
+// (LYCM-803, mirrors Switchyard's SWY-161). The browser SPA behind the CF edge
+// calls it on load: the tunnel injects a `Cf-Access-Jwt-Assertion` header, this
+// verifies it, matches the verified email to a users row, and mints a session.
+//
+// It never auto-provisions. An email that cleared the CF gate but has no Lyceum
+// account gets a 403 refusal, not a new account — whether a household member
+// exists is Purser's decision (SERV-38), not something Access-group membership
+// should silently confer.
+//
+// Response matrix (mirrors SWY-161):
+//   - 401 sso_disabled   — CF Access unconfigured, or the header is absent (the
+//     request didn't come through the tunnel).
+//   - 401 unauthorized   — the JWT failed verification (signature/aud/iss/exp).
+//   - 403 sso_no_account — verified email, but no matching account.
+//   - 200                — {"user": {...}, "session_token": "..."} and the
+//     session cookie is set, exactly like handleAuthSession.
+func (a *API) handleAuthCFAccess(w http.ResponseWriter, r *http.Request) {
+	if a.cfAccess == nil {
+		writeSSOError(w, http.StatusUnauthorized, "sso_disabled",
+			"Cloudflare Access SSO is not configured on this server", "")
+		return
+	}
+	jwt := r.Header.Get("Cf-Access-Jwt-Assertion")
+	if jwt == "" {
+		writeSSOError(w, http.StatusUnauthorized, "sso_disabled",
+			"no Cloudflare Access identity on this request", "")
+		return
+	}
+
+	email, err := a.cfAccess.Verify(r.Context(), jwt)
+	if err != nil {
+		writeSSOError(w, http.StatusUnauthorized, "unauthorized",
+			"invalid Cloudflare Access token", "")
+		return
+	}
+
+	u, err := a.store.GetUserByEmail(r.Context(), email)
+	if errors.Is(err, store.ErrNotFound) {
+		writeSSOError(w, http.StatusForbidden, "sso_no_account",
+			"signed in to Cloudflare as "+email+", but no Lyceum account has that email — ask the owner for an invite",
+			email)
+		return
+	}
+	if err != nil {
+		serverError(w, "cf access: lookup user", err)
+		return
+	}
+
+	// A fresh session per SSO sign-in, non-expiring like an invite-redeemed one.
+	// Signing in on the web doesn't revoke the person's other devices.
+	session, err := a.store.MintToken(r.Context(), u.ID, store.TokenSession, "Cloudflare Access", nil)
+	if err != nil {
+		serverError(w, "cf access: mint session", err)
+		return
+	}
+
+	// The cookie is what actually signs the browser in (covers ride it; see
+	// setSessionCookie). The token is also returned for parity with
+	// /auth/session, though the CF path is browser-only.
+	setSessionCookie(w, r, session)
+	writeJSON(w, http.StatusOK, struct {
+		User         userJSON `json:"user"`
+		SessionToken string   `json:"session_token"`
+	}{toUserJSON(u), session})
+}
+
 // handleAuthSignOut revokes the session token the request is carrying, so this
 // device stops working while the user's other devices are untouched.
 func (a *API) handleAuthSignOut(w http.ResponseWriter, r *http.Request) {

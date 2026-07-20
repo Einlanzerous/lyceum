@@ -107,6 +107,13 @@ ship a sign-in screen.
   clients, or the `lyceum_session` cookie that sign-in also sets. The cookie is
   not optional garnish: the shelf loads covers with plain `<img src>` tags, which
   cannot carry a header.
+- **Cloudflare Access SSO (LYCM-803)** — when Lyceum sits behind Cloudflare
+  Access, set `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` (both public
+  identifiers from the Zero Trust dashboard). The browser SPA then trades its
+  edge-verified identity for a session on load, so a household member behind the
+  gate signs in with no second step. The verified email must match an existing
+  account — unknown emails are refused, **never auto-provisioned**. Native apps
+  reach the API directly over Tailscale and keep using invite sign-in.
 
 Two token namespaces exist and are never interchangeable: **session tokens** (in
 the database, guard the reader core, belong to people) and the **service tokens**
