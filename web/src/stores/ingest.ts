@@ -77,6 +77,23 @@ export const useIngestStore = defineStore('ingest', {
     readyCount(): number {
       return this.counts.ready
     },
+
+    /** How many candidates in the batch have been confirmed into the library. */
+    confirmedCount(): number {
+      return this.candidates.filter((c) => c.status === 'confirmed').length
+    },
+
+    /**
+     * The count that still needs the reviewer to shelve a book: ready + review.
+     * Deliberately excludes no_match/duplicate — they linger in the queue as
+     * things you *may* re-resolve or skip, but they don't hold the batch open.
+     * This mirrors the backend's `hasReviewable` (internal/api/ingest_batch.go),
+     * which auto-closes a batch once no ready/review candidates remain (LYCM-74),
+     * so the "batch complete" signal here agrees with the server's status.
+     */
+    outstanding(): number {
+      return this.counts.ready + this.counts.review
+    },
   },
 
   actions: {
@@ -171,6 +188,7 @@ export const useIngestStore = defineStore('ingest', {
         const res = await confirmReady(this.batch!.id)
         confirmed = res.confirmed
         this.batch = res.batch
+        this.syncBatchInList()
         this.selectFirst()
       })
       return confirmed
@@ -226,6 +244,22 @@ export const useIngestStore = defineStore('ingest', {
     async refresh(): Promise<void> {
       if (!this.batch) return
       this.batch = await getBatch(this.batch.id)
+      this.syncBatchInList()
+    },
+
+    /**
+     * Reflect the active batch's current status/counts back into the picker list
+     * (LYCM-95). Confirming/skipping candidates one-by-one only reloaded
+     * `this.batch`, so a batch the server had auto-closed still showed as "open"
+     * in the picker until a full reload. Keeping the list entry in sync fixes
+     * that lingering-open stale state.
+     */
+    syncBatchInList(): void {
+      const b = this.batch
+      if (!b) return
+      this.batches = this.batches.map((x) =>
+        x.id === b.id ? { ...x, status: b.status, counts: b.counts } : x,
+      )
     },
 
     /** Wrap a mutating action with the busy flag + error capture. */

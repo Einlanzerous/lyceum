@@ -63,6 +63,38 @@ describe('ingest store', () => {
     expect(store.counts.no_match).toBe(1)
   })
 
+  it('exposes confirmed and outstanding counts', async () => {
+    vi.mocked(api.getBatch).mockResolvedValue(
+      mkBatch([cand(1, 'ready'), cand(2, 'review'), cand(3, 'no_match'), cand(4, 'confirmed')]),
+    )
+    const store = useIngestStore()
+    await store.openBatch(1)
+    expect(store.confirmedCount).toBe(1) // candidate 4
+    expect(store.outstanding).toBe(2) // ready + review, not no_match
+  })
+
+  it('syncs the picker list when a batch auto-closes after its last confirm', async () => {
+    vi.mocked(api.listBatches).mockResolvedValue([mkBatch([])])
+    const store = useIngestStore()
+    await store.loadBatches()
+    expect(store.batches[0].status).toBe('open')
+
+    // Confirming the last ready candidate closes the batch server-side; the
+    // refreshed batch reports 'confirmed', which must reach the picker list too.
+    vi.mocked(api.getBatch)
+      .mockResolvedValueOnce(mkBatch([cand(1, 'ready')]))
+      .mockResolvedValueOnce({ ...mkBatch([cand(1, 'confirmed')]), status: 'confirmed' })
+    vi.mocked(api.confirmCandidate).mockResolvedValue({
+      candidate: cand(1, 'confirmed'),
+      inventory: { id: 1, isbn: '9780000000001', state: 'wanted' },
+    })
+    await store.openBatch(1)
+    await store.confirm('', 0)
+
+    expect(store.batch?.status).toBe('confirmed')
+    expect(store.batches[0].status).toBe('confirmed') // no longer stale-open
+  })
+
   it('setFilter narrows the visible queue', async () => {
     vi.mocked(api.getBatch).mockResolvedValue(mkBatch([cand(1, 'ready'), cand(2, 'review')]))
     const store = useIngestStore()

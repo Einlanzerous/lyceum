@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useIngestStore, type QueueFilter } from '@/stores/ingest'
 import type { Candidate, Edition } from '@/api/ingest'
 import { useAuthStore } from '@/stores/auth'
+import { clearSeriesDraft, loadSeriesDraft, saveSeriesDraft } from '@/library/seriesDraft'
 
 const store = useIngestStore()
 const auth = useAuthStore()
@@ -23,14 +24,22 @@ const {
   error,
 } = storeToRefs(store)
 
-// Series assignment inputs for the selected candidate.
+// Series assignment inputs for the selected candidate. Each book's series is
+// entered explicitly and persists as a per-book draft in the browser (LYCM-95),
+// so switching between books — or reloading the page — keeps what you typed.
+// There is no carry-over or auto-increment between books: confirming one book
+// no longer bleeds its series onto the next.
 const seriesName = ref('')
 const seriesIndex = ref<number | null>(null)
-// Sticky series carry-over (LYCM-75): a run of books in one series keeps the
-// series name and an auto-incrementing index across confirms, instead of the
-// selection resetting them each time.
-let stickySeries = ''
-let stickyIndex: number | null = null
+// The (batch, candidate) the inputs currently belong to, so the persist watcher
+// always writes to the right book even as the selection moves beneath it.
+let draftFor: { batchId: number; candidateId: number } | null = null
+
+// A transient confirmation notice ("✓ Confirmed …"), so a confirm visibly
+// registers instead of the button just greying for a tick (LYCM-95). Cleared on
+// the next confirm or selection change rather than on a timer, so it's
+// deterministic and doesn't need teardown.
+const flash = ref('')
 
 // Add-book modal: a single combined field (title search or ISBN) reached from
 // the "＋" button on the batch, replacing the always-on add bar (LYCM-75).
@@ -45,16 +54,35 @@ onMounted(() => {
 
 watch(selected, (c) => {
   reIsbn.value = ''
-  if (c?.series) {
-    // A candidate with its own saved series wins; show its values.
+  flash.value = ''
+  if (!c || !batch.value) {
+    draftFor = null
+    seriesName.value = ''
+    seriesIndex.value = null
+    return
+  }
+  draftFor = { batchId: batch.value.id, candidateId: c.id }
+  if (c.series) {
+    // A candidate that already carries a saved series wins; show its values.
     seriesName.value = c.series
     seriesIndex.value = c.series_index ?? null
   } else {
-    // Otherwise inherit the sticky series carried over from the last confirm so
-    // consecutive books in a series don't lose the assignment.
-    seriesName.value = stickySeries
-    seriesIndex.value = stickyIndex
+    // Otherwise restore *this book's own* local draft — never another book's.
+    const draft = loadSeriesDraft(batch.value.id, c.id)
+    seriesName.value = draft?.name ?? ''
+    seriesIndex.value = draft?.index ?? null
   }
+})
+
+// Persist series edits to the current book's draft as they happen, so leaving
+// the book (or reloading) doesn't lose them. `draftFor` is set alongside the
+// input values above, so this always targets the book the inputs belong to.
+watch([seriesName, seriesIndex], () => {
+  if (!draftFor) return
+  saveSeriesDraft(draftFor.batchId, draftFor.candidateId, {
+    name: seriesName.value,
+    index: seriesIndex.value,
+  })
 })
 
 const scannedCount = computed(() => store.candidates.length)
@@ -97,20 +125,37 @@ function subtitle(c: Candidate): string {
 }
 
 async function onConfirm(): Promise<void> {
+  const c = selected.value
+  const batchId = batch.value?.id
+  if (!c) return
+  const title = c.title || 'book'
   const name = seriesName.value.trim()
   const idx = seriesIndex.value
-  // Carry the series onto the next book before confirm() advances the selection
-  // (which re-fills the inputs from the sticky state); auto-increment the index
-  // so a series is numbered as you go.
-  stickySeries = name
-  stickyIndex = name && idx != null ? idx + 1 : idx
   await store.confirm(name, idx ?? 0)
+  if (store.error) return
+  // Confirmed: drop this book's now-obsolete local draft and show a notice. The
+  // book is queued for the library via the acquirer, not shelved instantly, so
+  // say so rather than implying it's already there.
+  if (batchId != null) clearSeriesDraft(batchId, c.id)
+  flash.value = `✓ Confirmed “${title}” — queued for your library`
 }
 async function onPick(editionId: string): Promise<void> {
   await store.pick(editionId)
 }
 async function onConfirmAll(): Promise<void> {
-  await store.confirmAllReady()
+  const n = await store.confirmAllReady()
+  if (store.error) return
+  if (n > 0)
+    flash.value = `✓ Confirmed ${n} ${n === 1 ? 'book' : 'books'} — queued for your library`
+}
+
+// The batch has nothing left that needs shelving once no ready/review candidates
+// remain (no_match/duplicate may still linger for optional re-resolve/skip, and
+// don't hold the batch open — matching the server's auto-close). Drives the
+// "batch complete" banner (LYCM-95).
+const batchDone = computed(() => !!batch.value && store.outstanding === 0)
+function closeBatch(): void {
+  store.$patch({ batch: null })
 }
 async function onReResolve(): Promise<void> {
   const c = selected.value
@@ -238,13 +283,17 @@ function relTime(iso: string): string {
           <div class="ing__title-row">
             <h1 class="ing__h1">{{ scannedCount }} scanned books</h1>
             <span class="ing__submeta">
+              <span v-if="store.confirmedCount" class="ing__submeta-done"
+                >{{ store.confirmedCount }} confirmed</span
+              >
+              <span v-if="store.confirmedCount"> · </span>
               {{ counts.ready }} ready · {{ counts.review }} needs review · {{ counts.no_match }} no
               match
             </span>
           </div>
         </div>
         <div class="ing__head-actions">
-          <button class="btn btn--ghost" @click="store.$patch({ batch: null })">Close</button>
+          <button class="btn btn--ghost" @click="closeBatch">Close</button>
           <button
             class="btn btn--brass"
             :disabled="busy || counts.ready === 0"
@@ -254,6 +303,27 @@ function relTime(iso: string): string {
           </button>
         </div>
       </div>
+
+      <!-- Batch complete: nothing left that needs shelving (LYCM-95). Doesn't
+           hide the queue — any no-match rows remain resolvable below. -->
+      <div v-if="batchDone" class="ing__done">
+        <div class="ing__done-text">
+          <strong>✓ Batch complete.</strong>
+          {{ store.confirmedCount }}
+          {{ store.confirmedCount === 1 ? 'book' : 'books' }} confirmed and queued for your library.
+          <span v-if="counts.no_match"
+            >{{ counts.no_match }} unmatched still here — re-resolve or skip them, or you're
+            done.</span
+          >
+        </div>
+        <div class="ing__done-actions">
+          <RouterLink to="/" class="btn btn--brass">Back to library</RouterLink>
+          <button class="btn btn--ghost" @click="closeBatch">Back to batches</button>
+        </div>
+      </div>
+
+      <!-- Transient confirm notice (LYCM-95). -->
+      <p v-else-if="flash" class="ing__flash">{{ flash }}</p>
 
       <div class="ing__split">
         <!-- Queue -->
@@ -684,9 +754,48 @@ function relTime(iso: string): string {
   font: 400 14px var(--font-ui);
   color: var(--dim);
 }
+.ing__submeta-done {
+  color: var(--success);
+  font-weight: 700;
+}
 .ing__head-actions {
   display: flex;
   gap: 11px;
+}
+
+/* Batch-complete banner + transient confirm notice (LYCM-95) */
+.ing__done {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+}
+.ing__done-text {
+  font: 400 13.5px/1.5 var(--font-ui);
+  color: var(--text);
+}
+.ing__done-text strong {
+  color: var(--success);
+}
+.ing__done-actions {
+  display: flex;
+  gap: 10px;
+  flex: none;
+}
+.ing__flash {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 34%, transparent);
+  color: var(--success);
+  font: 600 13px var(--font-ui);
 }
 
 .ing__input {
