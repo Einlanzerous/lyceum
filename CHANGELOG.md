@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/Einlanzerous/lyceum/compare/v1.7.0...v1.7.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **ingest:** per-book series drafts, no carry-over, and confirm/batch-done feedback (LYCM-95) ([#58](https://github.com/Einlanzerous/lyceum/issues/58)) ([dc62e25](https://github.com/Einlanzerous/lyceum/commit/dc62e2554de3f624bc85957256b39800be01a2f0))
+* **library:** bound concurrent cover fetches so the shelf doesn't flood on load (LYCM-96) ([#57](https://github.com/Einlanzerous/lyceum/issues/57)) ([f07a8da](https://github.com/Einlanzerous/lyceum/commit/f07a8da449940a384e1f1755ca3b51d2a89a6a09))
+
 ## [1.7.0](https://github.com/Einlanzerous/lyceum/compare/v1.6.0...v1.7.0) (2026-07-20)
 
 
