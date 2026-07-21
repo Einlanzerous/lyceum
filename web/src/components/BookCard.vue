@@ -49,6 +49,7 @@ function toggleFinished(): void {
         :src="cover"
         :alt="`Cover of ${book.title}`"
         loading="lazy"
+        decoding="async"
         class="card__img"
         @error="coverFailed = true"
       />
