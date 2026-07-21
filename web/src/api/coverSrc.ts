@@ -24,6 +24,37 @@ import { apiFetch } from './http'
 const objectUrls = reactive(new Map<number, string>())
 const inFlight = new Set<number>()
 
+// Cap how many cover fetches are in flight at once (LYCM-96). In the native
+// shell every card fetches its own cover bytes through apiFetch as it mounts;
+// on a large shelf that fires one request per book the instant the library
+// renders, so the whole grid's covers all queue against the connection pool at
+// once (over HTTP/1.1 the browser serializes them ~6-at-a-time, which reads as
+// "downloading every cover in series"). Bounding concurrency turns that flood
+// into ordered waves — the visible covers land first and the rest follow as
+// slots free, instead of hundreds of pending fetches and object URLs at once.
+// The web build never reaches here (it returns the plain URL and lets the
+// <img loading="lazy"> defer off-screen images natively), so this only shapes
+// the native path.
+export const MAX_CONCURRENT_COVER_FETCHES = 6
+let activeFetches = 0
+const fetchQueue: Array<() => void> = []
+
+// Run `task` when a concurrency slot is free, releasing the slot (and starting
+// the next queued task) when it settles. FIFO, so covers requested first —
+// which, as cards mount top-to-bottom, are the ones nearest the top of the
+// shelf — load first.
+function scheduleCoverFetch(task: () => Promise<void>): void {
+  const run = (): void => {
+    activeFetches++
+    void task().finally(() => {
+      activeFetches--
+      fetchQueue.shift()?.()
+    })
+  }
+  if (activeFetches < MAX_CONCURRENT_COVER_FETCHES) run()
+  else fetchQueue.push(run)
+}
+
 /**
  * The `src` for a book's cover.
  *
@@ -42,14 +73,16 @@ export function coverSrc(id: number): string {
 
   if (!inFlight.has(id)) {
     inFlight.add(id)
-    void apiFetch(`/books/${id}/cover`)
-      .then(async (res) => {
+    scheduleCoverFetch(async () => {
+      try {
+        const res = await apiFetch(`/books/${id}/cover`)
         if (res.ok) objectUrls.set(id, URL.createObjectURL(await res.blob()))
-      })
-      .catch(() => {
+      } catch {
         // A cover that won't load is a placeholder, not an error worth surfacing.
-      })
-      .finally(() => inFlight.delete(id))
+      } finally {
+        inFlight.delete(id)
+      }
+    })
   }
   return ''
 }
