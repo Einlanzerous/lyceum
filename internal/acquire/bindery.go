@@ -29,15 +29,30 @@ import (
 const (
 	defaultUserAgent = "Lyceum/1.0 (self-hosted ebook server; acquire)"
 
-	// requestTimeout bounds a single Bindery call. Bindery adds a book
-	// synchronously (a metadata pull) but runs the searchOnAdd search+grab as a
-	// background command, so its add endpoint returns promptly; the cap guards a
-	// wedged backend without blocking the confirm request that calls Want.
-	requestTimeout = 15 * time.Second
+	// requestTimeout bounds a single Bindery HTTP attempt. Bindery adds a book
+	// synchronously — a metadata pull from external providers (Hardcover/
+	// OpenLibrary) — then runs the searchOnAdd search+grab as a background
+	// command. That synchronous pull routinely runs past ~15s under concurrent
+	// load, so a short cap silently stalls the Want (LYCM-99); 60s gives it
+	// comfortable headroom. The outer per-dispatch deadline (api.wantTimeout)
+	// still caps total time across retries, and Want is best-effort regardless.
+	requestTimeout = 60 * time.Second
+
+	// maxAttempts is how many times do() issues a request before giving up. A
+	// lookup/add that times out under burst often succeeds on a calmer retry
+	// (LYCM-99), so transport errors get a bounded backoff-and-retry. This is
+	// safe by construction: GET lookup is side-effect-free, and a duplicate add
+	// returns 409, which Want treats as success.
+	maxAttempts = 3
 
 	// maxBody bounds a decoded Bindery JSON response.
 	maxBody = 4 << 20
 )
+
+// retryBackoff is the base delay between do() attempts; the wait grows linearly
+// per attempt (1×, 2×, …) and is skipped once the caller's context is done. A
+// var so tests can shrink it.
+var retryBackoff = 2 * time.Second
 
 // errNotFound signals that Bindery could not resolve the ISBN to an addable
 // book (no metadata match). It is handled internally by Want as a best-effort
@@ -208,9 +223,41 @@ func (b *Bindery) addBook(ctx context.Context, req addBookRequest) (binderyBook,
 	return book, nil
 }
 
-// do issues an authenticated request to Bindery. path is everything after
-// BaseURL (including /api/v1 and any query string); body is nil for GETs.
+// do issues an authenticated request to Bindery, retrying transport failures
+// (a timed-out or dropped connection) up to maxAttempts with a linear backoff.
+// path is everything after BaseURL (including /api/v1 and any query string);
+// body is nil for GETs. A response — even a non-2xx one — is returned as-is
+// without retrying; only transport-level errors are retried, and never past the
+// caller's context deadline (the outer api.wantTimeout bounds total time).
 func (b *Bindery) do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return nil, fmt.Errorf("acquire: %s %s: %w", method, path, ctx.Err())
+			case <-time.After(time.Duration(attempt-1) * retryBackoff):
+			}
+		}
+		resp, err := b.doOnce(ctx, method, path, body)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		// A cancelled/expired outer context is terminal — retrying against a
+		// dead deadline just burns attempts.
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt < maxAttempts {
+			log.Printf("acquire: %s %s attempt %d/%d failed: %v; retrying", method, path, attempt, maxAttempts, err)
+		}
+	}
+	return nil, lastErr
+}
+
+// doOnce issues a single authenticated request to Bindery without retry.
+func (b *Bindery) doOnce(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
