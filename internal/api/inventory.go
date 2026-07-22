@@ -43,9 +43,11 @@ const (
 	// once (LYCM-79).
 	maxConcurrentWants = 3
 	// wantTimeout bounds one background dispatch. A live Bindery Want does a
-	// lookup + add (a metadata pull each, ~15s cap apiece) — generous headroom
-	// without letting a wedged dispatch pin a semaphore slot forever.
-	wantTimeout = 2 * time.Minute
+	// lookup + add (a synchronous metadata pull each, ~60s cap apiece, retried
+	// up to a few times under burst — see acquire.requestTimeout/maxAttempts);
+	// this outer deadline is sized to let those retries run while still stopping
+	// a wedged dispatch from pinning a semaphore slot forever.
+	wantTimeout = 4 * time.Minute
 )
 
 // dispatchWant hands an ISBN to the acquirer in the background, so the confirm

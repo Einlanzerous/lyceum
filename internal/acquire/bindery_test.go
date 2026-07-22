@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // capture records what a fake Bindery received so a test can assert on the
@@ -139,6 +140,95 @@ func TestWantBackendErrorIsNonFatal(t *testing.T) {
 
 	if err := b.Want(context.Background(), "9780765382115"); err != nil {
 		t.Fatalf("Want on lookup 500 = %v, want nil (best-effort)", err)
+	}
+}
+
+func TestWantRetriesTransientTransportError(t *testing.T) {
+	// A lookup whose first attempt drops the connection (a stand-in for the
+	// client timeout seen under burst, LYCM-99) must be retried and then
+	// succeed, driving the add exactly once.
+	old := retryBackoff
+	retryBackoff = time.Millisecond
+	t.Cleanup(func() { retryBackoff = old })
+
+	var lookupHits, addHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/book/lookup":
+			lookupHits++
+			if lookupHits == 1 {
+				// Hijack and close without a response → transport error.
+				hj, ok := w.(http.Hijacker)
+				if !ok {
+					t.Errorf("test server does not support hijack")
+					return
+				}
+				conn, _, err := hj.Hijack()
+				if err != nil {
+					t.Errorf("hijack: %v", err)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, freshLookup)
+		case "/api/v1/author/book":
+			addHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":77,"title":"The Dinosaur Lords","foreignBookId":"OL1B"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	b := NewBindery(srv.URL, "k")
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if lookupHits < 2 {
+		t.Fatalf("lookup hits = %d, want >= 2 (a retry after the dropped connection)", lookupHits)
+	}
+	if addHits != 1 {
+		t.Fatalf("add hits = %d, want 1", addHits)
+	}
+}
+
+func TestWantExhaustedRetriesIsNonFatal(t *testing.T) {
+	// When every attempt fails transport-side, Want gives up after maxAttempts
+	// and still returns nil (best-effort: the entry rests in `wanted`).
+	old := retryBackoff
+	retryBackoff = time.Millisecond
+	t.Cleanup(func() { retryBackoff = old })
+
+	var lookupHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/book/lookup" {
+			http.NotFound(w, r)
+			return
+		}
+		lookupHits++
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Errorf("test server does not support hijack")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	b := NewBindery(srv.URL, "k")
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want on exhausted retries = %v, want nil (best-effort)", err)
+	}
+	if lookupHits != maxAttempts {
+		t.Fatalf("lookup hits = %d, want %d (one per attempt)", lookupHits, maxAttempts)
 	}
 }
 
