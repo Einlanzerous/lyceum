@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/Einlanzerous/lyceum/compare/v1.7.1...v1.7.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **acquire:** raise Bindery Want timeout and retry transient failures (LYCM-99) ([#60](https://github.com/Einlanzerous/lyceum/issues/60)) ([62fa3c1](https://github.com/Einlanzerous/lyceum/commit/62fa3c1961c7bd2045fb3507dea615aadce65b9b))
+
 ## [1.7.1](https://github.com/Einlanzerous/lyceum/compare/v1.7.0...v1.7.1) (2026-07-21)
 
 
