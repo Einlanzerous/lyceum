@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -151,12 +152,14 @@ func TestWantRetriesTransientTransportError(t *testing.T) {
 	retryBackoff = time.Millisecond
 	t.Cleanup(func() { retryBackoff = old })
 
-	var lookupHits, addHits int
+	// Counters are touched from the server goroutine and read after Want
+	// returns; a hijacked+closed connection gives no happens-before, so use
+	// atomics to stay clean under -race.
+	var lookupHits, addHits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/book/lookup":
-			lookupHits++
-			if lookupHits == 1 {
+			if lookupHits.Add(1) == 1 {
 				// Hijack and close without a response → transport error.
 				hj, ok := w.(http.Hijacker)
 				if !ok {
@@ -174,7 +177,7 @@ func TestWantRetriesTransientTransportError(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, freshLookup)
 		case "/api/v1/author/book":
-			addHits++
+			addHits.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"id":77,"title":"The Dinosaur Lords","foreignBookId":"OL1B"}`)
 		default:
@@ -187,11 +190,11 @@ func TestWantRetriesTransientTransportError(t *testing.T) {
 	if err := b.Want(context.Background(), "9780765382115"); err != nil {
 		t.Fatalf("Want: %v", err)
 	}
-	if lookupHits < 2 {
-		t.Fatalf("lookup hits = %d, want >= 2 (a retry after the dropped connection)", lookupHits)
+	if got := lookupHits.Load(); got < 2 {
+		t.Fatalf("lookup hits = %d, want >= 2 (a retry after the dropped connection)", got)
 	}
-	if addHits != 1 {
-		t.Fatalf("add hits = %d, want 1", addHits)
+	if got := addHits.Load(); got != 1 {
+		t.Fatalf("add hits = %d, want 1", got)
 	}
 }
 
@@ -202,13 +205,15 @@ func TestWantExhaustedRetriesIsNonFatal(t *testing.T) {
 	retryBackoff = time.Millisecond
 	t.Cleanup(func() { retryBackoff = old })
 
-	var lookupHits int
+	// Atomic: written by the server goroutine, read after Want returns, with no
+	// happens-before from the hijacked+closed connection (stays clean -race).
+	var lookupHits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/book/lookup" {
 			http.NotFound(w, r)
 			return
 		}
-		lookupHits++
+		lookupHits.Add(1)
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			t.Errorf("test server does not support hijack")
@@ -227,8 +232,8 @@ func TestWantExhaustedRetriesIsNonFatal(t *testing.T) {
 	if err := b.Want(context.Background(), "9780765382115"); err != nil {
 		t.Fatalf("Want on exhausted retries = %v, want nil (best-effort)", err)
 	}
-	if lookupHits != maxAttempts {
-		t.Fatalf("lookup hits = %d, want %d (one per attempt)", lookupHits, maxAttempts)
+	if got := lookupHits.Load(); got != maxAttempts {
+		t.Fatalf("lookup hits = %d, want %d (one per attempt)", got, maxAttempts)
 	}
 }
 
