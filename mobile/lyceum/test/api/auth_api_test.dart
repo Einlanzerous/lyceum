@@ -150,6 +150,53 @@ void main() {
       expect(devices[0].current, isTrue);
       expect(devices[1].lastSeenAt, isNull);
     });
+
+    // "Add a device" (LYCM-105). Deliberately *not* /admin/users/{id}/invite: that
+    // route is owner-only, so routing this through it would leave every housemate
+    // unable to pair their own phone.
+    test('a device key is minted through the self route, not an admin one', () async {
+      late http.Request seen;
+      final client = clientFor(
+        MockClient((req) async {
+          seen = req;
+          return http.Response(
+            jsonEncode({
+              'user': user,
+              'invite_token': 'lyc_theOnlyCopy',
+              'pairing_code': 'BK4T9Q2M',
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final invite = await client.requestDeviceInvite();
+
+      expect(seen.method, 'POST');
+      expect(seen.url.path, '/auth/invite');
+      expect(invite.token, 'lyc_theOnlyCopy');
+      expect(invite.pairingCode, 'BK4T9Q2M');
+      expect(invite.user.displayName, 'Theo');
+    });
+
+    // The one 403 this route can answer means the server refuses to mint at all,
+    // which is a state to explain rather than an error to apologise for.
+    test('the auth-off 403 is the explained, locked state here too', () async {
+      final client = clientFor(
+        MockClient(
+          (_) async => http.Response(
+            'issuing a device key requires LYCEUM_AUTH; use `lyceum mint-token` '
+            'on the server to issue a sign-in invite',
+            403,
+          ),
+        ),
+      );
+      await expectLater(
+        client.requestDeviceInvite(),
+        throwsA(isA<AdminDisabledException>()),
+      );
+    });
   });
 
   group('household', () {

@@ -9,6 +9,7 @@ import '../../auth/relative_time.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/lyc_sheet.dart';
+import '../household/invite_flow.dart';
 
 /// This device's signed-in siblings. Only meaningful when the server enforces
 /// auth — with enforcement off nobody holds a session at all.
@@ -250,7 +251,9 @@ class _AccountSectionState extends ConsumerState<AccountSection> {
 ///
 /// A session never expires, so a phone that is lost or lent stays signed in
 /// forever unless the person who owns it can see it here and cut it off. That is
-/// the entire reason this list exists.
+/// the entire reason this list exists — and, until LYCM-105, the only thing it
+/// could do. Adding a device now lives here too, because this is where people come
+/// looking for it.
 class DevicesSection extends ConsumerWidget {
   const DevicesSection({super.key});
 
@@ -267,22 +270,105 @@ class DevicesSection extends ConsumerWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 12.5, color: lyc.error),
       ),
-      data: (list) {
-        if (list.isEmpty) {
-          return Text(
-            'No other devices are signed in.',
-            style: TextStyle(fontSize: 13, color: lyc.dim),
-          );
-        }
-        return Column(
-          children: [
+      data: (list) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (list.isEmpty)
+            Text(
+              'No other devices are signed in.',
+              style: TextStyle(fontSize: 13, color: lyc.dim),
+            )
+          else
             for (var i = 0; i < list.length; i++) ...[
               if (i > 0) Divider(height: 22, color: lyc.border),
               _DeviceRow(device: list[i]),
             ],
+          Divider(height: 22, color: lyc.border),
+          const _AddDeviceRow(),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Add a device" (LYCM-105).
+///
+/// A key minted here signs in as *you* — it is not an invite to a housemate, and
+/// needs no authority over the household, so a member gets this too.
+class _AddDeviceRow extends ConsumerStatefulWidget {
+  const _AddDeviceRow();
+
+  @override
+  ConsumerState<_AddDeviceRow> createState() => _AddDeviceRowState();
+}
+
+class _AddDeviceRowState extends ConsumerState<_AddDeviceRow> {
+  bool _minting = false;
+  String? _error;
+
+  /// Mint here, not inside the reveal: a sheet that can be dismissed mid-flight is
+  /// no place to be holding the only copy of a credential (the same reason the
+  /// household invite form gathers an email and nothing more).
+  Future<void> _addDevice() async {
+    if (_minting) return;
+    setState(() {
+      _minting = true;
+      _error = null;
+    });
+    try {
+      final invite = await ref.read(lyceumClientProvider).requestDeviceInvite();
+      if (mounted) await runInviteReveal(context, ref, invite);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _minting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Add a device',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: lyc.text,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'A one-time key to paste on another phone, tablet, or browser. '
+                    'It signs in as you — same shelf, same place in every book.',
+                    style: TextStyle(fontSize: 12, height: 1.4, color: lyc.dim),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: _minting ? null : _addDevice,
+              child: Text(_minting ? 'Issuing…' : 'Get a key'),
+            ),
           ],
-        );
-      },
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error!,
+            style: TextStyle(fontSize: 12, height: 1.4, color: lyc.error),
+          ),
+        ],
+      ],
     );
   }
 }

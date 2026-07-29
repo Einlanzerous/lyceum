@@ -409,6 +409,44 @@ func (a *API) handleAuthUpdateMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toUserJSON(u))
 }
 
+// handleSelfInvite mints a one-time invite for the *caller* — the "add a device"
+// path (LYCM-105).
+//
+// This is deliberately not an /admin route. Adding your own second device is not
+// household administration: it hands a member no authority they do not already
+// hold, since the session making the request can already do everything the new
+// one will be able to do. Routing it through requireOwner instead would have left
+// every non-owner unable to pair a phone without asking the owner to do it for
+// them — and the owner unable to do it at all, because the household list offers
+// no action on its own row.
+//
+// It is weaker than the session that authorises it: single-use, and expired after
+// store.InviteTTL.
+//
+// 201: {"user": {...}, "invite_token": "lyc_...", "pairing_code": "..."}
+func (a *API) handleSelfInvite(w http.ResponseWriter, r *http.Request) {
+	// The same refusal requireOwner makes, for the same reason: with user auth off
+	// every caller is served as the owner, so an unauthenticated request from
+	// anything that can reach the port could mint an owner invite here, redeem it,
+	// and still be holding a valid session after the operator turns auth on. The
+	// door has to be shut before it can issue keys. `lyceum mint-token` on the host
+	// is the bootstrap path.
+	if !a.userAuth {
+		http.Error(w, "issuing a device key requires LYCEUM_AUTH; "+
+			"use `lyceum mint-token` on the server to issue a sign-in invite",
+			http.StatusForbidden)
+		return
+	}
+
+	u := userFrom(r.Context())
+	token, code, err := a.store.MintInvite(r.Context(), u.ID, "device", inviteExpiry())
+	if err != nil {
+		serverError(w, "mint device invite", err)
+		return
+	}
+	writeInvite(w, http.StatusCreated, u, token, code)
+}
+
 // handleAdminUserCreate adds a household member and returns their one-time
 // invite token. Owner only.
 //

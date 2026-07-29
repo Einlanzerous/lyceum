@@ -162,10 +162,10 @@ export async function revokeDevice(id: number): Promise<void> {
   await apiSend<void>('DELETE', `/auth/sessions/${id}`)
 }
 
-// --- Household (owner only) ---
+// --- Minting credentials ---
 
 /**
- * Raised when the server has accounts but administration switched off
+ * Raised when the server has accounts but credential-minting is switched off
  * (LYCEUM_AUTH=false → 403). It is not a permissions failure to apologise for —
  * it is a server that cannot tell who is asking, so it refuses to mint
  * credentials. The Household view renders it as its own explained state.
@@ -184,6 +184,21 @@ async function adminJSON<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
+
+/**
+ * "Add a device" — a one-time key for *yourself*, to redeem on a phone, tablet or
+ * second browser (LYCM-105).
+ *
+ * The only mint route here that is not owner-only, deliberately: pairing your own
+ * device grants nothing the session asking for it doesn't already hold, so making
+ * it administration would have left a housemate unable to add their own phone. It
+ * shares the LYCEUM_AUTH posture above, hence the same 403 handling.
+ */
+export function requestDeviceInvite(): Promise<Invite> {
+  return adminJSON<Invite>('/auth/invite', { method: 'POST' })
+}
+
+// --- Household (owner only) ---
 
 /** Everyone on this server, owner first. */
 export function listMembers(): Promise<Member[]> {

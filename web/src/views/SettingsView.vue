@@ -10,7 +10,9 @@ import { READING_FONTS, resolveFontFamily } from '@/reader/font'
 import { isNativeShell } from '@/api/base'
 import { listDevices, revokeDevice, type Device } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { useInviteReveal } from '@/auth/useInviteReveal'
 import ServerSettings from '@/components/ServerSettings.vue'
+import InviteReveal from '@/components/InviteReveal.vue'
 
 const router = useRouter()
 const { theme, set } = useTheme()
@@ -61,6 +63,24 @@ async function loadDevices(): Promise<void> {
   }
 }
 onMounted(loadDevices)
+
+// "Add a device" (LYCM-105) — the other half of this list. It sat here showing
+// which devices are signed in with no way to add one, and the answer people
+// reached for ("Invite someone") creates a whole other account.
+//
+// A minted key doesn't become a device until it is redeemed, so there is nothing
+// to re-list afterwards; the reveal itself is the feedback.
+const {
+  invite,
+  self,
+  lost,
+  minting,
+  reissuing,
+  error: mintError,
+  addDevice,
+  close: closeReveal,
+  reissue,
+} = useInviteReveal()
 
 async function revoke(d: Device): Promise<void> {
   await revokeDevice(d.id)
@@ -213,6 +233,22 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
           <div v-if="!devicesLoading && !devices.length" class="row">
             <div class="row__hint">No other devices are signed in.</div>
           </div>
+
+          <div class="row">
+            <div class="row__text">
+              <div class="row__name">Add a device</div>
+              <div class="row__hint">
+                Get a one-time key to paste on a phone, tablet, or another browser. It signs in as
+                you — same shelf, same place in every book.
+              </div>
+            </div>
+            <button type="button" class="btn btn--brass" :disabled="minting" @click="addDevice">
+              {{ minting ? 'Issuing…' : 'Get a key' }}
+            </button>
+          </div>
+          <div v-if="mintError" class="row">
+            <div class="row__hint row__hint--err">{{ mintError }}</div>
+          </div>
         </div>
       </div>
 
@@ -284,6 +320,15 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
         </div>
       </div>
     </div>
+
+    <InviteReveal
+      :invite="invite"
+      :self="self"
+      :lost="lost"
+      :reissuing="reissuing"
+      @close="closeReveal"
+      @reissue="reissue"
+    />
   </section>
 </template>
 
@@ -369,6 +414,9 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
   font: 400 12.5px var(--font-ui);
   color: var(--muted);
   margin-top: 2px;
+}
+.row__hint--err {
+  color: var(--error);
 }
 
 .seg {

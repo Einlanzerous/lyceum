@@ -189,6 +189,111 @@ func TestAdminRoutesAreOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestSelfInviteAddsADevice is the "add a device" path (LYCM-105): a signed-in
+// person mints a key for themselves and redeems it on a second device, landing in
+// the *same* account rather than a new one.
+//
+// It runs as a member, not the owner, because that is the case the /admin route
+// could never serve: a housemate pairing their own phone needs no ownership, and
+// having to ask the owner to do it for them was the whole bug.
+func TestSelfInviteAddsADevice(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+
+	member, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	laptop := signIn(t, s, srv, member.ID)
+
+	resp := do(t, http.MethodPost, srv.URL+"/auth/invite", laptop, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /auth/invite = %d, want 201", resp.StatusCode)
+	}
+	minted := decode[struct {
+		User        userJSON `json:"user"`
+		InviteToken string   `json:"invite_token"`
+		PairingCode string   `json:"pairing_code"`
+	}](t, resp)
+	if minted.User.ID != member.ID {
+		t.Fatalf("invite minted for user %d, want the caller %d", minted.User.ID, member.ID)
+	}
+	if minted.InviteToken == "" || minted.PairingCode == "" {
+		t.Fatalf("incomplete reveal: token=%q code=%q", minted.InviteToken, minted.PairingCode)
+	}
+
+	// Redeem on the "phone". Same account, new session — the laptop keeps working.
+	redeemed := do(t, http.MethodPost, srv.URL+"/auth/session", "", map[string]string{
+		"token": minted.InviteToken, "device_label": "phone",
+	})
+	if redeemed.StatusCode != http.StatusOK {
+		t.Fatalf("redeem self-invite = %d, want 200", redeemed.StatusCode)
+	}
+	phone := decode[struct {
+		User         userJSON `json:"user"`
+		SessionToken string   `json:"session_token"`
+	}](t, redeemed)
+	if phone.User.ID != member.ID {
+		t.Fatalf("second device signed in as %d, want %d", phone.User.ID, member.ID)
+	}
+	if resp := do(t, http.MethodGet, srv.URL+"/auth/me", laptop, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("pairing a device disturbed the one that issued the key: %d, want 200", resp.StatusCode)
+	}
+
+	// Single-use, exactly like an invite to a housemate.
+	if again := do(t, http.MethodPost, srv.URL+"/auth/session", "", map[string]string{
+		"token": minted.InviteToken, "device_label": "tablet",
+	}); again.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("reused self-invite = %d, want 401", again.StatusCode)
+	}
+
+	// A member minting for themselves is not a foothold into administration.
+	if resp := do(t, http.MethodGet, srv.URL+"/admin/users", phone.SessionToken, nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("member GET /admin/users after self-invite = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestSelfInviteNeedsASession: the route mints a credential, so it must refuse an
+// anonymous caller rather than falling back to anyone.
+func TestSelfInviteNeedsASession(t *testing.T) {
+	s := testStore(t)
+	srv := authServer(t, s)
+
+	if resp := do(t, http.MethodPost, srv.URL+"/auth/invite", "", nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated POST /auth/invite = %d, want 401", resp.StatusCode)
+	}
+	if resp := do(t, http.MethodPost, srv.URL+"/auth/invite", "lyc_bogus", nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bogus-token POST /auth/invite = %d, want 401", resp.StatusCode)
+	}
+}
+
+// TestSelfInviteClosedWhenAuthDisabled is TestAdminClosedWhenAuthDisabled's
+// reason applied to this route, and the whole reason it carries its own gate
+// instead of relying on requireUser: with auth off every caller is resolved to
+// the owner, so an open /auth/invite would let anything that can reach the port
+// mint an *owner* key and keep the session it redeems after the operator turns
+// auth on.
+func TestSelfInviteClosedWhenAuthDisabled(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := newServer(t, s) // auth off
+
+	resp := do(t, http.MethodPost, srv.URL+"/auth/invite", "", nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST /auth/invite with auth off = %d, want 403", resp.StatusCode)
+	}
+
+	// Nothing redeemable was written, either.
+	invites, err := s.CountTokens(ctx, ownerID(ctx, t, s), store.TokenInvite)
+	if err != nil {
+		t.Fatalf("CountTokens: %v", err)
+	}
+	if invites != 0 {
+		t.Fatalf("an unauthenticated caller minted %d owner invite(s) on an auth-off server", invites)
+	}
+}
+
 // TestAdminInviteFlow walks the path Purser's connector will drive (SERV-38):
 // create the account, get a one-time invite back, redeem it for a session.
 func TestAdminInviteFlow(t *testing.T) {

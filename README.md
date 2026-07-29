@@ -103,6 +103,11 @@ ship a sign-in screen.
   expire after 7 days. The `/admin` routes are refused entirely while
   `LYCEUM_AUTH=false`, since a server that can't tell who is asking shouldn't be
   minting credentials — use `lyceum mint-token` on the host to bootstrap.
+- **Adding your own device** — `POST /auth/invite` mints a key for whoever is
+  asking, so a phone or tablet can be paired from Settings → Your devices without
+  the owner doing it for them. It needs no ownership (the session asking already
+  has everything the new one will), but it shares the `/admin` refusal while
+  `LYCEUM_AUTH=false`, for the same reason.
 - **Two ways to present a session** — `Authorization: Bearer <token>` for native
   clients, or the `lyceum_session` cookie that sign-in also sets. The cookie is
   not optional garnish: the shelf loads covers with plain `<img src>` tags, which
@@ -125,6 +130,9 @@ read a library; a session cannot drive a Kindle delivery.
 | `POST /auth/session` | redeem an invite → `{user, session_token}` |
 | `DELETE /auth/session` | sign out this device only |
 | `GET` / `PATCH /auth/me` | current account; rename yourself |
+| `GET /auth/sessions` | your signed-in devices |
+| `DELETE /auth/sessions/{id}` | revoke one of *your own* devices |
+| `POST /auth/invite` | a one-time key for **yourself** — add a device |
 | `POST` / `GET /admin/users` | invite a member (returns a one-time token) / list |
 | `POST /admin/users/{id}/invite` | re-invite (a second device, or a lost token) |
 | `DELETE /admin/users/{id}` | remove a member (the owner can't be removed) |

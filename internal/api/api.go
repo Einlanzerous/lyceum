@@ -240,6 +240,9 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
 	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
 	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
+	// "Add a device" (LYCM-105) — a key for yourself, not for a housemate, so it
+	// needs no ownership. See handleSelfInvite for why it is not an /admin route.
+	mux.HandleFunc("POST /auth/invite", a.requireUser(a.handleSelfInvite))
 
 	// Your devices. A password-free session never expires, so the only real risk
 	// is a lost or lent device staying signed in forever — this is how its owner
