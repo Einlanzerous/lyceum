@@ -172,7 +172,12 @@ export async function revokeDevice(id: number): Promise<void> {
  */
 export class AdminDisabledError extends Error {
   constructor() {
-    super('household administration is switched off on this server')
+    // Deliberately about *keys*, not about administration: since LYCM-105 this is
+    // also what a member sees after asking for their own device key, and telling
+    // them household administration is off would answer a question they didn't
+    // ask. The Household view overrides it with its own explained panel anyway;
+    // this text is what Settings shows.
+    super('This server has key issuing switched off.')
     this.name = 'AdminDisabledError'
   }
 }

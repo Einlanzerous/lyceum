@@ -6,11 +6,11 @@ import '../../api/api_providers.dart';
 import '../../api/client.dart';
 import '../../api/models.dart';
 import '../../auth/auth_controller.dart';
+import '../../auth/invite_flow.dart';
 import '../../auth/relative_time.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/lyc_sheet.dart';
-import 'invite_flow.dart';
 
 final membersProvider = FutureProvider<List<Member>>(
   (ref) => ref.watch(lyceumClientProvider).listMembers(),
@@ -59,17 +59,18 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
   /// The loop itself is shared with Settings' "Add a device" — see
   /// [runInviteReveal]. All this screen adds is re-reading the household, since an
   /// outstanding invite is what turns a row "pending".
-  Future<void> _reveal(Invite invite) => runInviteReveal(
+  Future<void> _reveal(Invite invite, {required bool self}) => runInviteReveal(
         context,
         ref,
         invite,
+        self: self,
         onMinted: () => ref.invalidate(membersProvider),
       );
 
   Future<void> _reinvite(Member m) async {
     try {
       final invite = await ref.read(lyceumClientProvider).reinviteMember(m.id);
-      if (mounted) await _reveal(invite);
+      if (mounted) await _reveal(invite, self: false);
     } catch (e) {
       _toast('$e');
     }
@@ -86,7 +87,7 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
     setState(() => _minting = true);
     try {
       final invite = await ref.read(lyceumClientProvider).requestDeviceInvite();
-      if (mounted) await _reveal(invite);
+      if (mounted) await _reveal(invite, self: true);
     } catch (e) {
       _toast('$e');
     } finally {
@@ -131,7 +132,8 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
       final invite = await ref
           .read(lyceumClientProvider)
           .inviteMember(email: who.email, displayName: who.name);
-      if (mounted) await _reveal(invite);
+      // A brand-new housemate's key, never your own.
+      if (mounted) await _reveal(invite, self: false);
     } on ApiException catch (e) {
       _toast(
         e.isDuplicate

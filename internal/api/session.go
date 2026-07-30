@@ -439,7 +439,25 @@ func (a *API) handleSelfInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := userFrom(r.Context())
-	token, code, err := a.store.MintInvite(r.Context(), u.ID, "device", inviteExpiry())
+
+	// Retire any device key this account minted earlier and never redeemed, so
+	// "Add a device" leaves exactly one live key rather than piling up a
+	// seven-day credential per tap. Nothing in the product can show or revoke a
+	// dangling one — /auth/sessions lists redeemed sessions, not outstanding
+	// invites — so bounding it here is the only thing standing between an
+	// impatient double-tap and a handful of valid keys nobody can account for.
+	//
+	// Scoped to InviteLabelDevice: an invite the owner issued to a housemate is
+	// none of this route's business, and revoking one out from under someone
+	// mid-redemption would be its own bug. This also matches what the reveal has
+	// always promised — "Lost it? Just issue yourself another" — which is only
+	// true if the lost one stops working.
+	if _, err := a.store.RevokeUnredeemedInvites(r.Context(), u.ID, store.InviteLabelDevice); err != nil {
+		serverError(w, "revoke previous device invites", err)
+		return
+	}
+
+	token, code, err := a.store.MintInvite(r.Context(), u.ID, store.InviteLabelDevice, inviteExpiry())
 	if err != nil {
 		serverError(w, "mint device invite", err)
 		return

@@ -87,6 +87,10 @@ type Store interface {
 	// MintInvite issues a single-use invite plus a short pairing code that stands
 	// for the same invite (LYCM-88), returning both plaintexts once.
 	MintInvite(ctx context.Context, userID int64, label string, expiresAt *time.Time) (token string, code string, err error)
+	// RevokeUnredeemedInvites retires a user's outstanding invites carrying a
+	// label, so minting a replacement device key doesn't leave the old one live
+	// (LYCM-105).
+	RevokeUnredeemedInvites(ctx context.Context, userID int64, label string) (int64, error)
 	UserByToken(ctx context.Context, plaintext string) (store.User, error)
 	RedeemInvite(ctx context.Context, plaintext, deviceLabel string) (store.User, string, error)
 	// RedeemPairingCode exchanges a short pairing code for a session, the

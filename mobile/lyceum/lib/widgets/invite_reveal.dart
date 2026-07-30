@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../../api/models.dart';
-import '../../theme/lyceum_colors.dart';
-import '../../theme/lyceum_theme.dart';
-import '../../widgets/lyc_sheet.dart';
+import '../api/models.dart';
+import '../theme/lyceum_colors.dart';
+import '../theme/lyceum_theme.dart';
+import 'lyc_sheet.dart';
 
 /// How the reveal was closed.
 ///

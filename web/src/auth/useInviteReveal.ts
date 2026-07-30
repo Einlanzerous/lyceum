@@ -20,7 +20,13 @@ interface Lost {
   self: boolean
 }
 
-export function useInviteReveal(onMinted?: () => void | Promise<void>) {
+/**
+ * @param onMinted Called with every key this shows, re-issues included, so a
+ * caller can re-read whatever the mint changed. It receives the invite because
+ * what changed depends on whose key it was: a housemate's turns their row
+ * "pending", your own changes nothing any list renders.
+ */
+export function useInviteReveal(onMinted?: (minted: Invite) => void | Promise<void>) {
   const auth = useAuthStore()
 
   const invite = ref<Invite | null>(null)
@@ -49,8 +55,9 @@ export function useInviteReveal(onMinted?: () => void | Promise<void>) {
     busy.value = true
     error.value = null
     try {
-      present(await call())
-      await onMinted?.()
+      const minted = await call()
+      present(minted)
+      await onMinted?.(minted)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'could not issue a key'
     } finally {

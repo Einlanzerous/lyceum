@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lyceum/api/models.dart';
-import 'package:lyceum/features/household/invite_reveal.dart';
+import 'package:lyceum/widgets/invite_reveal.dart';
 import 'package:lyceum/theme/lyceum_colors.dart';
 import 'package:lyceum/theme/lyceum_theme.dart';
 import 'package:qr_flutter/qr_flutter.dart';

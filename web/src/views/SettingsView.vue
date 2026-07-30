@@ -326,6 +326,7 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
       :self="self"
       :lost="lost"
       :reissuing="reissuing"
+      :error="mintError"
       @close="closeReveal"
       @reissue="reissue"
     />

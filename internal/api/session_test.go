@@ -254,6 +254,89 @@ func TestSelfInviteAddsADevice(t *testing.T) {
 	}
 }
 
+// TestSelfInviteRetiresThePreviousKey: minting is insert-only, so without this
+// every tap of "Add a device" would leave another key valid for seven days, and
+// nothing in the product could show or revoke them — /auth/sessions lists redeemed
+// sessions, not outstanding invites.
+func TestSelfInviteRetiresThePreviousKey(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+
+	member, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	laptop := signIn(t, s, srv, member.ID)
+
+	mint := func() string {
+		t.Helper()
+		resp := do(t, http.MethodPost, srv.URL+"/auth/invite", laptop, nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("POST /auth/invite = %d, want 201", resp.StatusCode)
+		}
+		return decode[struct {
+			InviteToken string `json:"invite_token"`
+		}](t, resp).InviteToken
+	}
+
+	first := mint()
+	second := mint()
+
+	// Exactly one live key, not two.
+	live, err := s.CountTokens(ctx, member.ID, store.TokenInvite)
+	if err != nil {
+		t.Fatalf("CountTokens: %v", err)
+	}
+	if live != 1 {
+		t.Fatalf("%d outstanding device invites after two mints, want 1", live)
+	}
+
+	// And it is the *newer* one that works — matching what the reveal promises
+	// when it says "lost it? just issue yourself another".
+	if resp := do(t, http.MethodPost, srv.URL+"/auth/session", "", map[string]string{
+		"token": first, "device_label": "stale",
+	}); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("superseded device key still redeemed: %d, want 401", resp.StatusCode)
+	}
+	if resp := do(t, http.MethodPost, srv.URL+"/auth/session", "", map[string]string{
+		"token": second, "device_label": "phone",
+	}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("current device key = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestSelfInviteLeavesHousemateInvitesAlone: the retirement above is scoped by
+// label, because revoking an invite the owner just handed to a housemate — who
+// may be mid-redemption — because somebody else added a phone would be its own bug.
+func TestSelfInviteLeavesHousemateInvitesAlone(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+	ownerToken := signIn(t, s, srv, ownerID(ctx, t, s))
+
+	// The owner invites a housemate, then adds a device of their own.
+	resp := do(t, http.MethodPost, srv.URL+"/admin/users", ownerToken,
+		map[string]string{"email": "mara@example.com", "display_name": "Mara"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /admin/users = %d, want 201", resp.StatusCode)
+	}
+	housemate := decode[struct {
+		InviteToken string `json:"invite_token"`
+	}](t, resp).InviteToken
+
+	if r := do(t, http.MethodPost, srv.URL+"/auth/invite", ownerToken, nil); r.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /auth/invite = %d, want 201", r.StatusCode)
+	}
+
+	// Mara's invite is untouched.
+	if r := do(t, http.MethodPost, srv.URL+"/auth/session", "", map[string]string{
+		"token": housemate, "device_label": "mara-phone",
+	}); r.StatusCode != http.StatusOK {
+		t.Fatalf("housemate invite = %d after the owner added a device, want 200", r.StatusCode)
+	}
+}
+
 // TestSelfInviteNeedsASession: the route mints a credential, so it must refuse an
 // anonymous caller rather than falling back to anyone.
 func TestSelfInviteNeedsASession(t *testing.T) {

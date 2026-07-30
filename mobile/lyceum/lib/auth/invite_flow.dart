@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/api_providers.dart';
-import '../../api/models.dart';
-import '../../api/server_store.dart';
-import '../../auth/auth_controller.dart';
-import '../../auth/invite_token.dart';
-import 'invite_reveal.dart';
+import '../api/api_providers.dart';
+import '../api/models.dart';
+import '../api/server_store.dart';
+import '../widgets/invite_reveal.dart';
+import 'invite_token.dart';
 
 /// The reveal → "that key is gone" → re-issue loop.
 ///
@@ -17,6 +16,14 @@ import 'invite_reveal.dart';
 /// from. Keeping two copies of that in step by hand is how one of them ends up
 /// telling someone their key is gone when it isn't.
 ///
+/// [self] says whose key this is, and decides two things: how the sheet reads,
+/// and **which route re-issues it** — your own goes back through `/auth/invite`, a
+/// housemate's through `/admin`. It is told, not inferred: deriving it by
+/// comparing against the signed-in account would silently answer "not yours" if
+/// that account were ever null or still resolving, sending a re-issue of your own
+/// device key down the owner-only admin route to 403 for every member. Both
+/// callers know the answer for certain at the point they mint.
+///
 /// [onMinted] fires for every key this shows, including re-issues, so a caller can
 /// re-read whatever the mint changed (the household list, for one — an outstanding
 /// invite is what turns a row "pending").
@@ -24,14 +31,10 @@ Future<void> runInviteReveal(
   BuildContext context,
   WidgetRef ref,
   Invite invite, {
+  required bool self,
   VoidCallback? onMinted,
 }) async {
   onMinted?.call();
-
-  // Whose key this is decides how the sheet reads *and* which route re-issues it:
-  // your own goes back through /auth/invite, a housemate's through /admin. Derived
-  // rather than passed so the recursion below cannot drift from the truth.
-  final self = invite.user.id == ref.read(authControllerProvider).user?.id;
 
   // Offer the key as a scannable QR too, pointing at this library's sign-in route
   // (LYCM-88). An empty server URL (shouldn't happen once signed in) omits the QR.
@@ -60,7 +63,8 @@ Future<void> runInviteReveal(
         ? await client.requestDeviceInvite()
         : await client.reinviteMember(invite.user.id);
     if (context.mounted) {
-      await runInviteReveal(context, ref, fresh, onMinted: onMinted);
+      // Same `self` all the way down: a re-issue of your own key is still yours.
+      await runInviteReveal(context, ref, fresh, self: self, onMinted: onMinted);
     }
   } catch (e) {
     if (context.mounted) {

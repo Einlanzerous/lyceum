@@ -13,7 +13,7 @@
 // your own next device (LYCM-105) — and every string forks on which, because
 // "hand this to Mara" read back at Mara is gibberish.
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Invite } from '@/api/auth'
 import InviteQr from './InviteQr.vue'
 
@@ -25,6 +25,13 @@ const props = defineProps<{
   /** Set when the person dismissed a reveal without copying — the recovery path. */
   lost: { name: string; userId: number; self: boolean } | null
   reissuing?: boolean
+  /**
+   * A failed mint, shown *inside* the sheet. The page behind it is covered by an
+   * opaque scrim, so an error rendered out there is an error nobody sees — and
+   * the one place that matters is here, where a dead "issue another" button is
+   * otherwise indistinguishable from one that did nothing.
+   */
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -42,6 +49,23 @@ const emit = defineEmits<{
 const copied = ref(false)
 const copyFailed = ref(false)
 const codeCopied = ref(false)
+
+// Both parents render this component unconditionally — the `v-if` that opens and
+// closes it is inside its own template — so the instance, and this state, outlive
+// any one reveal. Left alone, the second key of a session would inherit the
+// first's "✓ Copied": the sheet would claim a key is on the clipboard that isn't,
+// and the once-only warning it replaces would never be shown. That is the exact
+// path to losing a key silently, and it got far more likely the moment "Add a
+// device" made a second mint routine, so every fresh invite starts clean.
+watch(
+  () => props.invite,
+  (next) => {
+    if (!next) return
+    copied.value = false
+    copyFailed.value = false
+    codeCopied.value = false
+  },
+)
 
 // The pairing code grouped XXXX-XXXX for reading aloud and typing (LYCM-88); the
 // sign-in field strips the hyphen back out.
@@ -210,6 +234,7 @@ async function copyAndClose(): Promise<void> {
           {{ lost.name }}'s account is still here and waiting — issue a fresh key whenever you're
           ready.
         </p>
+        <p v-if="error" class="lost__err">{{ error }}</p>
         <div class="actions">
           <button
             type="button"
@@ -489,6 +514,11 @@ async function copyAndClose(): Promise<void> {
 .lost__title {
   font: 800 17px var(--font-display);
   color: var(--text);
+}
+.lost__err {
+  margin: 14px 0 0;
+  font: 500 12.5px/1.5 var(--font-ui);
+  color: var(--error);
 }
 .redacted {
   padding: 14px 16px;

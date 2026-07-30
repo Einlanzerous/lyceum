@@ -49,9 +49,10 @@ describe('addDevice', () => {
     expect(r.error.value).toMatch(/switched off/)
   })
 
-  // A home server on a slow LAN leaves a real window to click twice, and each
-  // mint invalidates the one before it — so the second click would hand back a key
-  // the first reveal is already showing as valid.
+  // A home server on a slow LAN leaves a real window to click twice. The server
+  // retires the previous device key on every mint (LYCM-105), so a double-tap
+  // would burn the key the first reveal is about to show and replace it with a
+  // second — same sheet, silently different secret.
   it('ignores a second click while the first is still in flight', async () => {
     let release = (): void => {}
     vi.mocked(authApi.requestDeviceInvite).mockImplementation(

@@ -6,10 +6,10 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../auth/auth_controller.dart';
 import '../../auth/relative_time.dart';
+import '../../auth/invite_flow.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/lyc_sheet.dart';
-import '../household/invite_flow.dart';
 
 /// This device's signed-in siblings. Only meaningful when the server enforces
 /// auth — with enforcement off nobody holds a session at all.
@@ -262,31 +262,40 @@ class DevicesSection extends ConsumerWidget {
     final lyc = context.lyc;
     final devices = ref.watch(devicesProvider);
 
-    return devices.when(
-      loading: () => Text('Loading…', style: TextStyle(fontSize: 13, color: lyc.dim)),
-      error: (e, _) => Text(
-        '$e',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12.5, color: lyc.error),
-      ),
-      data: (list) => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (list.isEmpty)
-            Text(
-              'No other devices are signed in.',
-              style: TextStyle(fontSize: 13, color: lyc.dim),
-            )
-          else
-            for (var i = 0; i < list.length; i++) ...[
-              if (i > 0) Divider(height: 22, color: lyc.border),
-              _DeviceRow(device: list[i]),
-            ],
-          Divider(height: 22, color: lyc.border),
-          const _AddDeviceRow(),
-        ],
-      ),
+    // "Add a device" sits *outside* the list's async states, deliberately. It
+    // depends on nothing the list fetches — it mints against the caller's own
+    // session — so hanging it off `data:` would take it away for exactly the
+    // person most likely to want it: someone whose server is slow or erroring,
+    // trying to get a key onto a second device.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        devices.when(
+          loading: () => Text('Loading…', style: TextStyle(fontSize: 13, color: lyc.dim)),
+          error: (e, _) => Text(
+            '$e',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12.5, color: lyc.error),
+          ),
+          data: (list) => list.isEmpty
+              ? Text(
+                  'No other devices are signed in.',
+                  style: TextStyle(fontSize: 13, color: lyc.dim),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < list.length; i++) ...[
+                      if (i > 0) Divider(height: 22, color: lyc.border),
+                      _DeviceRow(device: list[i]),
+                    ],
+                  ],
+                ),
+        ),
+        Divider(height: 22, color: lyc.border),
+        const _AddDeviceRow(),
+      ],
     );
   }
 }
@@ -317,7 +326,8 @@ class _AddDeviceRowState extends ConsumerState<_AddDeviceRow> {
     });
     try {
       final invite = await ref.read(lyceumClientProvider).requestDeviceInvite();
-      if (mounted) await runInviteReveal(context, ref, invite);
+      // Always yours here — this section only ever mints for the caller.
+      if (mounted) await runInviteReveal(context, ref, invite, self: true);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {

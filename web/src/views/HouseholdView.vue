@@ -34,8 +34,12 @@ const error = ref<string | null>(null)
 
 // Minting, revealing, and the "you closed it uncopied" recovery path (LYCM-105).
 // Settings drives the same flow for its own "Add a device", which is why it isn't
-// written out here. Re-list after every mint: an outstanding invite is what turns
-// a row "pending".
+// written out here.
+//
+// Re-list after a housemate's key, since an outstanding invite is what turns their
+// row "pending" — but not after your own: your row shows an address and a device
+// count, neither of which a pending invite touches, so reloading would flip the
+// whole list into its loading state to render exactly the same thing.
 const {
   invite,
   self,
@@ -48,7 +52,7 @@ const {
   reinvite,
   close: closeReveal,
   reissue,
-} = useInviteReveal(load)
+} = useInviteReveal((minted) => (minted.user.id === auth.user?.id ? undefined : load()))
 
 const inviting = ref(false)
 const newEmail = ref('')
@@ -61,8 +65,26 @@ const removing = ref(false)
 
 const canInvite = computed(() => newEmail.value.trim().length > 0 && !submitting.value)
 
-/** One error line for the page, whether it came from listing or from minting. */
-const shownError = computed(() => error.value ?? mintError.value)
+/**
+ * One error line for the page, whether it came from listing or from minting.
+ *
+ * Each action clears the other's error before it starts, so at most one of these
+ * is ever set — otherwise a remove that failed an hour ago would sit here masking
+ * every mint error after it, and the button would just look broken.
+ */
+const shownError = computed(() => mintError.value ?? error.value)
+
+/** Mint a key for a housemate, clearing any stale list/remove error first. */
+function reinviteRow(id: number): Promise<void> {
+  error.value = null
+  return reinvite(id)
+}
+
+/** Mint a key for yourself — "Add a device" on your own row. */
+function addDeviceForMe(): Promise<void> {
+  error.value = null
+  return addDevice()
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -104,6 +126,8 @@ async function doRemove(): Promise<void> {
   const m = confirmRemove.value
   if (!m) return
   removing.value = true
+  error.value = null
+  mintError.value = null
   try {
     await removeMember(m.id)
     confirmRemove.value = null
@@ -255,28 +279,29 @@ $ export LYCEUM_AUTH=true
               </div>
             </div>
 
-            <!-- Your own row. "Re-invite yourself" would be a strange thing to -->
+            <span v-if="m.is_owner" class="row__note">Can't be removed</span>
+
+            <!-- Your own row. "Re-invite yourself" would be a strange thing to  -->
             <!-- read, but the need is real and had nowhere to live: this is how -->
-            <!-- you get a key onto your next phone (LYCM-105).                  -->
-            <template v-if="m.is_owner">
-              <span class="row__note">Can't be removed</span>
-              <button
-                v-if="m.id === auth.user?.id"
-                type="button"
-                class="row__btn"
-                :disabled="minting"
-                @click="addDevice"
-              >
-                {{ minting ? 'Issuing…' : '+ Add a device' }}
-              </button>
-            </template>
-            <template v-else>
+            <!-- you get a key onto your next phone (LYCM-105). Keyed on being   -->
+            <!-- *you*, not on being the owner — the route mints for the caller, -->
+            <!-- so ownership was never what decided this.                       -->
+            <button
+              v-if="m.id === auth.user?.id"
+              type="button"
+              class="row__btn"
+              :disabled="minting"
+              @click="addDeviceForMe"
+            >
+              {{ minting ? 'Issuing…' : '+ Add a device' }}
+            </button>
+            <template v-else-if="!m.is_owner">
               <button
                 type="button"
                 class="row__btn"
                 :class="{ 'row__btn--pending': m.invite_expires_at && !m.last_seen_at }"
                 :disabled="minting"
-                @click="reinvite(m.id)"
+                @click="reinviteRow(m.id)"
               >
                 Re-invite
               </button>
@@ -294,6 +319,7 @@ $ export LYCEUM_AUTH=true
       :self="self"
       :lost="lost"
       :reissuing="reissuing"
+      :error="mintError"
       @close="closeReveal"
       @reissue="reissue"
     />

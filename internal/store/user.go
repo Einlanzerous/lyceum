@@ -28,6 +28,13 @@ const pgUniqueViolation = "23505"
 const (
 	TokenInvite  = "invite"
 	TokenSession = "session"
+
+	// InviteLabelDevice marks an invite a person minted for their own next device
+	// (POST /auth/invite) rather than one the owner issued to a housemate. The
+	// label is what makes those two distinguishable in user_tokens, which is how
+	// minting a new device key can retire the previous one without touching an
+	// invite somebody is waiting to redeem.
+	InviteLabelDevice = "device"
 )
 
 // tokenPrefix marks a Lyceum user token, so it is recognizable in a log or a
@@ -404,6 +411,31 @@ func (s *Store) RevokeToken(ctx context.Context, plaintext string) error {
 		return fmt.Errorf("store: revoke token: %w", err)
 	}
 	return nil
+}
+
+// RevokeUnredeemedInvites deletes a user's outstanding, still-redeemable invites
+// carrying the given label, and reports how many went. Redeemed ones are left
+// alone: they are spent, and the sessions they became are revoked from "your
+// devices", not from here.
+//
+// This is what keeps self-minted device keys (label InviteLabelDevice) to one
+// live credential per account. Minting is otherwise insert-only, so tapping "Add
+// a device" three times would leave three keys valid for seven days each, with
+// nothing in the product able to see or revoke them — /auth/sessions lists only
+// redeemed sessions, and the household's "invite pending" row is gated on the
+// account having never signed in, which is never true of someone who just asked
+// for this from a signed-in device.
+//
+// The pairing code goes with it: pairing_codes.token_id is ON DELETE CASCADE.
+func (s *Store) RevokeUnredeemedInvites(ctx context.Context, userID int64, label string) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM user_tokens
+		  WHERE user_id = $1 AND kind = 'invite' AND label = $2 AND used_at IS NULL`,
+		userID, label)
+	if err != nil {
+		return 0, fmt.Errorf("store: revoke unredeemed invites: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // CountTokens reports how many credentials of a kind a user holds. cmd/lyceum
