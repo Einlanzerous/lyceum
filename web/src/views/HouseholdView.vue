@@ -17,12 +17,11 @@ import {
   AdminDisabledError,
   inviteMember,
   listMembers,
-  reinviteMember,
   removeMember,
-  type Invite,
   type Member,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { useInviteReveal } from '@/auth/useInviteReveal'
 import InviteReveal from '@/components/InviteReveal.vue'
 
 const router = useRouter()
@@ -33,9 +32,27 @@ const loading = ref(true)
 const adminDisabled = ref(false)
 const error = ref<string | null>(null)
 
-const invite = ref<Invite | null>(null)
-const lost = ref<{ name: string; userId: number } | null>(null)
-const reissuing = ref(false)
+// Minting, revealing, and the "you closed it uncopied" recovery path (LYCM-105).
+// Settings drives the same flow for its own "Add a device", which is why it isn't
+// written out here.
+//
+// Re-list after a housemate's key, since an outstanding invite is what turns their
+// row "pending" — but not after your own: your row shows an address and a device
+// count, neither of which a pending invite touches, so reloading would flip the
+// whole list into its loading state to render exactly the same thing.
+const {
+  invite,
+  self,
+  lost,
+  minting,
+  reissuing,
+  error: mintError,
+  present,
+  addDevice,
+  reinvite,
+  close: closeReveal,
+  reissue,
+} = useInviteReveal((minted) => (minted.user.id === auth.user?.id ? undefined : load()))
 
 const inviting = ref(false)
 const newEmail = ref('')
@@ -47,6 +64,27 @@ const confirmRemove = ref<Member | null>(null)
 const removing = ref(false)
 
 const canInvite = computed(() => newEmail.value.trim().length > 0 && !submitting.value)
+
+/**
+ * One error line for the page, whether it came from listing or from minting.
+ *
+ * Each action clears the other's error before it starts, so at most one of these
+ * is ever set — otherwise a remove that failed an hour ago would sit here masking
+ * every mint error after it, and the button would just look broken.
+ */
+const shownError = computed(() => mintError.value ?? error.value)
+
+/** Mint a key for a housemate, clearing any stale list/remove error first. */
+function reinviteRow(id: number): Promise<void> {
+  error.value = null
+  return reinvite(id)
+}
+
+/** Mint a key for yourself — "Add a device" on your own row. */
+function addDeviceForMe(): Promise<void> {
+  error.value = null
+  return addDevice()
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -69,7 +107,7 @@ async function submitInvite(): Promise<void> {
   submitting.value = true
   inviteError.value = null
   try {
-    invite.value = await inviteMember(newEmail.value.trim(), newName.value.trim())
+    present(await inviteMember(newEmail.value.trim(), newName.value.trim()))
     inviting.value = false
     newEmail.value = ''
     newName.value = ''
@@ -84,49 +122,12 @@ async function submitInvite(): Promise<void> {
   }
 }
 
-async function reinvite(m: Member): Promise<void> {
-  try {
-    invite.value = await reinviteMember(m.id)
-    lost.value = null
-    await load()
-  } catch (err) {
-    error.value = (err as Error).message
-  }
-}
-
-/** Re-issue after the reveal was dismissed uncopied — the recovery path. */
-async function reissue(userId: number): Promise<void> {
-  reissuing.value = true
-  try {
-    invite.value = await reinviteMember(userId)
-    lost.value = null
-    await load()
-  } catch (err) {
-    error.value = (err as Error).message
-  } finally {
-    reissuing.value = false
-  }
-}
-
-/**
- * Closing the reveal is the point of no return: the plaintext exists only in this
- * component's memory, and the server kept nothing but its hash.
- *
- * If they copied it (or said they had it), just close. If they walked away from
- * it, hand over to the "that invite is gone" state — honest about what happened,
- * and offering the only real fix. Telling someone who *just copied the key* that
- * it is gone would be both wrong and alarming.
- */
-function closeReveal(saved: boolean): void {
-  const shown = invite.value
-  invite.value = null
-  lost.value = !saved && shown ? { name: shown.user.display_name, userId: shown.user.id } : null
-}
-
 async function doRemove(): Promise<void> {
   const m = confirmRemove.value
   if (!m) return
   removing.value = true
+  error.value = null
+  mintError.value = null
   try {
     await removeMember(m.id)
     confirmRemove.value = null
@@ -234,7 +235,7 @@ $ export LYCEUM_AUTH=true
           </p>
         </form>
 
-        <p v-if="error" class="err">{{ error }}</p>
+        <p v-if="shownError" class="err">{{ shownError }}</p>
         <p v-if="loading" class="muted">Loading the household…</p>
 
         <div v-else class="rows">
@@ -279,12 +280,28 @@ $ export LYCEUM_AUTH=true
             </div>
 
             <span v-if="m.is_owner" class="row__note">Can't be removed</span>
-            <template v-else>
+
+            <!-- Your own row. "Re-invite yourself" would be a strange thing to  -->
+            <!-- read, but the need is real and had nowhere to live: this is how -->
+            <!-- you get a key onto your next phone (LYCM-105). Keyed on being   -->
+            <!-- *you*, not on being the owner — the route mints for the caller, -->
+            <!-- so ownership was never what decided this.                       -->
+            <button
+              v-if="m.id === auth.user?.id"
+              type="button"
+              class="row__btn"
+              :disabled="minting"
+              @click="addDeviceForMe"
+            >
+              {{ minting ? 'Issuing…' : '+ Add a device' }}
+            </button>
+            <template v-else-if="!m.is_owner">
               <button
                 type="button"
                 class="row__btn"
                 :class="{ 'row__btn--pending': m.invite_expires_at && !m.last_seen_at }"
-                @click="reinvite(m)"
+                :disabled="minting"
+                @click="reinviteRow(m.id)"
               >
                 Re-invite
               </button>
@@ -299,8 +316,10 @@ $ export LYCEUM_AUTH=true
 
     <InviteReveal
       :invite="invite"
+      :self="self"
       :lost="lost"
       :reissuing="reissuing"
+      :error="mintError"
       @close="closeReveal"
       @reissue="reissue"
     />
@@ -497,6 +516,10 @@ $ export LYCEUM_AUTH=true
   font: 700 12.5px var(--font-ui);
   cursor: pointer;
   flex: none;
+}
+.row__btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
 }
 .row__btn--pending {
   border-color: color-mix(in srgb, var(--brass) 40%, transparent);

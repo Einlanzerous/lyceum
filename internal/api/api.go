@@ -87,6 +87,10 @@ type Store interface {
 	// MintInvite issues a single-use invite plus a short pairing code that stands
 	// for the same invite (LYCM-88), returning both plaintexts once.
 	MintInvite(ctx context.Context, userID int64, label string, expiresAt *time.Time) (token string, code string, err error)
+	// RevokeUnredeemedInvites retires a user's outstanding invites carrying a
+	// label, so minting a replacement device key doesn't leave the old one live
+	// (LYCM-105).
+	RevokeUnredeemedInvites(ctx context.Context, userID int64, label string) (int64, error)
 	UserByToken(ctx context.Context, plaintext string) (store.User, error)
 	RedeemInvite(ctx context.Context, plaintext, deviceLabel string) (store.User, string, error)
 	// RedeemPairingCode exchanges a short pairing code for a session, the
@@ -240,6 +244,9 @@ func (a *API) Handler() *http.ServeMux {
 	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
 	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
 	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
+	// "Add a device" (LYCM-105) — a key for yourself, not for a housemate, so it
+	// needs no ownership. See handleSelfInvite for why it is not an /admin route.
+	mux.HandleFunc("POST /auth/invite", a.requireUser(a.handleSelfInvite))
 
 	// Your devices. A password-free session never expires, so the only real risk
 	// is a lost or lent device staying signed in forever — this is how its owner

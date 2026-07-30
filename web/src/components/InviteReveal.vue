@@ -8,17 +8,30 @@
 // instead of being a row in a list.
 //
 // It is a key, not a link: single-use, one device, expiring in 7 days.
+//
+// The same sheet covers both directions a key can travel — to a housemate, or to
+// your own next device (LYCM-105) — and every string forks on which, because
+// "hand this to Mara" read back at Mara is gibberish.
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Invite } from '@/api/auth'
 import InviteQr from './InviteQr.vue'
 
 const props = defineProps<{
   /** The freshly minted invite, or null once it has been let go. */
   invite: Invite | null
+  /** Whether the key is the viewer's own — "Add a device" rather than an invite. */
+  self?: boolean
   /** Set when the person dismissed a reveal without copying — the recovery path. */
-  lost: { name: string; userId: number } | null
+  lost: { name: string; userId: number; self: boolean } | null
   reissuing?: boolean
+  /**
+   * A failed mint, shown *inside* the sheet. The page behind it is covered by an
+   * opaque scrim, so an error rendered out there is an error nobody sees — and
+   * the one place that matters is here, where a dead "issue another" button is
+   * otherwise indistinguishable from one that did nothing.
+   */
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -29,12 +42,30 @@ const emit = defineEmits<{
    *               than letting a key evaporate silently.
    */
   close: [saved: boolean]
-  reissue: [userId: number]
+  /** Issue another for whoever `lost` names — the parent already knows who. */
+  reissue: []
 }>()
 
 const copied = ref(false)
 const copyFailed = ref(false)
 const codeCopied = ref(false)
+
+// Both parents render this component unconditionally — the `v-if` that opens and
+// closes it is inside its own template — so the instance, and this state, outlive
+// any one reveal. Left alone, the second key of a session would inherit the
+// first's "✓ Copied": the sheet would claim a key is on the clipboard that isn't,
+// and the once-only warning it replaces would never be shown. That is the exact
+// path to losing a key silently, and it got far more likely the moment "Add a
+// device" made a second mint routine, so every fresh invite starts clean.
+watch(
+  () => props.invite,
+  (next) => {
+    if (!next) return
+    copied.value = false
+    copyFailed.value = false
+    codeCopied.value = false
+  },
+)
 
 // The pairing code grouped XXXX-XXXX for reading aloud and typing (LYCM-88); the
 // sign-in field strips the hyphen back out.
@@ -88,20 +119,27 @@ async function copyAndClose(): Promise<void> {
             {{ (invite.user.display_name[0] ?? '?').toUpperCase() }}
           </div>
           <div>
-            <div class="eyebrow">Invite created</div>
-            <div class="who__name">A key for {{ invite.user.display_name }}</div>
+            <div class="eyebrow">{{ self ? 'Device key' : 'Invite created' }}</div>
+            <div class="who__name">
+              {{ self ? 'A key for your next device' : `A key for ${invite.user.display_name}` }}
+            </div>
           </div>
         </div>
         <button type="button" class="x" aria-label="Close" @click="emit('close', false)">✕</button>
       </header>
 
       <div class="sheet__body">
-        <p class="lede">
+        <p v-if="self" class="lede">
+          Paste this on the device you're adding — phone, tablet, another browser — and it signs in
+          as you: same shelf, same place in every book. It's the only credential, so treat it like a
+          house key, not a link.
+        </p>
+        <p v-else class="lede">
           Hand this key to {{ invite.user.display_name }}. When they paste it on their device,
           they're in. It's the only credential — treat it like a house key, not a link.
         </p>
 
-        <div class="label">The invite key</div>
+        <div class="label">{{ self ? 'The device key' : 'The invite key' }}</div>
         <div class="secret">
           <code class="secret__value" :class="{ 'is-copied': copied }">{{
             invite.invite_token
@@ -141,15 +179,26 @@ async function copyAndClose(): Promise<void> {
 
         <div v-else-if="copied" class="done">
           <span class="done__dot" aria-hidden="true"></span>
-          Copied to clipboard — now hand it to {{ invite.user.display_name }}. Closing this dialog
-          is safe once you've sent it.
+          <template v-if="self">
+            Copied to clipboard — now paste it on the other device. Closing this dialog is safe once
+            it's there.
+          </template>
+          <template v-else>
+            Copied to clipboard — now hand it to {{ invite.user.display_name }}. Closing this dialog
+            is safe once you've sent it.
+          </template>
         </div>
 
         <div v-else class="warn">
           <span class="warn__icon" aria-hidden="true">⚠</span>
           <div>
             <b>This is the only time you'll see this key.</b> Copy it before you close — we can't
-            show it again. Lost it? Just issue {{ invite.user.display_name }} another.
+            show it again. Lost it?
+            {{
+              self
+                ? 'Just issue yourself another.'
+                : `Just issue ${invite.user.display_name} another.`
+            }}
           </div>
         </div>
 
@@ -170,22 +219,36 @@ async function copyAndClose(): Promise<void> {
       <div class="sheet__body">
         <div class="lost__head">
           <span aria-hidden="true">🔒</span>
-          <div class="lost__title">That invite is gone</div>
+          <div class="lost__title">
+            {{ lost.self ? 'That key is gone' : 'That invite is gone' }}
+          </div>
         </div>
         <div class="redacted">lyc_•••••••••••••••••••••••</div>
-        <p class="lede">
+        <p v-if="lost.self" class="lede">
+          For security, a key is shown only once and we can't display it again. Nothing is lost but
+          the string itself — your account and every device already signed in are untouched. Issue
+          yourself a fresh one whenever you're ready.
+        </p>
+        <p v-else class="lede">
           For security, an invite is shown only once and we can't display it again.
           {{ lost.name }}'s account is still here and waiting — issue a fresh key whenever you're
           ready.
         </p>
+        <p v-if="error" class="lost__err">{{ error }}</p>
         <div class="actions">
           <button
             type="button"
             class="btn btn--brass"
             :disabled="reissuing"
-            @click="emit('reissue', lost.userId)"
+            @click="emit('reissue')"
           >
-            {{ reissuing ? 'Issuing…' : `Issue another invite for ${lost.name}` }}
+            {{
+              reissuing
+                ? 'Issuing…'
+                : lost.self
+                  ? 'Issue myself another key'
+                  : `Issue another invite for ${lost.name}`
+            }}
           </button>
           <button type="button" class="btn btn--ghost" @click="emit('close', true)">Not now</button>
         </div>
@@ -451,6 +514,11 @@ async function copyAndClose(): Promise<void> {
 .lost__title {
   font: 800 17px var(--font-display);
   color: var(--text);
+}
+.lost__err {
+  margin: 14px 0 0;
+  font: 500 12.5px/1.5 var(--font-ui);
+  color: var(--error);
 }
 .redacted {
   padding: 14px 16px;

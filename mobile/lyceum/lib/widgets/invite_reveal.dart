@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-import '../../api/models.dart';
-import '../../theme/lyceum_colors.dart';
-import '../../theme/lyceum_theme.dart';
-import '../../widgets/lyc_sheet.dart';
+import '../api/models.dart';
+import '../theme/lyceum_colors.dart';
+import '../theme/lyceum_theme.dart';
+import 'lyc_sheet.dart';
 
 /// How the reveal was closed.
 ///
@@ -31,10 +31,15 @@ enum InviteRevealResult { saved, dismissed }
 /// from the configured server (LYCM-88); when present, the key is also offered as
 /// a QR. Passed in rather than read here so this sheet stays a plain,
 /// provider-free widget.
+///
+/// [self] says the key is the viewer's own — "Add a device" rather than an invite
+/// to hand over (LYCM-105). Every string forks on it, because "hand this to Theo"
+/// read back at Theo is gibberish.
 Future<InviteRevealResult> showInviteReveal(
   BuildContext context,
   Invite invite, {
   String? signInUrl,
+  bool self = false,
 }) async {
   final result = await showLycSheet<InviteRevealResult>(
     context: context,
@@ -43,15 +48,24 @@ Future<InviteRevealResult> showInviteReveal(
     // (The back gesture still works — Android's contract — and lands as
     // `dismissed`, which is exactly the recovery path.)
     dismissible: false,
-    builder: (context) => _InviteRevealSheet(invite: invite, signInUrl: signInUrl),
+    builder: (context) => _InviteRevealSheet(
+      invite: invite,
+      signInUrl: signInUrl,
+      self: self,
+    ),
   );
   return result ?? InviteRevealResult.dismissed;
 }
 
 class _InviteRevealSheet extends StatefulWidget {
-  const _InviteRevealSheet({required this.invite, this.signInUrl});
+  const _InviteRevealSheet({
+    required this.invite,
+    this.signInUrl,
+    this.self = false,
+  });
   final Invite invite;
   final String? signInUrl;
+  final bool self;
 
   @override
   State<_InviteRevealSheet> createState() => _InviteRevealSheetState();
@@ -154,7 +168,7 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'INVITE CREATED',
+                    widget.self ? 'DEVICE KEY' : 'INVITE CREATED',
                     style: TextStyle(
                       fontFamily: kDisplayFont,
                       fontSize: 10,
@@ -165,7 +179,7 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'A key for $_name',
+                    widget.self ? 'A key for your next device' : 'A key for $_name',
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontFamily: kDisplayFont,
@@ -188,14 +202,20 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
         ),
         const SizedBox(height: 14),
         Text(
-          "Hand this key to $_name. When they paste it on their device, they're "
-          "in. It's the only credential — treat it like a house key, not a link.",
+          widget.self
+              ? 'Paste this on the device you\'re adding — another phone, a '
+                    'tablet, a browser — and it signs in as you: same shelf, same '
+                    "place in every book. It's the only credential, so treat it "
+                    'like a house key, not a link.'
+              : "Hand this key to $_name. When they paste it on their device, "
+                    "they're in. It's the only credential — treat it like a house "
+                    'key, not a link.',
           style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
         ),
         const SizedBox(height: 20),
 
         Text(
-          'THE INVITE KEY',
+          widget.self ? 'THE DEVICE KEY' : 'THE INVITE KEY',
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w600,
@@ -248,11 +268,12 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
           onCopy: _copyCode,
         ),
 
-        // The same key as a QR, so $_name can scan it from their phone's camera
-        // instead of copying text across devices (LYCM-88). The caller encodes
-        // the sign-in URL served by this library, so a stock camera app can
-        // complete the flow.
-        if (signInUrl != null && signInUrl.isNotEmpty) _InviteQr(url: signInUrl),
+        // The same key as a QR, so it can be scanned by the camera of whatever
+        // device is being signed in instead of copying text across machines
+        // (LYCM-88). The caller encodes the sign-in URL served by this library, so
+        // a stock camera app can complete the flow.
+        if (signInUrl != null && signInUrl.isNotEmpty)
+          _InviteQr(url: signInUrl, self: widget.self),
 
         const SizedBox(height: 14),
         Wrap(
@@ -281,8 +302,11 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
             tone: LycTone.success,
             icon: Icons.check_circle_outline_rounded,
             child: Text(
-              'Copied to clipboard — now hand it to $_name. Closing this is safe '
-              "once you've sent it.",
+              widget.self
+                  ? 'Copied to clipboard — now paste it on the other device. '
+                        "Closing this is safe once it's there."
+                  : 'Copied to clipboard — now hand it to $_name. Closing this is '
+                        "safe once you've sent it.",
               style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
             ),
           )
@@ -302,7 +326,8 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
                   ),
                   TextSpan(
                     text: " Copy it before you close — we can't show it again. "
-                        'Lost it? Just issue $_name another.',
+                        'Lost it? '
+                        '${widget.self ? 'Just issue yourself another.' : 'Just issue $_name another.'}',
                   ),
                 ],
               ),
@@ -336,8 +361,9 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
 /// The invite as a QR on a white quiet-zone tile (LYCM-88). White is not a theme
 /// choice — QR contrast has to survive the app's dark surfaces to stay scannable.
 class _InviteQr extends StatelessWidget {
-  const _InviteQr({required this.url});
+  const _InviteQr({required this.url, this.self = false});
   final String url;
+  final bool self;
 
   @override
   Widget build(BuildContext context) {
@@ -371,7 +397,9 @@ class _InviteQr extends StatelessWidget {
           ),
           const SizedBox(height: 9),
           Text(
-            'Or have them scan this with their camera',
+            self
+                ? 'Or scan this with the other device'
+                : 'Or have them scan this with their camera',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 11.5, color: lyc.dim),
           ),
@@ -478,17 +506,22 @@ class _Meta extends StatelessWidget {
 /// The tone matters. Nothing is broken and nothing is lost except a string that
 /// was always meant to be disposable — the *account* is still there, waiting. So
 /// this explains rather than apologises, and puts the fix one tap away.
-Future<bool> showInviteLostSheet(BuildContext context, String name) async {
+Future<bool> showInviteLostSheet(
+  BuildContext context,
+  String name, {
+  bool self = false,
+}) async {
   final reissue = await showLycSheet<bool>(
     context: context,
-    builder: (context) => _InviteLostSheet(name: name),
+    builder: (context) => _InviteLostSheet(name: name, self: self),
   );
   return reissue ?? false;
 }
 
 class _InviteLostSheet extends StatelessWidget {
-  const _InviteLostSheet({required this.name});
+  const _InviteLostSheet({required this.name, this.self = false});
   final String name;
+  final bool self;
 
   @override
   Widget build(BuildContext context) {
@@ -502,7 +535,7 @@ class _InviteLostSheet extends StatelessWidget {
             Icon(Icons.lock_outline_rounded, size: 19, color: lyc.muted),
             const SizedBox(width: 10),
             Text(
-              'That invite is gone',
+              self ? 'That key is gone' : 'That invite is gone',
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ],
@@ -528,15 +561,22 @@ class _InviteLostSheet extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(
-          "For security, an invite is shown only once and we can't display it "
-          "again. $name's account is still here and waiting — issue a fresh key "
-          "whenever you're ready.",
+          self
+              ? "For security, a key is shown only once and we can't display it "
+                    'again. Nothing is lost but the string itself — your account '
+                    'and every device already signed in are untouched. Issue '
+                    "yourself a fresh one whenever you're ready."
+              : "For security, an invite is shown only once and we can't display "
+                    "it again. $name's account is still here and waiting — issue a "
+                    "fresh key whenever you're ready.",
           style: TextStyle(fontSize: 13, height: 1.55, color: lyc.muted),
         ),
         const SizedBox(height: 20),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
-          child: Text('Issue another invite for $name'),
+          child: Text(
+            self ? 'Issue myself another key' : 'Issue another invite for $name',
+          ),
         ),
         const SizedBox(height: 8),
         TextButton(

@@ -5,14 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../../api/api_providers.dart';
 import '../../api/client.dart';
 import '../../api/models.dart';
-import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
-import '../../auth/invite_token.dart';
+import '../../auth/invite_flow.dart';
 import '../../auth/relative_time.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/lyc_sheet.dart';
-import 'invite_reveal.dart';
 
 final membersProvider = FutureProvider<List<Member>>(
   (ref) => ref.watch(lyceumClientProvider).listMembers(),
@@ -54,42 +52,46 @@ class HouseholdScreen extends ConsumerStatefulWidget {
 
 class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
   bool _inviting = false;
+  bool _minting = false;
 
   /// Reveal a freshly minted key, then act on how it was closed.
   ///
-  /// Dismissing without copying is not an error — it is the one case where a
-  /// person can silently lose something unrecoverable, so it gets an explicit
-  /// second act rather than a shrug.
-  Future<void> _reveal(Invite invite) async {
-    ref.invalidate(membersProvider);
-    // Offer the key as a scannable QR too, pointing at this library's sign-in
-    // route (LYCM-88). Empty server URL (shouldn't happen once signed in) simply
-    // omits the QR.
-    final serverUrl = ref.read(serverUrlProvider);
-    final signInUrl = serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token);
-    final result = await showInviteReveal(context, invite, signInUrl: signInUrl);
-    if (!mounted || result == InviteRevealResult.saved) return;
+  /// The loop itself is shared with Settings' "Add a device" — see
+  /// [runInviteReveal]. All this screen adds is re-reading the household, since an
+  /// outstanding invite is what turns a row "pending".
+  Future<void> _reveal(Invite invite, {required bool self}) => runInviteReveal(
+        context,
+        ref,
+        invite,
+        self: self,
+        onMinted: () => ref.invalidate(membersProvider),
+      );
 
-    final name = invite.user.displayName.trim().isEmpty
-        ? invite.user.email
-        : invite.user.displayName.trim();
-    final reissue = await showInviteLostSheet(context, name);
-    if (!mounted || !reissue) return;
-
+  Future<void> _reinvite(Member m) async {
     try {
-      final fresh = await ref.read(lyceumClientProvider).reinviteMember(invite.user.id);
-      if (mounted) await _reveal(fresh); // straight back to the reveal, new key
+      final invite = await ref.read(lyceumClientProvider).reinviteMember(m.id);
+      if (mounted) await _reveal(invite, self: false);
     } catch (e) {
       _toast('$e');
     }
   }
 
-  Future<void> _reinvite(Member m) async {
+  /// "Add a device" — a key for yourself (LYCM-105).
+  ///
+  /// Your own row is the one row here that had no action on it, so the person who
+  /// owns the library was the only one who couldn't get a key onto a second
+  /// device. It goes through the self route, not /admin: "re-invite myself" is
+  /// both a strange thing to read and the wrong permission to require.
+  Future<void> _addDevice() async {
+    if (_minting) return;
+    setState(() => _minting = true);
     try {
-      final invite = await ref.read(lyceumClientProvider).reinviteMember(m.id);
-      if (mounted) await _reveal(invite);
+      final invite = await ref.read(lyceumClientProvider).requestDeviceInvite();
+      if (mounted) await _reveal(invite, self: true);
     } catch (e) {
       _toast('$e');
+    } finally {
+      if (mounted) setState(() => _minting = false);
     }
   }
 
@@ -130,7 +132,8 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
       final invite = await ref
           .read(lyceumClientProvider)
           .inviteMember(email: who.email, displayName: who.name);
-      if (mounted) await _reveal(invite);
+      // A brand-new housemate's key, never your own.
+      if (mounted) await _reveal(invite, self: false);
     } on ApiException catch (e) {
       _toast(
         e.isDuplicate
@@ -214,6 +217,8 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
                         _MemberCard(
                           member: m,
                           isMe: m.id == me?.id,
+                          minting: _minting,
+                          onAddDevice: _addDevice,
                           onReinvite: () => _reinvite(m),
                           onRemove: () => _remove(m),
                         ),
@@ -235,12 +240,16 @@ class _MemberCard extends StatelessWidget {
   const _MemberCard({
     required this.member,
     required this.isMe,
+    required this.minting,
+    required this.onAddDevice,
     required this.onReinvite,
     required this.onRemove,
   });
 
   final Member member;
   final bool isMe;
+  final bool minting;
+  final VoidCallback onAddDevice;
   final VoidCallback onReinvite;
   final VoidCallback onRemove;
 
@@ -318,13 +327,28 @@ class _MemberCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           if (member.isOwner)
-            Text(
-              "Can't be removed",
-              style: TextStyle(
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-                color: lyc.dimmer,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    "Can't be removed",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                      color: lyc.dimmer,
+                    ),
+                  ),
+                ),
+                // Only on your *own* row: a key minted here signs in as the caller,
+                // so offering it against somebody else's account would be a lie
+                // (LYCM-105).
+                if (isMe)
+                  OutlinedButton.icon(
+                    onPressed: minting ? null : onAddDevice,
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: Text(minting ? 'Issuing…' : 'Add a device'),
+                  ),
+              ],
             )
           else
             Row(

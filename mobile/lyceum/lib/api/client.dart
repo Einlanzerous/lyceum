@@ -191,6 +191,21 @@ class LyceumClient {
     if (r.statusCode != 204) _throw(r);
   }
 
+  /// `POST /auth/invite` — a one-time key for **yourself**, to redeem on another
+  /// device (LYCM-105). 201, and the plaintext comes back once.
+  ///
+  /// Deliberately not an `/admin` route: pairing your own phone grants nothing
+  /// this session doesn't already hold, so it needs no ownership and a housemate
+  /// can do it too. It does share the auth-off refusal — a server that cannot tell
+  /// who is asking must not mint credentials — hence [_throwAdmin], which turns
+  /// that one 403 into the explained [AdminDisabledException] rather than a bare
+  /// error.
+  Future<Invite> requestDeviceInvite() async {
+    final r = await _http.post(_uri('/auth/invite')).timeout(timeout);
+    if (r.statusCode != 201) _throwAdmin(r);
+    return Invite.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
   // --- Household administration (owner only) --------------------------------
 
   /// `/admin/*` answers **two different 403s**, and confusing them tells a lie.

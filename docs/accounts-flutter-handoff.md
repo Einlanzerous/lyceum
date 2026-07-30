@@ -32,6 +32,7 @@ lands would lock out every phone.** Flipping it is the last step here.
 | `DELETE /auth/session` | Sign out **this device only** |
 | `GET /auth/sessions` | `[{id, device_label, created_at, last_seen_at, current}]` |
 | `DELETE /auth/sessions/{id}` | Revoke one of *your own* devices (scoped server-side; someone else's id 404s) |
+| `POST /auth/invite` | A one-time key for **yourself** — "add a device" (LYCM-105). → `{user, invite_token, pairing_code}`, shown once. Any signed-in account, not just the owner. Minting **retires your previous unredeemed device key**, so there is at most one live at a time. |
 | `GET /admin/users` | Owner. `[{...user, last_seen_at, invite_expires_at, session_count}]` |
 | `POST /admin/users` | Owner. `{email, display_name}` → `{user, invite_token}` — **shown once, never recoverable** |
 | `POST /admin/users/{id}/invite` | Owner. A fresh invite for an existing member |
@@ -45,7 +46,10 @@ Facts that shape the UI:
 - `/admin/*` returns **403** while `LYCEUM_AUTH=false` — "household administration
   requires LYCEUM_AUTH". Not a permissions failure to apologise for; a server that
   can't tell who is asking refuses to mint credentials. It gets its own explained
-  state.
+  state. **`POST /auth/invite` refuses on the same terms** ("issuing a device key
+  requires LYCEUM_AUTH"), for the same reason: with enforcement off every caller
+  resolves to the owner, so an open port could otherwise mint an owner key and
+  keep the session it redeems after the operator turns auth on.
 - **`GET /auth/me` returning 200 with no token means enforcement is off** and the
   server is serving you as the owner. That is how the client detects an auth-off
   server — there is no separate endpoint.
