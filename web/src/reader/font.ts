@@ -19,7 +19,7 @@ export interface ReadingFont {
 }
 
 export const READING_FONTS: readonly ReadingFont[] = [
-  { id: 'publisher', label: 'Publisher', stack: null, hint: "The book's own typography" },
+  { id: 'publisher', label: 'Publisher', stack: null, hint: "The book's own typeface" },
   {
     id: 'serif',
     label: 'Serif',

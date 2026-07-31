@@ -8,7 +8,9 @@ import { getBook, putPositionKeepalive, setBookFinished } from '@/api/client'
 import { formatProgress } from '@/api/progress'
 import { useTheme, type Theme } from '@/theme'
 import { useReadingFont } from '@/reader/readingFont'
+import { useLineSpacing } from '@/reader/lineSpacing'
 import { READING_FONTS, resolveFontFamily } from '@/reader/font'
+import { LINE_SPACINGS } from '@/reader/theme'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -23,6 +25,7 @@ const settingsOpen = ref(false)
 // stores — changing them here also updates Settings, and vice versa.
 const { theme, set: setTheme } = useTheme()
 const { font, set: setFont } = useReadingFont()
+const { lineSpacing, set: setLineSpacing } = useLineSpacing()
 const themeOptions: { value: Theme; label: string }[] = [
   { value: 'dark', label: 'Dark' },
   { value: 'light', label: 'Light' },
@@ -204,6 +207,22 @@ onBeforeUnmount(() => {
                 @click="reader.increaseFont()"
               >
                 A+
+              </button>
+            </div>
+          </div>
+
+          <div class="rset__row rset__row--stack">
+            <span class="rset__label">Line spacing</span>
+            <div class="seg" role="group" aria-label="Line spacing">
+              <button
+                v-for="opt in LINE_SPACINGS"
+                :key="opt.id"
+                type="button"
+                class="seg__btn"
+                :class="{ 'is-active': lineSpacing === opt.id }"
+                @click="setLineSpacing(opt.id)"
+              >
+                {{ opt.label }}
               </button>
             </div>
           </div>
