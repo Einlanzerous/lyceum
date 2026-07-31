@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.3](https://github.com/Einlanzerous/lyceum/compare/v1.7.2...v1.7.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **auth:** let a signed-in person issue themselves a device key (LYCM-105) ([#62](https://github.com/Einlanzerous/lyceum/issues/62)) ([56a0f61](https://github.com/Einlanzerous/lyceum/commit/56a0f615c83b8c328c3650cd410d1d1da69278c0))
+* **reader:** normalize book typography so the reading controls work (LYCM-110) ([#65](https://github.com/Einlanzerous/lyceum/issues/65)) ([6a4fe4b](https://github.com/Einlanzerous/lyceum/commit/6a4fe4b7f33b8e1639fe21db5f47cf738e87ec93))
+
 ## [1.7.2](https://github.com/Einlanzerous/lyceum/compare/v1.7.1...v1.7.2) (2026-07-22)
 
 
