@@ -196,7 +196,7 @@ stand one up:
 docker run -d --name lyceum-dev-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_USER=dev \
   -e POSTGRES_DB=lyceum_dev -p 55433:5432 postgres:16-alpine
 
-go build -o /tmp/lyceum ./cmd/lyceum      # embeds the built SPA (npm run build first)
+go build -o /tmp/lyceum ./cmd/lyceum      # embeds the built SPA (bun run build first)
 
 LYCEUM_ADDR=:4090 \
 LYCEUM_DATABASE_URL="postgres://dev:dev@localhost:55433/lyceum_dev?sslmode=disable" \

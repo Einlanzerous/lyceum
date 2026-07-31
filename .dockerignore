@@ -1,0 +1,20 @@
+# Keep the build context small and — more importantly — keep the host's
+# installed deps out of it. `COPY web/ ./` runs *after* `bun install
+# --frozen-lockfile` in deploy/Dockerfile, so a copied-in web/node_modules
+# would overwrite the freshly resolved one and silently discard the
+# reproducible install (LYCM-71).
+node_modules
+**/node_modules
+
+# Build output — the image builds its own.
+web/dist
+wrappers/wails/build
+wrappers/wails/frontend/dist
+bin/
+*.exe
+
+# Local-only: secrets, data, git history, sample books.
+.git
+.env
+data/
+example_docs/

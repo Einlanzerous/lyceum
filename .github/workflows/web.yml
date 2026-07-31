@@ -1,0 +1,36 @@
+name: web
+
+# Frontend gate (LYCM-71). Until this existed the web suite never ran in CI —
+# eslint errors and type regressions could land on main untouched. Scoped to
+# web/** so backend-only changes don't pay for it.
+on:
+  pull_request:
+    paths: ["web/**", ".github/workflows/web.yml"]
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/web.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      # Keep in sync with web/package.json's `packageManager` (the source of
+      # truth), deploy/Dockerfile, wrappers.yml and windows-release.yml: a
+      # newer bun's module resolution breaks vue-tsc on .vue imports.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      # `build` also runs vue-tsc, but typecheck runs first so a type error
+      # reports as a type error rather than as a build failure.
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build

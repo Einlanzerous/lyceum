@@ -6,7 +6,7 @@
 //
 // The embed pattern always resolves because a placeholder dist/.gitkeep is
 // checked in (the `all:` prefix includes dotfiles); a real bundle is produced
-// by `make build-web` (npm run build) before `go build`. When only the
+// by `make build-web` (bun run build) before `go build`. When only the
 // placeholder is present, Handler serves a clear "not built" message rather
 // than a stale page.
 package web

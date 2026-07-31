@@ -3,8 +3,8 @@
   "name": "Lyceum",
   "outputfilename": "Lyceum",
   "frontend:dir": "frontend",
-  "frontend:install": "npm --prefix ../../../web ci",
-  "frontend:build": "node copy-dist.mjs",
+  "frontend:install": "bun install --cwd ../../../web --frozen-lockfile",
+  "frontend:build": "bun copy-dist.mjs",
   "info": {
     "companyName": "Lyceum",
     "productName": "Lyceum",

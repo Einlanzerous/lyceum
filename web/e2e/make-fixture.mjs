@@ -3,7 +3,7 @@
 // pages, so Next/Prev navigation is genuinely exercised (the repo's testdata
 // EPUBs are single-page and can't).
 //
-//   node e2e/make-fixture.mjs <out.epub> [unique-tag]
+//   bun e2e/make-fixture.mjs <out.epub> [unique-tag]
 //
 // The optional tag is woven into the identifier and content so each tagged
 // build produces distinct bytes — the backend content-addresses uploads, so a
@@ -66,6 +66,6 @@ zip.file('OEBPS/chapter1.xhtml', chapter)
 
 const buffer = await zip.generateAsync({ type: 'nodebuffer' })
 const out = process.argv[2]
-if (!out) throw new Error('usage: node make-fixture.mjs <out.epub>')
+if (!out) throw new Error('usage: bun make-fixture.mjs <out.epub>')
 writeFileSync(out, buffer)
 console.log(`wrote ${out} (${buffer.length} bytes)`)

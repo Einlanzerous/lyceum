@@ -1,6 +1,6 @@
 // Command lyceum-desktop is the Wails (Windows) wrapper for the Lyceum reader
 // (LYCM-300). It hosts the *same* TypeScript SPA as the web build inside a
-// native WebView2 window; the SPA is built with `npm run build:native` so its
+// native WebView2 window; the SPA is built with `bun run build:native` so its
 // API calls target the user-configured remote backend (see web/src/api/base.ts)
 // rather than a same-origin server. The backend's CORS allowlist
 // (internal/api.CORS) includes the Wails asset origin so those calls succeed.

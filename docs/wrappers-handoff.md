@@ -20,7 +20,7 @@ same-origin backend, so two seams were added:
 1. **Backend-base-URL-aware frontend.**
    - [`web/src/api/base.ts`](../web/src/api/base.ts) resolves the API base.
      Web build → `''` (relative, unchanged). Native build (`VITE_LYCEUM_TARGET=native`,
-     set by `npm run build:native` / `vite build --mode native`) → a server URL
+     set by `bun run build:native` / `vite build --mode native`) → a server URL
      the user configures, persisted in `localStorage` (`lyceum.server_url`).
    - `client.ts` routes every URL through `apiUrl()`; `coverUrl()`/`bookFileUrl()`
      become absolute in native shells (they back `<img src>` and the epub fetch).
@@ -80,7 +80,7 @@ Notes:
 ## Verified here
 
 - `web`: 64 unit tests green (incl. `base.test.ts` both shells, native
-  LibraryView prompt). Both `npm run build` and `npm run build:native` succeed;
+  LibraryView prompt). Both `bun run build` and `bun run build:native` succeed;
   the `VITE_LYCEUM_TARGET` define is confirmed replaced in both bundles.
 - `backend`: `go build/vet ./...` clean; full `go test ./...` green incl.
   `cors_test.go`. End-to-end CORS smoke against the running binary confirmed:

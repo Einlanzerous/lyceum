@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [vue()],
   define: {
     // Build target (LYCM-300), surfaced as import.meta.env.VITE_LYCEUM_TARGET.
-    // The native (Wails) shell builds with `npm run build:native`
+    // The native (Wails) shell builds with `bun run build:native`
     // (`vite build --mode native`); api/base.ts reads this to decide whether
     // API URLs are same-origin relative (web) or prefixed with the
     // user-configured remote backend (native). `--mode` keeps it cross-platform

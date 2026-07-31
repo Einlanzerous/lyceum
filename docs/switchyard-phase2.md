@@ -97,7 +97,7 @@ meaningfully unit-testable under jsdom/vitest. Split the work:
 set -a && . ./.env && set +a && make run        # :8080
 
 # terminal 2 — frontend (proxies API calls to :8080)
-cd web && npm install && npm run dev            # :5173
+cd web && bun install && bun run dev            # :5173
 ```
 
 ## Handoff: running it
