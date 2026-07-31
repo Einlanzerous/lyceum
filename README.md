@@ -44,6 +44,15 @@ cp .env.example .env     # then set the lyceum_user password
 
 ## Quickstart
 
+The frontend toolchain is [Bun](https://bun.sh) (LYCM-71). Install the version
+pinned in `web/package.json`'s `packageManager` field — CI and the production
+image build with exactly that one, and a newer bun's module resolution has been
+seen to break `vue-tsc` on `.vue` imports:
+
+```sh
+curl -fsSL https://bun.sh/install | bash -s "bun-v1.3.14"
+```
+
 ```sh
 cp .env.example .env           # then set the lyceum_user password
 make dev                       # backend (:8080, auto-migrates) + Vite reader (HMR)

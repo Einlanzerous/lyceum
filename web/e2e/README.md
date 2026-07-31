@@ -20,7 +20,7 @@ LYCEUM_ADDR=:8099 LYCEUM_DATA_DIR=$(mktemp -d) make -C .. run &   # from web/
 LYCEUM_BACKEND=http://localhost:8099 bun run dev -- --port 5180 --strictPort &
 
 # 3. Generate + upload a fresh multi-page book, capture its id:
-node e2e/make-fixture.mjs /tmp/sample.epub "run-$(date +%s)"
+bun e2e/make-fixture.mjs /tmp/sample.epub "run-$(date +%s)"
 ID=$(curl -sF file=@/tmp/sample.epub http://localhost:8099/upload | jq .id)
 
 # 4. Run the specs against it:

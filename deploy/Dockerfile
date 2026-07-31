@@ -9,8 +9,10 @@
 # 1) Build the Vite SPA -> web/dist (embedded by the Go binary in step 2).
 #    Regular `bun run build` = same-origin API (LYCM-207); the native/Wails
 #    flavour is a different mode and not used here.
-#    Bun is pinned to the same version CI uses (LYCM-71): a floating "1-debian"
-#    can pull a newer bun whose module resolution breaks vue-tsc on .vue imports.
+#    Bun is pinned (LYCM-71): a floating "1-debian" can pull a newer bun whose
+#    module resolution breaks vue-tsc on .vue imports. Keep in sync with
+#    web/package.json's `packageManager` (the source of truth) and the
+#    setup-bun steps in web.yml / wrappers.yml / windows-release.yml.
 FROM oven/bun:1.3.14-debian AS web
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./

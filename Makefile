@@ -1,8 +1,12 @@
 BINARY := lyceum
 PKG := ./...
 WEB_DIR := web
-# Frontend toolchain is Bun (LYCM-71), matching our other projects.
+# Frontend toolchain is Bun (LYCM-71), matching our other projects. Pinned
+# version lives in web/package.json's `packageManager`. Exported so an override
+# (`make wails-windows BUN=/opt/bun/bin/bun`) also reaches the Wails frontend
+# hook, which shells bun from copy-dist.mjs.
 BUN ?= bun
+export BUN
 
 # Load .env (DATABASE_URL, TEST_DATABASE_URL) if present.
 ifneq (,$(wildcard ./.env))

@@ -19,6 +19,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # Keep in sync with web/package.json's `packageManager` (the source of
+      # truth), deploy/Dockerfile, web.yml and windows-release.yml: a newer
+      # bun's module resolution breaks vue-tsc on .vue imports (LYCM-71).
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
