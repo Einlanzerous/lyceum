@@ -7,14 +7,16 @@
 #   docker build -f deploy/Dockerfile -t lyceum:latest .
 
 # 1) Build the Vite SPA -> web/dist (embedded by the Go binary in step 2).
-#    Regular `npm run build` = same-origin API (LYCM-207); the native/Wails
+#    Regular `bun run build` = same-origin API (LYCM-207); the native/Wails
 #    flavour is a different mode and not used here.
-FROM node:20-bookworm-slim AS web
+#    Bun is pinned to the same version CI uses (LYCM-71): a floating "1-debian"
+#    can pull a newer bun whose module resolution breaks vue-tsc on .vue imports.
+FROM oven/bun:1.3.14-debian AS web
 WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN bun run build
 
 # 2) Build the Go binary with the SPA embedded. Copy the freshly built dist over
 #    the checked-in placeholder before `go build` so //go:embed picks up the real

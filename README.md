@@ -66,7 +66,7 @@ Phase 3 packages the *same* web reader as a native Windows `.exe` (Wails) that
 reaches a remote Lyceum server and syncs just like the browser. See
 [`wrappers/`](wrappers/) for the full picture; the short version:
 
-- The shell embeds the SPA built with `npm run build:native`. In that mode the
+- The shell embeds the SPA built with `bun run build:native`. In that mode the
   frontend prefixes every API call with a **server URL the user configures on
   first run** (Settings → Connection) instead of using same-origin relative
   URLs. The web build is unchanged.

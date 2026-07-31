@@ -19,8 +19,8 @@
 const SERVER_KEY = 'lyceum.server_url'
 
 // Build-time target, injected by Vite (see vite.config.ts `define`). 'native'
-// is set by `npm run build:native`, which the wrappers consume; an ordinary
-// `npm run build` leaves it 'web'. We key off a build flag rather than sniffing
+// is set by `bun run build:native`, which the wrappers consume; an ordinary
+// `bun run build` leaves it 'web'. We key off a build flag rather than sniffing
 // `window.Capacitor`/Wails at runtime because the decision we actually need —
 // "is the backend a different origin I must be told about?" — is fixed at build
 // time, and a flag is trivially testable under jsdom.

@@ -50,9 +50,9 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "name=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "20"
+          bun-version: "1.3.14"
 
       - uses: actions/setup-go@v5
         with:
@@ -71,10 +71,10 @@ jobs:
           choco install nsis -y --no-progress
           "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      # copy-dist.mjs runs `npm run build:native` in web/, which needs vue-tsc —
+      # copy-dist.mjs runs `bun run build:native` in web/, which needs vue-tsc —
       # install web deps explicitly so it's present regardless of frontend:install.
       - name: Install web deps
-        run: npm --prefix web ci
+        run: bun install --cwd web --frozen-lockfile
 
       # The installer version (Add/Remove Programs + file properties) comes from
       # wails.json info.productVersion. Stamp it from the tag so it matches
@@ -85,7 +85,7 @@ jobs:
           VERSION: ${{ steps.ver.outputs.name }}
         run: |
           echo "Building installer version $VERSION"
-          node -e "const fs=require('fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          bun -e "const fs=require('node:fs'),f='wrappers/wails/wails.json',j=JSON.parse(fs.readFileSync(f));j.info=j.info||{};j.info.productVersion=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 
       # frontend:build builds web/ in native mode and copies the bundle in; -nsis
       # then runs makensis on build/windows/installer/project.nsi to wrap the exe

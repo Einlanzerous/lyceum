@@ -51,7 +51,7 @@ the pure resolve-family→rule helper; verify rendering via the reader smoke.
 
 epub.js renders into a real iframe; it is **not** meaningfully testable under
 jsdom. Keep pure logic in vitest; verify rendering with the Playwright smoke
-(`web/e2e/`, `npm run test:e2e`) driving **system Chrome** (`channel: 'chrome'`,
+(`web/e2e/`, `bun run test:e2e`) driving **system Chrome** (`channel: 'chrome'`,
 no bundled download). The repo's testdata EPUBs are single-page, so
 `web/e2e/make-fixture.mjs <out> <unique-tag>` generates a multi-page book; pass a
 fresh tag to avoid the content-addressed 409 and get a position-free book.
@@ -64,7 +64,7 @@ set -a && . ./.env && set +a
 LYCEUM_ADDR=:8099 LYCEUM_DATA_DIR=$(mktemp -d) go run ./cmd/lyceum &
 
 # Dev server proxies the API to that backend; --host exposes it on the LAN:
-cd web && LYCEUM_BACKEND=http://localhost:8099 npm run dev -- --host --port 5180 --strictPort
+cd web && LYCEUM_BACKEND=http://localhost:8099 bun run dev -- --host --port 5180 --strictPort
 # desktop: http://<server-ip>:5180/
 ```
 

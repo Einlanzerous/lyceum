@@ -7,7 +7,7 @@ first launch it asks for your server URL (Settings → Connection).
 
 ## How it fits together
 
-- The SPA is built with `npm run build:native` (`web/`), which flips
+- The SPA is built with `bun run build:native` (`web/`), which flips
   `import.meta.env.VITE_LYCEUM_TARGET` to `native`. In that mode
   `web/src/api/base.ts` prefixes every API call with the configured server URL
   instead of using same-origin relative URLs.
@@ -49,7 +49,7 @@ By default the `.exe` prompts for a server URL on first run — the right build 
 other self-hosters, who point it at their own server. To ship a **zero-config**
 build for friends & family pointed at *your* server, bake the URL in via
 `VITE_LYCEUM_DEFAULT_SERVER` (the build env flows through `copy-dist.mjs` →
-`npm run build:native`):
+`bun run build:native`):
 
 ```sh
 VITE_LYCEUM_DEFAULT_SERVER=http://your-server:5174 make wails-windows

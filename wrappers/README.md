@@ -19,7 +19,7 @@ are relative (`/library`, `/sync`, …). The Wails shell loads the SPA from its
 own origin (`http://wails.localhost`) with no same-origin backend, so two things
 change:
 
-1. **Build mode.** `npm run build:native` sets `VITE_LYCEUM_TARGET=native`. In
+1. **Build mode.** `bun run build:native` sets `VITE_LYCEUM_TARGET=native`. In
    that mode [`web/src/api/base.ts`](../web/src/api/base.ts) prefixes every API
    call with a server URL the user configures on first run (Settings →
    Connection, surfaced by `ServerSettings.vue`). The same source builds the web

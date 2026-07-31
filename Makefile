@@ -1,6 +1,8 @@
 BINARY := lyceum
 PKG := ./...
 WEB_DIR := web
+# Frontend toolchain is Bun (LYCM-71), matching our other projects.
+BUN ?= bun
 
 # Load .env (DATABASE_URL, TEST_DATABASE_URL) if present.
 ifneq (,$(wildcard ./.env))
@@ -17,12 +19,12 @@ build:
 # `go build` alone still compiles (the placeholder web/dist/index.html is
 # embedded); run this first whenever the binary must actually serve the reader.
 build-web:
-	cd $(WEB_DIR) && npm ci && npm run build
+	cd $(WEB_DIR) && $(BUN) install --frozen-lockfile && $(BUN) run build
 
 # Build the SPA in *native* mode (API calls target a configured remote backend
 # instead of same-origin). Consumed by the Wails desktop wrapper (LYCM-300).
 build-web-native:
-	cd $(WEB_DIR) && npm ci && npm run build:native
+	cd $(WEB_DIR) && $(BUN) install --frozen-lockfile && $(BUN) run build:native
 
 # Production single binary: real SPA bundle embedded into the Go server.
 release: build-web build
@@ -58,7 +60,7 @@ dev: check-env web-deps
 		fi; \
 		echo "==> lyceum backend (:$$port) + vite dev server (--host) — open Vite's Network URL; Ctrl-C stops both"; \
 		LYCEUM_ADDR=":$$port" go run ./cmd/lyceum & back=$$!; \
-		( cd $(WEB_DIR) && LYCEUM_BACKEND="http://localhost:$$port" npm run dev -- --host ) & front=$$!; \
+		( cd $(WEB_DIR) && LYCEUM_BACKEND="http://localhost:$$port" $(BUN) run dev -- --host ) & front=$$!; \
 		trap 'kill $$back $$front 2>/dev/null' INT TERM; \
 		wait
 
@@ -72,7 +74,7 @@ check-env:
 
 # Install web dependencies on first run (skipped once node_modules exists).
 web-deps:
-	@test -d $(WEB_DIR)/node_modules || { echo "==> installing web deps"; cd $(WEB_DIR) && npm install; }
+	@test -d $(WEB_DIR)/node_modules || { echo "==> installing web deps"; cd $(WEB_DIR) && $(BUN) install; }
 
 test:
 	go test $(PKG)
