@@ -20,6 +20,14 @@ test('opens a book and advances pages', async ({ page }) => {
   // Loading overlay cleared once the first page rendered.
   await expect(page.locator('.overlay')).toHaveCount(0)
 
+  // The reader's own stylesheet reached the book's document (LYCM-110/106).
+  // Theme, the size ladder, line spacing and word wrapping all ride in it, and
+  // it has to be re-injected into every section as it renders — so its absence
+  // means an unstyled, unbreakable book however correct the CSS itself is.
+  await expect(
+    page.frameLocator('.reader__surface iframe').locator('#lyceum-reader-style'),
+  ).toHaveCount(1)
+
   // epub.js paginates a section with CSS columns, so body text is constant
   // within a section; the CFI is the reliable signal that the page advanced.
   const reader = page.locator('.reader')

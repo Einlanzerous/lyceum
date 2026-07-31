@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // Preferences home (LYCM-501). Theme (LYCM-501) + opt-in reading font
-// (LYCM-502). Both write to persisted reactive stores the reader watches, so a
-// change here re-renders an open book live.
+// (LYCM-502) + line spacing (LYCM-110). All write to persisted reactive stores
+// the reader watches, so a change here re-renders an open book live.
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme, type Theme } from '@/theme'
 import { useReadingFont } from '@/reader/readingFont'
+import { useLineSpacing } from '@/reader/lineSpacing'
 import { READING_FONTS, resolveFontFamily } from '@/reader/font'
+import { LINE_SPACINGS } from '@/reader/theme'
 import { isNativeShell } from '@/api/base'
 import { listDevices, revokeDevice, type Device } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
@@ -17,6 +19,7 @@ import InviteReveal from '@/components/InviteReveal.vue'
 const router = useRouter()
 const { theme, set } = useTheme()
 const { font, set: setFont } = useReadingFont()
+const { lineSpacing, set: setLineSpacing } = useLineSpacing()
 
 // Identity is the account now, not a label in this browser (LYCM-801). The name
 // lives on the server and follows the person to every device they read on.
@@ -316,6 +319,26 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
             <p class="specimen" :style="{ fontFamily: specimenFamily }">
               The quick brown fox jumps over the lazy dog.
             </p>
+          </div>
+          <div class="row">
+            <div class="row__text">
+              <div class="row__name">Line spacing</div>
+              <div class="row__hint">
+                How much air sits between the lines, whatever the book asks for.
+              </div>
+            </div>
+            <div class="seg" role="group" aria-label="Line spacing">
+              <button
+                v-for="opt in LINE_SPACINGS"
+                :key="opt.id"
+                type="button"
+                class="seg__btn"
+                :class="{ 'is-active': lineSpacing === opt.id }"
+                @click="setLineSpacing(opt.id)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
           </div>
         </div>
       </div>

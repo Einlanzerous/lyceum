@@ -14,8 +14,9 @@ import type { NavItem } from 'epubjs'
 import { apiFetch } from '@/api/http'
 import { clampProgress } from '@/api/progress'
 import { useTheme } from '@/theme'
-import { FONT_SIZE_DEFAULT, fontSizeCss, stepFontSize, themeStyles } from './theme'
+import { FONT_SIZE_DEFAULT, readerCss, stepFontSize } from './theme'
 import { useReadingFont } from './readingFont'
+import { useLineSpacing } from './lineSpacing'
 import { resolveFontFamily } from './font'
 
 /** Position information emitted on every relocate, for syncing. */
@@ -61,7 +62,7 @@ export interface ReaderControls {
   destroy(): void
 }
 
-const REGISTERED_THEME = 'lyceum'
+const STYLE_ELEMENT_ID = 'lyceum-reader-style'
 const LOCATION_GRANULARITY = 1600
 
 function flattenToc(items: NavItem[]): TocEntry[] {
@@ -80,6 +81,7 @@ export function useReader(
 ): ReaderControls {
   const { theme } = useTheme()
   const { font } = useReadingFont()
+  const { lineSpacing } = useLineSpacing()
 
   const loading = ref(true)
   const error = ref<string | null>(null)
@@ -99,32 +101,42 @@ export function useReader(
   const rendition = shallowRef<Rendition | null>(null)
   let lastPosition: RelocateInfo | null = null
 
-  function applyTheme(): void {
-    const r = rendition.value
-    if (!r) return
-    r.themes.register(REGISTERED_THEME, themeStyles(theme.value))
-    r.themes.select(REGISTERED_THEME)
+  // Theme, size, spacing and typeface all ride in one stylesheet we own and
+  // rewrite in place, rather than epub.js's themes API. Its overrides land as
+  // inline styles on `body` alone, which a publisher's own rules on `p`/`div`
+  // defeat outright (LYCM-110), and its registered themes can only *add* rules
+  // to a content document — never withdraw one, which "Publisher" needs when it
+  // takes the typeface override back off.
+  function styleOptions() {
+    return {
+      theme: theme.value,
+      fontSizePct: fontSize.value,
+      lineSpacing: lineSpacing.value,
+      fontFamily: resolveFontFamily(font.value),
+    }
   }
 
-  function applyFontSize(): void {
-    rendition.value?.themes.fontSize(fontSizeCss(fontSize.value))
+  /** Write (or rewrite) our stylesheet into one rendered content document. */
+  function injectStyles(doc: Document): void {
+    const head = doc.head ?? doc.documentElement
+    if (!head) return
+    let el = doc.getElementById(STYLE_ELEMENT_ID) as HTMLStyleElement | null
+    if (!el) {
+      el = doc.createElement('style')
+      el.id = STYLE_ELEMENT_ID
+      head.appendChild(el)
+    }
+    el.textContent = readerCss(styleOptions())
   }
 
-  // Override the book's typeface, or remove the override to restore the
-  // publisher's own fonts. epub.js re-applies overrides to each rendered
-  // section, so this survives page turns; family and size stay independent.
-  function applyFont(): void {
+  /** Re-style every section currently rendered, after a preference change. */
+  function applyStyles(): void {
     const r = rendition.value
     if (!r) return
-    const family = resolveFontFamily(font.value)
-    if (family) r.themes.font(family)
-    // removeOverride drops the inline font-family so the publisher's own fonts
-    // win again. It ships in epub.js (themes.js) but is missing from the
-    // bundled type defs, hence the cast.
-    else
-      (r.themes as typeof r.themes & { removeOverride(name: string): void }).removeOverride(
-        'font-family',
-      )
+    // getContents() returns one Contents per rendered section; the bundled type
+    // defs declare a single Contents, hence the cast.
+    const contents = r.getContents() as unknown as Contents[]
+    for (const c of contents) if (c.document) injectStyles(c.document)
   }
 
   function recomputePage(): void {
@@ -208,6 +220,9 @@ export function useReader(
       // overlay handles it — see ReaderView).
       r.hooks.content.register((contents: Contents) => {
         const doc = contents.document
+        // Every section is a fresh document, so it needs the stylesheet as it
+        // is rendered — this is what carries the theme across page turns.
+        injectStyles(doc)
         let sx = 0
         let sy = 0
         doc.addEventListener(
@@ -232,9 +247,6 @@ export function useReader(
         )
       })
 
-      applyTheme()
-      applyFontSize()
-      applyFont()
       r.on('relocated', onRelocated)
       r.on('keyup', onKeyup)
 
@@ -286,11 +298,11 @@ export function useReader(
   }
   function increaseFont(): void {
     fontSize.value = stepFontSize(fontSize.value, 1)
-    applyFontSize()
+    applyStyles()
   }
   function decreaseFont(): void {
     fontSize.value = stepFontSize(fontSize.value, -1)
-    applyFontSize()
+    applyStyles()
   }
   function goTo(href: string): void {
     void rendition.value?.display(href)
@@ -311,10 +323,9 @@ export function useReader(
     book.value = null
   }
 
-  // Re-theme the rendered document whenever the app theme flips.
-  watch(theme, applyTheme)
-  // Re-apply the typeface when the reading font is changed from Settings.
-  watch(font, applyFont)
+  // Re-style the rendered sections whenever a reading preference changes — the
+  // app theme, or the typeface / line spacing chosen here or in Settings.
+  watch([theme, font, lineSpacing], applyStyles)
 
   onMounted(() => void load())
 
