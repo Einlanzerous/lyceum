@@ -85,10 +85,14 @@ export interface ReaderStyleOptions {
 // simply ignores the body. Forcing these back to `inherit` gives the ladder
 // something to scale.
 //
+// Containers count as much as the text elements inside them: `li` set to
+// `inherit` still lands on whatever size its `ul` was given, so every wrapper a
+// publisher might size — lists, tables, figures — has to be here too.
+//
 // Headings are handled separately (they keep a hierarchy, in em, so the ladder
 // still reaches them). `sup`, `sub` and `small` are deliberately absent: they
 // are supposed to be smaller than their surroundings.
-const PROSE_SELECTOR = [
+const PROSE_ELEMENTS = [
   'p',
   'div',
   'span',
@@ -98,27 +102,44 @@ const PROSE_SELECTOR = [
   'i',
   'b',
   'u',
+  's',
   'cite',
   'q',
+  'abbr',
+  'center',
+  'ul',
+  'ol',
   'li',
+  'dl',
   'dd',
   'dt',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
   'td',
   'th',
   'caption',
   'blockquote',
-  'pre',
+  'figure',
+  'figcaption',
+  'address',
   'section',
   'article',
   'aside',
   'main',
+  'nav',
   'header',
   'footer',
-  'figcaption',
-  'address',
-].join(', ')
+]
 
-const HEADING_SELECTOR = 'h1, h2, h3, h4, h5, h6'
+// Preformatted and code elements follow the size ladder like everything else,
+// but keep whatever monospace face they were given: `pre` in a proportional
+// typeface loses the column alignment that is the whole point of it.
+const MONO_ELEMENTS = ['pre', 'code', 'kbd', 'samp', 'tt', 'var']
+
+const HEADING_ELEMENTS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']
 
 /** Heading ladder, in em so the reader's size setting still reaches them. */
 const HEADING_SIZES: readonly (readonly [string, string])[] = [
@@ -129,6 +150,20 @@ const HEADING_SIZES: readonly (readonly [string, string])[] = [
   ['h5', '1em'],
   ['h6', '0.9em'],
 ]
+
+// `!important` alone only wins against a publisher's *ordinary* declarations.
+// Against their important ones the cascade falls through to specificity, where
+// a bare `p` (0,0,1) loses to anything class-scoped — `.chapter p
+// { font-size: 9pt !important }` (0,1,1) — and the books that fight hardest are
+// exactly the ones that write CSS like that. Two negations of an id nothing
+// carries buy id-level specificity (2,0,1) while matching precisely the same
+// elements.
+const SPECIFICITY = ':not(#lyceum-reader):not(#lyceum-reader)'
+
+/** One selector matching any of `elements`, outweighing publisher CSS. */
+function selector(...elements: readonly string[][]): string {
+  return `:is(${elements.flat().join(', ')})${SPECIFICITY}`
+}
 
 /**
  * The stylesheet injected into the book's own content document. It is appended
@@ -163,13 +198,13 @@ export function readerCss(opts: ReaderStyleOptions): string {
 
 /* Pin the base the size ladder is a percentage of, so 100% means the same
    thing in every book, and stop the Android WebView inflating text on its own. */
-html {
+html${SPECIFICITY} {
   font-size: 100% !important;
   -webkit-text-size-adjust: 100% !important;
   text-size-adjust: 100% !important;
 }
 
-body {
+body${SPECIFICITY} {
   color: ${palette.color} !important;
   background: ${palette.background} !important;
   font-size: ${fontSizeCss(opts.fontSizePct)} !important;
@@ -177,24 +212,24 @@ body {
 ${family ? `  font-family: ${family} !important;\n` : ''}${wrap}
 }
 
-a {
+a${SPECIFICITY} {
   color: ${palette.color} !important;
 }
 
-${PROSE_SELECTOR} {
+${selector(PROSE_ELEMENTS, MONO_ELEMENTS)} {
   font-size: inherit !important;
   line-height: ${spacing.lineHeight} !important;
 ${wrap}
 }
 
-${HEADING_SELECTOR} {
+${selector(HEADING_ELEMENTS)} {
   line-height: 1.25 !important;
 ${wrap}
 }
 
-${HEADING_SIZES.map(([tag, size]) => `${tag} { font-size: ${size} !important; }`).join('\n')}
+${HEADING_SIZES.map(([tag, size]) => `${tag}${SPECIFICITY} { font-size: ${size} !important; }`).join('\n')}
 
-p {
+p${SPECIFICITY} {
   margin-top: ${spacing.paragraphGap} !important;
   margin-bottom: ${spacing.paragraphGap} !important;
 }
@@ -203,25 +238,25 @@ ${
     ? `
 /* Reach past the publisher's own per-element faces, for the same reason the
    size rules do. Omitted entirely under "Publisher", where the book's fonts
-   are the point. */
-${PROSE_SELECTOR}, ${HEADING_SELECTOR} {
+   are the point — and never applied to the monospace elements, whose face is
+   load-bearing. */
+${selector(PROSE_ELEMENTS, HEADING_ELEMENTS)} {
   font-family: inherit !important;
 }
 `
     : ''
 }
-/* Figures and tables overflow the column the same way a long word does. */
-img, svg, video {
-  max-width: 100% !important;
-  max-height: 100% !important;
-}
-
-table, pre {
+/* Wide blocks overflow the column the same way a long word does. Note that
+   'img' and 'svg' are absent deliberately: epub.js's own adjustImages hook
+   already clamps them to the measured page height, and anything we add here
+   outranks that clamp — a 'max-height: 100%' resolves to 'none' against an
+   auto-height figure wrapper, which is how a tall image escapes the page. */
+video${SPECIFICITY}, table${SPECIFICITY}, pre${SPECIFICITY} {
   max-width: 100% !important;
 }
 
 /* Only wrapping keeps a long preformatted line on its own page. */
-pre {
+pre${SPECIFICITY} {
   white-space: pre-wrap !important;
 }
 `

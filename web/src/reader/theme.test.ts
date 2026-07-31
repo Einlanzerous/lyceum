@@ -19,12 +19,34 @@ const BASE: ReaderStyleOptions = {
   fontFamily: null,
 }
 
-/** The declarations of one rule, by its exact selector. */
-function ruleFor(css: string, selector: string): string {
-  const match = css.match(
-    new RegExp(`(^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`),
-  )
-  return match?.[2] ?? ''
+interface Rule {
+  selector: string
+  body: string
+}
+
+/** Every rule in the sheet, comments stripped. */
+function rules(css: string): Rule[] {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...stripped.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
+    selector: m[1]!.trim(),
+    body: m[2]!.trim(),
+  }))
+}
+
+/** The declarations of the rule whose selector leads with `element`. */
+function ruleFor(css: string, element: string): string {
+  return rules(css).find((r) => r.selector.startsWith(element))?.body ?? ''
+}
+
+/** The rule carrying a given declaration, e.g. 'font-size: inherit'. */
+function ruleDeclaring(css: string, declaration: string): Rule | undefined {
+  return rules(css).find((r) => r.body.includes(declaration))
+}
+
+/** The element names a selector targets, out of its `:is(…)` list. */
+function targets(selector: string): string[] {
+  const list = selector.match(/^:is\(([^)]*)\)/)?.[1] ?? selector
+  return list.split(',').map((s) => s.trim().split(':')[0]!.trim())
 }
 
 describe('clampFontSize', () => {
@@ -101,13 +123,28 @@ describe('readerCss', () => {
   it('puts the size ladder on body and nowhere else', () => {
     const css = readerCss({ ...BASE, fontSizePct: 150 })
     expect(ruleFor(css, 'body')).toContain('font-size: 150% !important')
-
-    const prose = css.match(/\n(p, div, span[^{]*)\{([^}]*)\}/)
-    expect(prose?.[2]).toContain('font-size: inherit !important')
+    expect(ruleDeclaring(css, 'font-size: inherit')).toBeDefined()
     // Any other font-size in the sheet must be relative (the heading ladder),
     // or the reader's setting stops reaching it.
     for (const decl of css.match(/font-size:[^;]+/g) ?? []) {
       expect(decl).toMatch(/inherit|%|em/)
+    }
+  })
+
+  // Setting `li` to inherit is useless while its `ul` still carries the
+  // publisher's absolute size — the containers have to be normalized too.
+  it('normalizes the containers that size their contents', () => {
+    const prose = targets(ruleDeclaring(readerCss(BASE), 'font-size: inherit')!.selector)
+    for (const tag of ['ul', 'ol', 'dl', 'table', 'tbody', 'tr', 'figure', 'blockquote']) {
+      expect(prose).toContain(tag)
+    }
+  })
+
+  // `!important` alone still loses to a publisher's own important rule with any
+  // class specificity, which is exactly what the worst books ship.
+  it('outweighs class-scoped publisher rules', () => {
+    for (const rule of rules(readerCss({ ...BASE, fontFamily: 'Georgia, serif' }))) {
+      expect(rule.selector).toContain(':not(#')
     }
   })
 
@@ -141,22 +178,46 @@ describe('readerCss', () => {
     expect(serif).toContain('font-family: inherit !important')
   })
 
+  // A `pre` in Georgia has lost the column alignment that is the point of it,
+  // and inline `code` beside it must not disagree.
+  it('leaves the monospace elements their face, but not their size', () => {
+    const serif = readerCss({ ...BASE, fontFamily: 'Georgia, serif' })
+    const sized = targets(ruleDeclaring(serif, 'font-size: inherit')!.selector)
+    const refaced = targets(ruleDeclaring(serif, 'font-family: inherit')!.selector)
+    for (const tag of ['pre', 'code', 'kbd', 'samp']) {
+      expect(sized).toContain(tag)
+      expect(refaced).not.toContain(tag)
+    }
+  })
+
+  // epub.js's own adjustImages hook clamps them to the measured page height.
+  // Anything we add outranks it, and `max-height: 100%` computes to `none`
+  // against an auto-height figure wrapper — so a tall plate escaped the page.
+  it('leaves images to epub.js, which measures the page it has', () => {
+    const css = readerCss(BASE)
+    for (const rule of rules(css)) {
+      expect(rule.body).not.toContain('max-height')
+      expect(targets(rule.selector)).not.toContain('img')
+      expect(targets(rule.selector)).not.toContain('svg')
+    }
+  })
+
   // LYCM-106: an unbreakable token overflows the column box, which epub.js does
   // not clip, so the tail lands on top of the next page.
   it('lets long words break, and keeps figures inside the column', () => {
     const css = readerCss(BASE)
     expect(ruleFor(css, 'body')).toContain('overflow-wrap: break-word !important')
     expect(css.match(/overflow-wrap: break-word/g)?.length).toBeGreaterThan(1)
-    expect(ruleFor(css, 'img, svg, video')).toContain('max-width: 100% !important')
-    expect(ruleFor(css, 'pre')).toContain('white-space: pre-wrap !important')
+    expect(ruleDeclaring(css, 'max-width: 100%')).toBeDefined()
+    expect(ruleDeclaring(css, 'white-space: pre-wrap')).toBeDefined()
   })
 
   it('leaves relatively-sized elements alone', () => {
     // sup/sub/small are meant to be smaller than their surroundings; forcing
     // them to inherit would flatten them.
-    const prose = readerCss(BASE).match(/\n(p, div, span[^{]*)\{/)?.[1] ?? ''
+    const prose = targets(ruleDeclaring(readerCss(BASE), 'font-size: inherit')!.selector)
     for (const tag of ['sup', 'sub', 'small']) {
-      expect(prose.split(/,\s*/)).not.toContain(tag)
+      expect(prose).not.toContain(tag)
     }
   })
 })
