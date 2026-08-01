@@ -50,9 +50,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       // The page is the SPA, and anything it throws is otherwise invisible from
       // out here — a rejected promise reads as a book that is merely slow.
       ..setOnConsoleMessage(
-        (msg) => debugPrint('[lyceum-reader] ${msg.level.name}: ${msg.message}'),
+        (msg) =>
+            debugPrint('[lyceum-reader] ${msg.level.name}: ${msg.message}'),
       )
-      ..setBackgroundColor(dark ? const Color(0xFF171717) : const Color(0xFFF7F5F0))
+      ..setBackgroundColor(
+        dark ? const Color(0xFF171717) : const Color(0xFFF7F5F0),
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           // Inject the app's theme/font into the reader's localStorage as early
@@ -78,7 +81,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           },
           onNavigationRequest: (req) {
             final url = req.url;
-            final allowed = url.startsWith(_origin) ||
+            final allowed =
+                url.startsWith(_origin) ||
                 url.startsWith('blob:') ||
                 url.startsWith('data:') ||
                 url.startsWith('about:');
@@ -159,11 +163,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                     width: 26,
                     height: 26,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2.5, color: lyc.brass),
+                      strokeWidth: 2.5,
+                      color: lyc.brass,
+                    ),
                   ),
                   const SizedBox(height: 16),
-                  Text('Finding your place…',
-                      style: TextStyle(color: lyc.muted, fontSize: 13.5)),
+                  Text(
+                    'Finding your place…',
+                    style: TextStyle(color: lyc.muted, fontSize: 13.5),
+                  ),
                 ],
               ),
             ),
@@ -174,16 +182,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 children: [
                   Icon(Icons.error_outline, color: lyc.error, size: 32),
                   const SizedBox(height: 12),
-                  Text("This book won't open",
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    "This book won't open",
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 6),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(_error!,
-                        textAlign: TextAlign.center,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.5, color: lyc.muted)),
+                    child: Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: lyc.muted),
+                    ),
                   ),
                   const SizedBox(height: 18),
                   Row(

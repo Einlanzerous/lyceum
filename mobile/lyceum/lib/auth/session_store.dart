@@ -48,7 +48,9 @@ class SecureTokenStore implements TokenStore {
   Future<void> delete() => _storage.delete(key: kSessionTokenKey);
 }
 
-final tokenStoreProvider = Provider<TokenStore>((ref) => const SecureTokenStore());
+final tokenStoreProvider = Provider<TokenStore>(
+  (ref) => const SecureTokenStore(),
+);
 
 /// The token read from the keystore at boot, injected via a `ProviderScope`
 /// override in `main()`. Reading it is async and every consumer below wants it

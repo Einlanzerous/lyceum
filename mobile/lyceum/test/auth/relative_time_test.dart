@@ -12,23 +12,47 @@ void main() {
     });
 
     test('within the hour is live', () {
-      expect(deviceUsedAt(ago(const Duration(minutes: 5)), now: now), 'active now');
-      expect(deviceUsedAt(ago(const Duration(minutes: 59)), now: now), 'active now');
+      expect(
+        deviceUsedAt(ago(const Duration(minutes: 5)), now: now),
+        'active now',
+      );
+      expect(
+        deviceUsedAt(ago(const Duration(minutes: 59)), now: now),
+        'active now',
+      );
     });
 
     test('crosses to today at one hour, not at midnight', () {
-      expect(deviceUsedAt(ago(const Duration(hours: 1)), now: now), 'last used today');
-      expect(deviceUsedAt(ago(const Duration(hours: 23)), now: now), 'last used today');
+      expect(
+        deviceUsedAt(ago(const Duration(hours: 1)), now: now),
+        'last used today',
+      );
+      expect(
+        deviceUsedAt(ago(const Duration(hours: 23)), now: now),
+        'last used today',
+      );
     });
 
     test('yesterday spans the whole second day', () {
-      expect(deviceUsedAt(ago(const Duration(hours: 24)), now: now), 'last used yesterday');
-      expect(deviceUsedAt(ago(const Duration(hours: 47)), now: now), 'last used yesterday');
+      expect(
+        deviceUsedAt(ago(const Duration(hours: 24)), now: now),
+        'last used yesterday',
+      );
+      expect(
+        deviceUsedAt(ago(const Duration(hours: 47)), now: now),
+        'last used yesterday',
+      );
     });
 
     test('then counts days', () {
-      expect(deviceUsedAt(ago(const Duration(days: 2)), now: now), 'last used 2 days ago');
-      expect(deviceUsedAt(ago(const Duration(days: 90)), now: now), 'last used 90 days ago');
+      expect(
+        deviceUsedAt(ago(const Duration(days: 2)), now: now),
+        'last used 2 days ago',
+      );
+      expect(
+        deviceUsedAt(ago(const Duration(days: 90)), now: now),
+        'last used 90 days ago',
+      );
     });
   });
 
@@ -38,14 +62,29 @@ void main() {
     });
 
     test('says seen, not used — this is a person, not a handset', () {
-      expect(memberSeenAt(ago(const Duration(minutes: 5)), now: now), 'last seen today');
-      expect(memberSeenAt(ago(const Duration(hours: 30)), now: now), 'last seen yesterday');
-      expect(memberSeenAt(ago(const Duration(days: 5)), now: now), 'last seen 5 days ago');
+      expect(
+        memberSeenAt(ago(const Duration(minutes: 5)), now: now),
+        'last seen today',
+      );
+      expect(
+        memberSeenAt(ago(const Duration(hours: 30)), now: now),
+        'last seen yesterday',
+      );
+      expect(
+        memberSeenAt(ago(const Duration(days: 5)), now: now),
+        'last seen 5 days ago',
+      );
     });
 
     test('stops counting past a month', () {
-      expect(memberSeenAt(ago(const Duration(days: 29)), now: now), 'last seen 29 days ago');
-      expect(memberSeenAt(ago(const Duration(days: 30)), now: now), 'last seen a while ago');
+      expect(
+        memberSeenAt(ago(const Duration(days: 29)), now: now),
+        'last seen 29 days ago',
+      );
+      expect(
+        memberSeenAt(ago(const Duration(days: 30)), now: now),
+        'last seen a while ago',
+      );
     });
   });
 
@@ -53,7 +92,10 @@ void main() {
     DateTime ahead(Duration d) => now.add(d);
 
     test('a fresh invite lives 7 days', () {
-      expect(inviteExpiresIn(ahead(const Duration(days: 7)), now: now), 'expires in 7 days');
+      expect(
+        inviteExpiresIn(ahead(const Duration(days: 7)), now: now),
+        'expires in 7 days',
+      );
     });
 
     test('an invite minted seconds ago still says 7 days, not 6', () {
@@ -70,17 +112,32 @@ void main() {
     });
 
     test('singular reads properly', () {
-      expect(inviteExpiresIn(ahead(const Duration(days: 1, hours: 2)), now: now), 'expires in 1 day');
+      expect(
+        inviteExpiresIn(ahead(const Duration(days: 1, hours: 2)), now: now),
+        'expires in 1 day',
+      );
     });
 
     test('under a day, counts hours — rounded, never "0 hours"', () {
-      expect(inviteExpiresIn(ahead(const Duration(hours: 5)), now: now), 'expires in 5 hours');
-      expect(inviteExpiresIn(ahead(const Duration(minutes: 50)), now: now), 'expires in 1 hour');
-      expect(inviteExpiresIn(ahead(const Duration(minutes: 2)), now: now), 'expires in 1 hour');
+      expect(
+        inviteExpiresIn(ahead(const Duration(hours: 5)), now: now),
+        'expires in 5 hours',
+      );
+      expect(
+        inviteExpiresIn(ahead(const Duration(minutes: 50)), now: now),
+        'expires in 1 hour',
+      );
+      expect(
+        inviteExpiresIn(ahead(const Duration(minutes: 2)), now: now),
+        'expires in 1 hour',
+      );
     });
 
     test('a lapsed invite says so', () {
-      expect(inviteExpiresIn(ago(const Duration(hours: 1)), now: now), 'expired');
+      expect(
+        inviteExpiresIn(ago(const Duration(hours: 1)), now: now),
+        'expired',
+      );
     });
   });
 

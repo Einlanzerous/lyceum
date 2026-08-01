@@ -222,10 +222,13 @@ class _TopToast extends StatelessWidget {
         child: FadeTransition(
           opacity: animation,
           child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, -0.7),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+            position:
+                Tween<Offset>(
+                  begin: const Offset(0, -0.7),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(parent: animation, curve: Curves.easeOut),
+                ),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
@@ -235,10 +238,7 @@ class _TopToast extends StatelessWidget {
               ),
               child: Text(
                 text!,
-                style: TextStyle(
-                  color: lyc.text,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(color: lyc.text, fontWeight: FontWeight.w600),
               ),
             ),
           ),

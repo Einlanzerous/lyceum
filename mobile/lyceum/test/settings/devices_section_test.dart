@@ -23,7 +23,10 @@ import '../auth/auth_controller_test_support.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Future<void> pumpDevices(WidgetTester tester, http.Response Function() reply) async {
+  Future<void> pumpDevices(
+    WidgetTester tester,
+    http.Response Function() reply,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final sp = await SharedPreferences.getInstance();
 

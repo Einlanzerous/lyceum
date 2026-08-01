@@ -53,7 +53,8 @@ class _SessionEndedSheet extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w700, color: lyc.text),
               ),
               const TextSpan(
-                text: ' Sign back in on this device to pick up exactly where you '
+                text:
+                    ' Sign back in on this device to pick up exactly where you '
                     'left off — nothing was lost. This can happen if your session '
                     'expired, or was signed out from another device.',
               ),

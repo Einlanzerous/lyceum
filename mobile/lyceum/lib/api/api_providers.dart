@@ -26,8 +26,9 @@ final authClientProvider = Provider<AuthClient>((ref) {
   final client = AuthClient(
     ref.watch(httpClientProvider),
     () => ref.read(sessionTokenProvider),
-    ({required hadToken}) =>
-        ref.read(authControllerProvider.notifier).unauthorized(hadToken: hadToken),
+    ({required hadToken}) => ref
+        .read(authControllerProvider.notifier)
+        .unauthorized(hadToken: hadToken),
   );
   // Deliberately NOT ref.onDispose(client.close) — closing it would close the
   // shared inner client, which httpClientProvider already owns.

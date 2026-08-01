@@ -69,7 +69,10 @@ void main() {
     });
 
     test('does not double a trailing slash on the origin', () {
-      expect(inviteSignInUrl('http://host/', 'lyc_x'), 'http://host/sign-in?token=lyc_x');
+      expect(
+        inviteSignInUrl('http://host/', 'lyc_x'),
+        'http://host/sign-in?token=lyc_x',
+      );
     });
   });
 }

@@ -53,9 +53,11 @@ class ServerUrlController extends Notifier<String> {
   Future<void> clear() => set('');
 }
 
-final serverUrlProvider =
-    NotifierProvider<ServerUrlController, String>(ServerUrlController.new);
+final serverUrlProvider = NotifierProvider<ServerUrlController, String>(
+  ServerUrlController.new,
+);
 
 /// True once a server URL is configured (the web `hasBackend()` on native).
-final hasBackendProvider =
-    Provider<bool>((ref) => ref.watch(serverUrlProvider).isNotEmpty);
+final hasBackendProvider = Provider<bool>(
+  (ref) => ref.watch(serverUrlProvider).isNotEmpty,
+);

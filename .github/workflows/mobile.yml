@@ -31,6 +31,11 @@ jobs:
           cache: true
       - name: Resolve deps
         run: flutter pub get
+      # Keeps the tree dart-format clean. It drifted once, and the cost lands on
+      # whoever next runs `dart format` over a directory: their change arrives
+      # buried in hundreds of lines of unrelated reformatting.
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
       - name: Analyze
         run: flutter analyze
       - name: Test

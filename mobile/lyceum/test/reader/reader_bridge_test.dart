@@ -32,7 +32,10 @@ void main() {
     // The native id (SharedPreferences) and the one the SPA would generate for
     // itself in here. Two ids = two rows in "your devices" and reading positions
     // split across both, for one phone.
-    expect(script(), contains('localStorage.setItem("lyceum.device_id","d1e2v3")'));
+    expect(
+      script(),
+      contains('localStorage.setItem("lyceum.device_id","d1e2v3")'),
+    );
   });
 
   test('removes a stale token when this device holds none', () {
@@ -58,31 +61,47 @@ void main() {
   });
 
   test('still carries the theme and font it always did', () {
-    expect(script(dark: true), contains('localStorage.setItem("lyceum.theme","dark")'));
-    expect(script(dark: false), contains('localStorage.setItem("lyceum.theme","light")'));
+    expect(
+      script(dark: true),
+      contains('localStorage.setItem("lyceum.theme","dark")'),
+    );
+    expect(
+      script(dark: false),
+      contains('localStorage.setItem("lyceum.theme","light")'),
+    );
     expect(
       script(font: ReadingFont.publisher),
       contains('localStorage.setItem("lyceum.readingFont","publisher")'),
     );
   });
 
-  test('keeps the nav hook that returns the SPA\'s "Library" pill to native', () {
-    final s = script();
-    expect(s, contains('__lyceumNavHook'));
-    expect(s, contains('LyceumNav.postMessage("exit")'));
-    expect(s, contains('history.pushState'));
-  });
+  test(
+    'keeps the nav hook that returns the SPA\'s "Library" pill to native',
+    () {
+      final s = script();
+      expect(s, contains('__lyceumNavHook'));
+      expect(s, contains('LyceumNav.postMessage("exit")'));
+      expect(s, contains('history.pushState'));
+    },
+  );
 
-  test('every write is inside the try, so one failure loses none of the others', () {
-    final s = script();
-    final body = s.substring(s.indexOf('try{'), s.indexOf('}catch(e){}'));
-    for (final key in [
-      'lyceum.session_token',
-      'lyceum.device_id',
-      'lyceum.theme',
-      'lyceum.readingFont',
-    ]) {
-      expect(body, contains(key), reason: '$key must be written inside the guard');
-    }
-  });
+  test(
+    'every write is inside the try, so one failure loses none of the others',
+    () {
+      final s = script();
+      final body = s.substring(s.indexOf('try{'), s.indexOf('}catch(e){}'));
+      for (final key in [
+        'lyceum.session_token',
+        'lyceum.device_id',
+        'lyceum.theme',
+        'lyceum.readingFont',
+      ]) {
+        expect(
+          body,
+          contains(key),
+          reason: '$key must be written inside the guard',
+        );
+      }
+    },
+  );
 }

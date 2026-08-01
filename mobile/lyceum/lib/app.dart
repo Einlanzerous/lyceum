@@ -52,7 +52,8 @@ class LyceumApp extends ConsumerWidget {
       darkTheme: buildLyceumTheme(LyceumPalette.dark),
       themeMode: themeMode,
       routerConfig: ref.watch(routerProvider),
-      builder: (context, child) => _SessionGate(child: child ?? const SizedBox()),
+      builder: (context, child) =>
+          _SessionGate(child: child ?? const SizedBox()),
     );
   }
 }
@@ -111,7 +112,10 @@ class _Splash extends StatelessWidget {
             SizedBox(
               width: 22,
               height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.4, color: lyc.brass),
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: lyc.brass,
+              ),
             ),
           ],
         ),

@@ -31,13 +31,15 @@ class SettingsScreen extends ConsumerWidget {
           children: [
             _BackPill(onTap: () => context.go('/')),
             const SizedBox(height: 24),
-            Text('PREFERENCES',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 3,
-                  color: lyc.brass,
-                )),
+            Text(
+              'PREFERENCES',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 3,
+                color: lyc.brass,
+              ),
+            ),
             const SizedBox(height: 6),
             Text('Settings', style: Theme.of(context).textTheme.headlineLarge),
             const SizedBox(height: 28),
@@ -72,7 +74,10 @@ class SettingsScreen extends ConsumerWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Theme', style: TextStyle(fontSize: 14, color: lyc.reading)),
+                  Text(
+                    'Theme',
+                    style: TextStyle(fontSize: 14, color: lyc.reading),
+                  ),
                   LycSegmentedControl<LyceumThemeMode>(
                     selected: mode,
                     onChanged: (m) =>
@@ -96,7 +101,10 @@ class SettingsScreen extends ConsumerWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Font', style: TextStyle(fontSize: 14, color: lyc.reading)),
+                      Text(
+                        'Font',
+                        style: TextStyle(fontSize: 14, color: lyc.reading),
+                      ),
                       LycSegmentedControl<ReadingFont>(
                         selected: font,
                         onChanged: (f) =>

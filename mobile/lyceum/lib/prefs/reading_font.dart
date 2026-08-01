@@ -11,10 +11,10 @@ enum ReadingFont {
   sans;
 
   String get label => switch (this) {
-        ReadingFont.publisher => 'Publisher',
-        ReadingFont.serif => 'Serif',
-        ReadingFont.sans => 'Sans',
-      };
+    ReadingFont.publisher => 'Publisher',
+    ReadingFont.serif => 'Serif',
+    ReadingFont.sans => 'Sans',
+  };
 }
 
 const _kFontKey = 'lyceum.readingFont';
@@ -37,4 +37,5 @@ class ReadingFontController extends Notifier<ReadingFont> {
 
 final readingFontProvider =
     NotifierProvider<ReadingFontController, ReadingFont>(
-        ReadingFontController.new);
+      ReadingFontController.new,
+    );

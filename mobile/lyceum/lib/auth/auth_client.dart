@@ -10,7 +10,6 @@ import 'package:http/http.dart' as http;
 class AuthClient extends http.BaseClient {
   AuthClient(this._inner, this._token, this._onUnauthorized);
 
-
   final http.Client _inner;
 
   /// Read live, per request — not captured at construction. Signing in must
