@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ApiError, listLibrary, setBookFinished, uploadBook } from '@/api/client'
+import { ApiError, deleteBook, listLibrary, setBookFinished, uploadBook } from '@/api/client'
 import type { Book } from '@/api/types'
 
 /** Outcome of an upload attempt, so the view can message each case distinctly. */
@@ -67,6 +67,24 @@ export const useLibraryStore = defineStore('library', {
         await setBookFinished(bookId, finished)
       } catch (err) {
         if (book) book.finished = prev
+        throw err
+      }
+    },
+
+    /**
+     * Remove a book from the library for good: the row, its blobs, and every
+     * reading position go with it (LYCM-109). The tile is dropped optimistically
+     * and put back at its old place if the server refuses, so a failed delete
+     * doesn't silently lose the book from the shelf until the next reload.
+     */
+    async remove(bookId: number): Promise<void> {
+      const index = this.books.findIndex((b) => b.id === bookId)
+      if (index === -1) return
+      const [removed] = this.books.splice(index, 1)
+      try {
+        await deleteBook(bookId)
+      } catch (err) {
+        this.books.splice(index, 0, removed)
         throw err
       }
     },

@@ -168,6 +168,25 @@ function onServerSaved(): void {
 function onSetFinished(id: number, finished: boolean): void {
   void store.setFinished(id, finished)
 }
+
+// Removing a book destroys its file and everyone's place in it, so it always
+// asks first (LYCM-109). Matches the confirm on the review queue's reject.
+async function onRemove(id: number): Promise<void> {
+  const book = books.value.find((b) => b.id === id)
+  if (!book) return
+  if (
+    !window.confirm(
+      `Remove “${book.title}” from the library? This deletes the book and its reading positions, and cannot be undone.`,
+    )
+  ) {
+    return
+  }
+  try {
+    await store.remove(id)
+  } catch (err) {
+    window.alert(err instanceof Error ? err.message : 'Could not remove the book.')
+  }
+}
 </script>
 
 <template>
@@ -307,6 +326,7 @@ function onSetFinished(id: number, finished: boolean): void {
         :key="book.id"
         :book="book"
         @set-finished="onSetFinished"
+        @remove="onRemove"
       />
     </div>
 
@@ -318,6 +338,7 @@ function onSetFinished(id: number, finished: boolean): void {
           :book="item.book"
           :pinned="pinnedId != null && item.book.id === pinnedId"
           @set-finished="onSetFinished"
+          @remove="onRemove"
         />
         <SeriesCard
           v-else
@@ -334,6 +355,8 @@ function onSetFinished(id: number, finished: boolean): void {
             :series="openSeries"
             :arrow-left-pct="arrowLeftPct"
             @close="openKey = null"
+            @set-finished="onSetFinished"
+            @remove="onRemove"
           />
         </Transition>
       </template>

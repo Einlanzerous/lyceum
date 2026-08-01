@@ -34,6 +34,10 @@ const (
 	// ingestReplaced: an existing book at the same source path was updated in
 	// place (a re-stamped watched file), keeping its id and reading positions.
 	ingestReplaced
+	// ingestTombstoned: the content (or the path it arrived at) belongs to a book
+	// somebody deleted, and the file is still sitting in the watched tree. Nothing
+	// was written; the delete stands.
+	ingestTombstoned
 )
 
 // ingestEPUB is the single ingest path shared by HTTP upload and folder ingest:
@@ -56,6 +60,10 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("%w: %v", errNotEPUB, err)
 	}
+
+	// Canonicalize the path's Unicode spelling up front so every identity check
+	// below — and the value that lands in the column — uses one form (LYCM-109).
+	sourcePath = store.NormalizeSourcePath(sourcePath)
 
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
@@ -80,6 +88,23 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		// not a content duplicate; continue
 	default:
 		return store.Book{}, ingestDuplicate, fmt.Errorf("lookup by hash: %w", err)
+	}
+
+	// The watcher re-offers every file in the tree on every scan, so content whose
+	// book was deleted has to be refused explicitly or the delete silently undoes
+	// itself on the next restart (LYCM-109). Uploads skip this check and clear the
+	// tombstone instead: uploading a file is an explicit request for that book.
+	if sourcePath != "" {
+		switch tombstoned, err := a.store.IsSourceTombstoned(ctx, sourcePath, hash); {
+		case err != nil:
+			return store.Book{}, ingestDuplicate, fmt.Errorf("check tombstone: %w", err)
+		case tombstoned:
+			return store.Book{}, ingestTombstoned, nil
+		}
+	} else if err := a.store.ClearTombstone(ctx, sourcePath, hash); err != nil {
+		// Best effort: a stale tombstone only affects a later folder ingest, and
+		// the upload itself has already succeeded in every way that matters.
+		log.Printf("api: clear tombstone for upload %q: %v", source, err)
 	}
 
 	// New content from a watched path that already maps to a book means the file

@@ -11,8 +11,18 @@ import 'library_controller.dart';
 
 String _pct(double v) => '${(v * 100).round()}%';
 
-/// Long-press action sheet for a library tile: mark the book read/unread.
-void _showReadMenu(BuildContext context, WidgetRef ref, Book book) {
+/// Long-press action sheet for a library tile: mark the book read/unread, or
+/// remove it from the library. Mirrors the web tile menu (LYCM-109).
+///
+/// [onRemoved] runs after a book is actually deleted. The series sheet uses it
+/// to close itself, since it renders a snapshot of the group taken when it
+/// opened and would otherwise keep offering the book that just went away.
+void showBookTileMenu(
+  BuildContext context,
+  WidgetRef ref,
+  Book book, {
+  VoidCallback? onRemoved,
+}) {
   showModalBottomSheet<void>(
     context: context,
     builder: (ctx) => SafeArea(
@@ -39,10 +49,64 @@ void _showReadMenu(BuildContext context, WidgetRef ref, Book book) {
                   .setFinished(book.id, !book.finished);
             },
           ),
+          ListTile(
+            leading: Icon(
+              Icons.delete_outline_rounded,
+              color: context.lyc.error,
+            ),
+            title: Text(
+              'Remove from library',
+              style: TextStyle(color: context.lyc.error),
+            ),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _confirmRemove(context, ref, book, onRemoved);
+            },
+          ),
         ],
       ),
     ),
   );
+}
+
+/// Destructive, and it takes the book's file and reading positions with it, so
+/// it always asks first.
+Future<void> _confirmRemove(
+  BuildContext context,
+  WidgetRef ref,
+  Book book,
+  VoidCallback? onRemoved,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Remove book?'),
+      content: Text(
+        '“${book.title}” will be deleted from the library, along with your '
+        'place in it. This cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: Text('Remove', style: TextStyle(color: ctx.lyc.error)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  try {
+    await ref.read(libraryControllerProvider.notifier).remove(book.id);
+    onRemoved?.call();
+  } catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Could not remove “${book.title}”: $e')),
+    );
+  }
 }
 
 /// Grid tile: a 2:3 cover (or generated fallback) with an optional progress
@@ -58,7 +122,7 @@ class BookCard extends ConsumerWidget {
     final client = ref.watch(lyceumClientProvider);
     return GestureDetector(
       onTap: () => context.push('/reader/${book.id}'),
-      onLongPress: () => _showReadMenu(context, ref, book),
+      onLongPress: () => showBookTileMenu(context, ref, book),
       behavior: HitTestBehavior.opaque,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,6 +217,7 @@ class BookListTile extends ConsumerWidget {
     final client = ref.watch(lyceumClientProvider);
     return GestureDetector(
       onTap: () => context.push('/reader/${book.id}'),
+      onLongPress: () => showBookTileMenu(context, ref, book),
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),

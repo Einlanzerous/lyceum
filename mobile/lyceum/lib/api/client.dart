@@ -342,6 +342,15 @@ class LyceumClient {
     if (r.statusCode != 204) _throw(r);
   }
 
+  /// `DELETE /books/{id}` — remove a book from the library for good, along with
+  /// its stored file and everyone's place in it (LYCM-109). A folder-ingested
+  /// book's source file is left where it is in the server's watched media tree;
+  /// the server records the deletion so it is not re-ingested.
+  Future<void> deleteBook(int id) async {
+    final r = await _http.delete(_uri('/books/$id')).timeout(timeout);
+    if (r.statusCode != 204) _throw(r);
+  }
+
   /// `POST /ingest/batches` — flush a set of scanned ISBNs as one review batch
   /// (LYCM-602). The server resolves each scan to a candidate and returns the
   /// batch with per-status counts; confirming/reviewing them is a web/desktop
