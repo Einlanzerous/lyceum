@@ -300,13 +300,12 @@ class _Shelf extends ConsumerWidget {
                   ),
                   SeriesItem(:final series) => SeriesTile(
                     series: series,
-                    // The resume volume, not the pinned one: finishing a
-                    // volume keeps its series pinned (LYCM-108), and Continue
-                    // has to point at the next book, not the one just read.
+                    // pinId already resolves to the volume to continue, so
+                    // the chip never reopens a book just finished (LYCM-108).
                     continueBookId:
                         pinId != null &&
                             series.members.any((m) => m.id == pinId)
-                        ? series.resumeBook.id
+                        ? pinId
                         : null,
                   ),
                 };

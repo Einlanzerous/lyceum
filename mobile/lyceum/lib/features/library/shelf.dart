@@ -119,45 +119,103 @@ int resumeIndex(List<Book> members) {
   return 0;
 }
 
-/// The id of the book to pin to the top of the shelf — your "continue reading".
-/// It is the most-recently-read book whose *shelf item* still has something left
-/// to read, which is not the same as the book itself being mid-read (LYCM-108):
-/// finish volume 2 of a trilogy and the series is still what you are reading, so
-/// its card stays pinned and resumes into volume 3.
-///
-/// A candidate that leads nowhere — a finished standalone, a series read to the
-/// end — is skipped rather than pinned, and the search falls through to the next
-/// most recent. So finishing a one-off leaves whatever else you are mid-way
-/// through at the top, instead of clearing the slot.
-///
-/// Returns null when nothing you have opened has anything left. Nothing here
-/// goes stale: it keys off the newest readAt, so reading anything else moves the
-/// pin. Mirrors `pinnedBookId` in web/src/library/series.ts.
-int? pinnedBookId(List<Book> books) {
-  final bySeries = <String, List<Book>>{};
-  for (final b in books) {
-    final key = (b.series ?? '').trim().toLowerCase();
-    if (key.isEmpty) continue;
-    bySeries.putIfAbsent(key, () => []).add(b);
-  }
+/// A series needs this many volumes to roll up into one tile; below it its books
+/// stay loose. buildShelf and pinnedBookId have to agree on the threshold, so
+/// they share it.
+const _seriesMinMembers = 2;
 
-  // Whether the shelf item holding [b] still offers an unread volume. A series
-  // of one renders as a loose book (see buildShelf), so it is judged as one.
-  bool leadsSomewhere(Book b) {
-    final members = bySeries[(b.series ?? '').trim().toLowerCase()];
-    if (members != null && members.length > 1) {
-      return members.any((m) => memberStatus(m) != MemberStatus.finished);
+/// Split books into series groups (keyed by normalized name) and loose books.
+({Map<String, ({String name, List<Book> members})> groups, List<Book> loose})
+_groupBySeries(List<Book> books) {
+  final groups = <String, ({String name, List<Book> members})>{};
+  final loose = <Book>[];
+  for (final b in books) {
+    final series = (b.series ?? '').trim();
+    if (series.isEmpty) {
+      loose.add(b);
+      continue;
     }
-    return memberStatus(b) != MemberStatus.finished;
+    final key = series.toLowerCase();
+    final g = groups[key];
+    if (g != null) {
+      g.members.add(b);
+    } else {
+      groups[key] = (name: series, members: [b]);
+    }
   }
+  return (groups: groups, loose: loose);
+}
+
+/// Members in reading order: by seriesIndex, then title.
+List<Book> _orderMembers(List<Book> members) => [...members]
+  ..sort((a, b) {
+    final ai = a.seriesIndex ?? double.infinity;
+    final bi = b.seriesIndex ?? double.infinity;
+    if (ai != bi) return ai.compareTo(bi);
+    final t = _compareText(a.title, b.title);
+    return t != 0 ? t : a.id - b.id;
+  });
+
+/// The books making up the shelf item that holds [book] — its series' members
+/// when that series rolls up into a tile, else the book on its own.
+List<Book> _itemMembers(
+  Book book,
+  Map<String, ({String name, List<Book> members})> groups,
+) {
+  final g = groups[(book.series ?? '').trim().toLowerCase()];
+  return g != null && g.members.length >= _seriesMinMembers
+      ? g.members
+      : [book];
+}
+
+/// The book to continue — pinned to the top of the shelf, and what the series
+/// tile's "Continue" chip opens. Every view takes its pin from this one id, so
+/// the grid, the list and the chip cannot disagree about where you left off.
+///
+/// It is *not* simply the last book you touched. The pin follows the most
+/// recently read book whose **shelf item** still has something left to read
+/// (LYCM-108): finish volume 2 of a trilogy and the series is still what you are
+/// reading, so its tile stays pinned — and the id handed back is volume 3, not
+/// the volume you just closed.
+///
+/// Two things are deliberately excluded:
+///
+/// - **Dead ends.** A finished standalone or a fully-read series is skipped, and
+///   the search falls through to the next most recent, so finishing a one-off
+///   leaves whatever else you are part-way through at the top instead of
+///   clearing the slot.
+/// - **Books you only opened.** readAt is stamped from any saved position,
+///   including the progress=0 one a still-open reader flushes before pagination
+///   settles, so a book at notStarted has not actually been read and must not
+///   take the pin from your real current read.
+///
+/// Returns null when nothing you have read leads anywhere. Mirrors
+/// `pinnedBookId` in web/src/library/series.ts.
+int? pinnedBookId(List<Book> books) {
+  final grouped = _groupBySeries(books);
 
   Book? best;
+  var bestItem = <Book>[];
   for (final b in books) {
     if (b.readAt == null) continue;
-    if (!leadsSomewhere(b)) continue;
-    if (best == null || b.readAt!.compareTo(best.readAt ?? '') > 0) best = b;
+    if (memberStatus(b) == MemberStatus.notStarted) continue;
+    final members = _itemMembers(b, grouped.groups);
+    if (!members.any((m) => memberStatus(m) != MemberStatus.finished)) {
+      continue; // dead end
+    }
+    if (best == null || b.readAt!.compareTo(best.readAt ?? '') > 0) {
+      best = b;
+      bestItem = members;
+    }
   }
-  return best?.id;
+  if (best == null) return null;
+
+  // Still part-way through it: that is exactly where you continue. Otherwise it
+  // is a finished volume of a series that (checked above) has one left, so hand
+  // back that volume rather than the one just closed.
+  if (memberStatus(best) != MemberStatus.finished) return best.id;
+  final ordered = _orderMembers(bestItem);
+  return ordered[resumeIndex(ordered)].id;
 }
 
 int _compareText(String a, String b) =>
@@ -220,14 +278,7 @@ String _pickAuthor(List<Book> members) {
 }
 
 SeriesGroup _buildGroup(String name, List<Book> members) {
-  final ordered = [...members]
-    ..sort((a, b) {
-      final ai = a.seriesIndex ?? double.infinity;
-      final bi = b.seriesIndex ?? double.infinity;
-      if (ai != bi) return ai.compareTo(bi);
-      final t = _compareText(a.title, b.title);
-      return t != 0 ? t : a.id - b.id;
-    });
+  final ordered = _orderMembers(members);
   final progress =
       ordered.fold<double>(
         0,
@@ -254,23 +305,9 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
 /// Group books into shelf items and order them by [sort]. A series of ≥2 books
 /// becomes one series item; a series of 1 (or none) stays a loose book.
 List<ShelfItem> buildShelf(List<Book> books, SortState sort, {int? pinBookId}) {
-  final groups = <String, ({String name, List<Book> members})>{};
-  final loose = <Book>[];
-
-  for (final b in books) {
-    final series = (b.series ?? '').trim();
-    if (series.isEmpty) {
-      loose.add(b);
-      continue;
-    }
-    final key = series.toLowerCase();
-    final g = groups[key];
-    if (g != null) {
-      g.members.add(b);
-    } else {
-      groups[key] = (name: series, members: [b]);
-    }
-  }
+  final grouped = _groupBySeries(books);
+  final groups = grouped.groups;
+  final loose = grouped.loose;
 
   final entries =
       <({ShelfItem item, String title, String author, String added, int id})>[];
@@ -284,7 +321,7 @@ List<ShelfItem> buildShelf(List<Book> books, SortState sort, {int? pinBookId}) {
     ));
   }
   for (final g in groups.values) {
-    if (g.members.length == 1) {
+    if (g.members.length < _seriesMinMembers) {
       final only = g.members.first;
       entries.add((
         item: BookItem(only),

@@ -6,9 +6,9 @@ import type { SeriesGroup } from '@/library/series'
 
 // continueBookId is the volume to resume when this series is the pinned "current
 // read": it turns the Continue chip into a direct link into that book, rather
-// than opening the drawer. It is the series' resumeBook, not whichever volume
-// was read most recently — finishing volume 2 keeps the series pinned, and the
-// chip has to point at volume 3 (LYCM-108).
+// than opening the drawer. It is pinnedBookId, which already resolves to the
+// volume to continue — finishing volume 2 keeps the series pinned and moves the
+// pin to volume 3, so the chip never reopens the book just closed (LYCM-108).
 const props = defineProps<{ series: SeriesGroup; open: boolean; continueBookId?: number | null }>()
 defineEmits<{ (e: 'toggle'): void }>()
 

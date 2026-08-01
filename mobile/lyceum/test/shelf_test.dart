@@ -234,11 +234,14 @@ void main() {
     // LYCM-108: finishing a volume used to drop its series out of the pinned
     // slot — the exact moment you most want the next book one tap away.
     test(
-      'keeps a series pinned after finishing a volume, while one is unread',
+      'after finishing a volume, points at the next one and keeps the series pinned',
       () {
         final books = [
+          // Sorts first by title, so the pin has to actually move the series tile.
+          _book(id: 9, title: 'Aardvarks'),
           _book(
             id: 1,
+            title: 'Chronicles 1',
             series: 'Chronicles',
             seriesIndex: 1,
             finished: true,
@@ -246,21 +249,29 @@ void main() {
           ),
           _book(
             id: 2,
+            title: 'Chronicles 2',
             series: 'Chronicles',
             seriesIndex: 2,
             finished: true,
             readAt: '2026-06-01T00:00:00Z',
           ),
-          _book(id: 3, series: 'Chronicles', seriesIndex: 3),
+          _book(
+            id: 3,
+            title: 'Chronicles 3',
+            series: 'Chronicles',
+            seriesIndex: 3,
+          ),
         ];
-        expect(pinnedBookId(books), 2);
+        // The unread volume, not the one just closed — this id drives the grid
+        // pin, the list pin and the Continue chip alike.
+        expect(pinnedBookId(books), 3);
 
-        // And the shelf floats the series item, which resumes into volume 3.
         final items = buildShelf(
           books,
           const SortState(key: SortKey.title, ascending: true),
           pinBookId: pinnedBookId(books),
         );
+        expect(items.length, 2); // the loose book + the series tile
         expect(items.first, isA<SeriesItem>());
         expect((items.first as SeriesItem).series.resumeBook.id, 3);
       },
@@ -292,6 +303,40 @@ void main() {
       final books = [
         _book(id: 1, progress: 0.4, readAt: '2026-05-01T00:00:00Z'),
         _book(id: 2, finished: true, readAt: '2026-06-01T00:00:00Z'),
+      ];
+      expect(pinnedBookId(books), 1);
+    });
+
+    // readAt is stamped from any saved position, including the progress=0 one a
+    // still-open reader flushes before pagination settles. Opening a book and
+    // closing it must not take the pin off what you are actually reading.
+    test('ignores a book that was opened but never got anywhere', () {
+      final books = [
+        _book(id: 1, progress: 0.4, readAt: '2026-05-01T00:00:00Z'),
+        _book(id: 2, progress: 0, readAt: '2026-06-01T00:00:00Z'),
+      ];
+      expect(pinnedBookId(books), 1);
+    });
+
+    // resumeIndex picks the furthest in-progress volume, which is not
+    // necessarily the one you last had open. While a volume is unfinished, the
+    // pin stays on it.
+    test('keeps the pin on the volume you are part-way through', () {
+      final books = [
+        _book(
+          id: 1,
+          series: 'Split',
+          seriesIndex: 1,
+          progress: 0.2,
+          readAt: '2026-06-01T00:00:00Z',
+        ),
+        _book(
+          id: 3,
+          series: 'Split',
+          seriesIndex: 3,
+          progress: 0.5,
+          readAt: '2026-01-01T00:00:00Z',
+        ),
       ];
       expect(pinnedBookId(books), 1);
     });
