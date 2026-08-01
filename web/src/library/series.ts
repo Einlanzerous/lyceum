@@ -20,6 +20,13 @@ export interface SeriesGroup {
   progress: number
   /** The book whose cover represents the stack (first with a cover, else first). */
   coverBook: Book
+  /**
+   * The volume "Continue" should open — resumeIndex applied to members. Carried
+   * on the group so the chip and the cover always name the same book: the pinned
+   * book may now be a *finished* volume (LYCM-108), which is not where you want
+   * to be sent.
+   */
+  resumeBook: Book
   finishedCount: number
 }
 
@@ -57,15 +64,44 @@ function normalizeKey(series: string): string {
 }
 
 /**
- * The id of the book to pin to the top of the shelf: the most-recently-read book
- * that is still in progress (your "continue reading"). Returns null when nothing
- * is mid-read.
+ * The id of the book to pin to the top of the shelf — your "continue reading".
+ * It is the most-recently-read book whose *shelf item* still has something left
+ * to read, which is not the same as the book itself being mid-read (LYCM-108):
+ * finish volume 2 of a trilogy and the series is still what you are reading, so
+ * its card stays pinned and resumes into volume 3.
+ *
+ * A candidate that leads nowhere — a finished standalone, a series read to the
+ * end — is skipped rather than pinned, and the search falls through to the next
+ * most recent. So finishing a one-off leaves whatever else you are mid-way
+ * through at the top, instead of clearing the slot.
+ *
+ * Returns null when nothing you have opened has anything left. Nothing here goes
+ * stale: it keys off the newest read_at, so reading anything else moves the pin.
  */
 export function pinnedBookId(books: readonly Book[]): number | null {
+  const bySeries = new Map<string, Book[]>()
+  for (const b of books) {
+    const key = normalizeKey(b.series ?? '')
+    if (!key) continue
+    const members = bySeries.get(key)
+    if (members) members.push(b)
+    else bySeries.set(key, [b])
+  }
+
+  // Whether the shelf item holding b still offers an unread volume. A series of
+  // one renders as a plain book card (see buildShelf), so it is judged as one.
+  const leadsSomewhere = (b: Book): boolean => {
+    const members = bySeries.get(normalizeKey(b.series ?? ''))
+    if (members && members.length > 1) {
+      return members.some((m) => memberStatus(m) !== 'finished')
+    }
+    return memberStatus(b) !== 'finished'
+  }
+
   let best: Book | null = null
   for (const b of books) {
     if (!b.read_at) continue
-    if (memberStatus(b) !== 'in-progress') continue // not finished, not unstarted
+    if (!leadsSomewhere(b)) continue
     if (!best || b.read_at > (best.read_at ?? '')) best = b
   }
   return best ? best.id : null
@@ -111,6 +147,7 @@ function buildGroup(name: string, members: Book[]): SeriesGroup {
     members: ordered,
     progress,
     coverBook,
+    resumeBook: onBook,
     finishedCount,
   }
 }

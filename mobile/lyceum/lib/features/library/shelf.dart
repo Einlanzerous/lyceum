@@ -62,6 +62,7 @@ class SeriesGroup {
     required this.members,
     required this.progress,
     required this.coverBook,
+    required this.resumeBook,
   });
 
   final String name;
@@ -75,6 +76,12 @@ class SeriesGroup {
 
   /// The book whose cover represents the stack.
   final Book coverBook;
+
+  /// The volume "Continue" should open — resumeIndex applied to members. Carried
+  /// on the group so the chip and the cover always name the same book: the
+  /// pinned book may now be a *finished* volume (LYCM-108), which is not where
+  /// you want to be sent.
+  final Book resumeBook;
 }
 
 /// A shelf entry: either a loose book or a rolled-up series.
@@ -112,14 +119,42 @@ int resumeIndex(List<Book> members) {
   return 0;
 }
 
-/// The id of the book to pin to the top of the shelf: the most-recently-read
-/// book still in progress (your "continue reading"), or null when none is
-/// mid-read.
+/// The id of the book to pin to the top of the shelf — your "continue reading".
+/// It is the most-recently-read book whose *shelf item* still has something left
+/// to read, which is not the same as the book itself being mid-read (LYCM-108):
+/// finish volume 2 of a trilogy and the series is still what you are reading, so
+/// its card stays pinned and resumes into volume 3.
+///
+/// A candidate that leads nowhere — a finished standalone, a series read to the
+/// end — is skipped rather than pinned, and the search falls through to the next
+/// most recent. So finishing a one-off leaves whatever else you are mid-way
+/// through at the top, instead of clearing the slot.
+///
+/// Returns null when nothing you have opened has anything left. Nothing here
+/// goes stale: it keys off the newest readAt, so reading anything else moves the
+/// pin. Mirrors `pinnedBookId` in web/src/library/series.ts.
 int? pinnedBookId(List<Book> books) {
+  final bySeries = <String, List<Book>>{};
+  for (final b in books) {
+    final key = (b.series ?? '').trim().toLowerCase();
+    if (key.isEmpty) continue;
+    bySeries.putIfAbsent(key, () => []).add(b);
+  }
+
+  // Whether the shelf item holding [b] still offers an unread volume. A series
+  // of one renders as a loose book (see buildShelf), so it is judged as one.
+  bool leadsSomewhere(Book b) {
+    final members = bySeries[(b.series ?? '').trim().toLowerCase()];
+    if (members != null && members.length > 1) {
+      return members.any((m) => memberStatus(m) != MemberStatus.finished);
+    }
+    return memberStatus(b) != MemberStatus.finished;
+  }
+
   Book? best;
   for (final b in books) {
     if (b.readAt == null) continue;
-    if (memberStatus(b) != MemberStatus.inProgress) continue;
+    if (!leadsSomewhere(b)) continue;
     if (best == null || b.readAt!.compareTo(best.readAt ?? '') > 0) best = b;
   }
   return best?.id;
@@ -212,6 +247,7 @@ SeriesGroup _buildGroup(String name, List<Book> members) {
     members: ordered,
     progress: progress,
     coverBook: coverBook,
+    resumeBook: onBook,
   );
 }
 

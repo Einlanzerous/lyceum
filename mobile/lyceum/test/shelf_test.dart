@@ -10,6 +10,8 @@ Book _book({
   String? addedAt,
   String? series,
   double? seriesIndex,
+  String? readAt,
+  bool finished = false,
 }) => Book(
   id: id,
   title: title ?? 'Book $id',
@@ -19,6 +21,8 @@ Book _book({
   addedAt: addedAt,
   series: series,
   seriesIndex: seriesIndex,
+  readAt: readAt,
+  finished: finished,
 );
 
 void main() {
@@ -225,6 +229,85 @@ void main() {
 
     test('returns null when nothing is mid-read', () {
       expect(pinnedBookId([_book(id: 1)]), isNull);
+    });
+
+    // LYCM-108: finishing a volume used to drop its series out of the pinned
+    // slot — the exact moment you most want the next book one tap away.
+    test(
+      'keeps a series pinned after finishing a volume, while one is unread',
+      () {
+        final books = [
+          _book(
+            id: 1,
+            series: 'Chronicles',
+            seriesIndex: 1,
+            finished: true,
+            readAt: '2026-01-01T00:00:00Z',
+          ),
+          _book(
+            id: 2,
+            series: 'Chronicles',
+            seriesIndex: 2,
+            finished: true,
+            readAt: '2026-06-01T00:00:00Z',
+          ),
+          _book(id: 3, series: 'Chronicles', seriesIndex: 3),
+        ];
+        expect(pinnedBookId(books), 2);
+
+        // And the shelf floats the series item, which resumes into volume 3.
+        final items = buildShelf(
+          books,
+          const SortState(key: SortKey.title, ascending: true),
+          pinBookId: pinnedBookId(books),
+        );
+        expect(items.first, isA<SeriesItem>());
+        expect((items.first as SeriesItem).series.resumeBook.id, 3);
+      },
+    );
+
+    test('stops pinning a series once every volume is read', () {
+      final books = [
+        _book(
+          id: 1,
+          series: 'Done',
+          seriesIndex: 1,
+          finished: true,
+          readAt: '2026-01-01T00:00:00Z',
+        ),
+        _book(
+          id: 2,
+          series: 'Done',
+          seriesIndex: 2,
+          finished: true,
+          readAt: '2026-06-01T00:00:00Z',
+        ),
+      ];
+      expect(pinnedBookId(books), isNull);
+    });
+
+    // A finished standalone read more recently must not clear the slot:
+    // whatever else you are mid-way through is still the answer.
+    test('falls through a dead-end candidate to the next most recent', () {
+      final books = [
+        _book(id: 1, progress: 0.4, readAt: '2026-05-01T00:00:00Z'),
+        _book(id: 2, finished: true, readAt: '2026-06-01T00:00:00Z'),
+      ];
+      expect(pinnedBookId(books), 1);
+    });
+
+    // A one-book "series" renders as a loose book, so it is judged as one.
+    test('treats a series of one as a standalone', () {
+      final books = [
+        _book(
+          id: 1,
+          series: 'Solo',
+          seriesIndex: 1,
+          finished: true,
+          readAt: '2026-06-01T00:00:00Z',
+        ),
+      ];
+      expect(pinnedBookId(books), isNull);
     });
   });
 

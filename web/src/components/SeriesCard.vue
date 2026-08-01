@@ -4,9 +4,11 @@ import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { SeriesGroup } from '@/library/series'
 
-// continueBookId is the id of the in-progress volume when this series is the
-// pinned "current read": it turns the Continue chip into a direct link into that
-// book, rather than opening the drawer.
+// continueBookId is the volume to resume when this series is the pinned "current
+// read": it turns the Continue chip into a direct link into that book, rather
+// than opening the drawer. It is the series' resumeBook, not whichever volume
+// was read most recently — finishing volume 2 keeps the series pinned, and the
+// chip has to point at volume 3 (LYCM-108).
 const props = defineProps<{ series: SeriesGroup; open: boolean; continueBookId?: number | null }>()
 defineEmits<{ (e: 'toggle'): void }>()
 
