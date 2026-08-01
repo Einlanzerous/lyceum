@@ -35,8 +35,11 @@ function onSelect(key: string): void {
   }
 }
 
+// The resume target comes off the group, so the drawer's Resume button, the
+// card's cover and the pinned Continue chip all name the same volume. The index
+// is only for the "Resume book N" label.
+const resumeBook = computed<Book>(() => props.series.resumeBook)
 const resumeAt = computed(() => resumeIndex(props.series.members))
-const resumeBook = computed<Book>(() => props.series.members[resumeAt.value]!)
 
 const STATUS_LABEL: Record<MemberStatus, string> = {
   finished: 'Finished',

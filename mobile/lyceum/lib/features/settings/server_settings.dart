@@ -59,12 +59,15 @@ class _ServerSettingsState extends ConsumerState<ServerSettings> {
       final reached = await client.ping();
       setState(() {
         _ok = reached;
-        _status = reached ? 'Reached the server.' : 'Server did not respond OK.';
+        _status = reached
+            ? 'Reached the server.'
+            : 'Server did not respond OK.';
       });
     } catch (_) {
       setState(() {
         _ok = false;
-        _status = "Couldn't reach the server. Check the address and that it's running.";
+        _status =
+            "Couldn't reach the server. Check the address and that it's running.";
       });
     } finally {
       if (mounted) setState(() => _testing = false);
@@ -90,15 +93,22 @@ class _ServerSettingsState extends ConsumerState<ServerSettings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Server URL',
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: lyc.text)),
+        Text(
+          'Server URL',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: lyc.text,
+          ),
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _controller,
           keyboardType: TextInputType.url,
           autocorrect: false,
-          decoration: const InputDecoration(hintText: 'http://192.168.1.10:8080'),
+          decoration: const InputDecoration(
+            hintText: 'http://192.168.1.10:8080',
+          ),
           onChanged: (_) => setState(() => _status = null),
         ),
         const SizedBox(height: 12),
@@ -108,7 +118,10 @@ class _ServerSettingsState extends ConsumerState<ServerSettings> {
               onPressed: _testing ? null : _test,
               child: _testing
                   ? const SizedBox(
-                      width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('Test'),
             ),
             const SizedBox(width: 10),

@@ -300,6 +300,8 @@ class _Shelf extends ConsumerWidget {
                   ),
                   SeriesItem(:final series) => SeriesTile(
                     series: series,
+                    // pinId already resolves to the volume to continue, so
+                    // the chip never reopens a book just finished (LYCM-108).
                     continueBookId:
                         pinId != null &&
                             series.members.any((m) => m.id == pinId)

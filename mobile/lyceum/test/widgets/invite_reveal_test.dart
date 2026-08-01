@@ -30,7 +30,10 @@ void main() {
   );
 
   /// Drives the reveal and reports how it closed.
-  Future<InviteRevealResult?> open(WidgetTester tester, {String? signInUrl}) async {
+  Future<InviteRevealResult?> open(
+    WidgetTester tester, {
+    String? signInUrl,
+  }) async {
     InviteRevealResult? result;
     await tester.pumpWidget(
       MaterialApp(
@@ -65,7 +68,9 @@ void main() {
         });
   });
 
-  testWidgets('the key is shown, and honestly labelled as once-only', (tester) async {
+  testWidgets('the key is shown, and honestly labelled as once-only', (
+    tester,
+  ) async {
     await open(tester);
     expect(find.text('lyc_theOnlyCopy'), findsOneWidget);
     expect(find.text('A key for Theo'), findsOneWidget);
@@ -82,8 +87,13 @@ void main() {
     expect(find.textContaining('SHORT CODE'), findsOneWidget);
   });
 
-  testWidgets('renders the key as a QR when given a sign-in URL', (tester) async {
-    await open(tester, signInUrl: 'http://192.168.1.9:8080/sign-in?token=lyc_theOnlyCopy');
+  testWidgets('renders the key as a QR when given a sign-in URL', (
+    tester,
+  ) async {
+    await open(
+      tester,
+      signInUrl: 'http://192.168.1.9:8080/sign-in?token=lyc_theOnlyCopy',
+    );
     expect(find.byType(QrImageView), findsOneWidget);
     expect(find.textContaining('scan this with their camera'), findsOneWidget);
   });
@@ -228,7 +238,11 @@ void main() {
     await tester.tap(find.text('Copy & close'));
     await tester.pumpAndSettle();
 
-    expect(closed, isFalse, reason: 'the key is still on screen and still the only copy');
+    expect(
+      closed,
+      isFalse,
+      reason: 'the key is still on screen and still the only copy',
+    );
     expect(result, isNull);
     expect(find.text('lyc_theOnlyCopy'), findsOneWidget);
     expect(find.textContaining("Couldn't reach the clipboard"), findsOneWidget);
@@ -264,7 +278,9 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('is addressed to the device, not to a housemate', (tester) async {
+    testWidgets('is addressed to the device, not to a housemate', (
+      tester,
+    ) async {
       await openSelf(tester);
 
       expect(find.text('A key for your next device'), findsOneWidget);
@@ -281,7 +297,10 @@ void main() {
         find.textContaining("This is the only time you'll see this key."),
         findsOneWidget,
       );
-      expect(find.textContaining('Just issue yourself another.'), findsOneWidget);
+      expect(
+        find.textContaining('Just issue yourself another.'),
+        findsOneWidget,
+      );
       expect(find.text('lyc_theOnlyCopy'), findsOneWidget);
     });
 
@@ -292,7 +311,10 @@ void main() {
       );
 
       expect(find.byType(QrImageView), findsOneWidget);
-      expect(find.textContaining('scan this with the other device'), findsOneWidget);
+      expect(
+        find.textContaining('scan this with the other device'),
+        findsOneWidget,
+      );
       expect(find.textContaining('their camera'), findsNothing);
     });
   });
@@ -308,8 +330,11 @@ void main() {
             builder: (context) => Scaffold(
               body: Center(
                 child: ElevatedButton(
-                  onPressed: () async =>
-                      reissue = await showInviteLostSheet(context, 'Theo', self: self),
+                  onPressed: () async => reissue = await showInviteLostSheet(
+                    context,
+                    'Theo',
+                    self: self,
+                  ),
                   child: const Text('open'),
                 ),
               ),
@@ -322,7 +347,9 @@ void main() {
       return reissue;
     }
 
-    testWidgets("offers to re-issue a housemate's invite by name", (tester) async {
+    testWidgets("offers to re-issue a housemate's invite by name", (
+      tester,
+    ) async {
       await openLost(tester, self: false);
 
       expect(find.text('That invite is gone'), findsOneWidget);
@@ -331,7 +358,9 @@ void main() {
 
     // Reassurance matters more here: losing your *own* key on the device you are
     // holding invites the fear that you have locked yourself out of it.
-    testWidgets('offers to re-issue your own key, and says nothing broke', (tester) async {
+    testWidgets('offers to re-issue your own key, and says nothing broke', (
+      tester,
+    ) async {
       await openLost(tester, self: true);
 
       expect(find.text('That key is gone'), findsOneWidget);
@@ -340,7 +369,10 @@ void main() {
         find.textContaining('every device already signed in are untouched'),
         findsOneWidget,
       );
-      expect(find.textContaining('Issue another invite for Theo'), findsNothing);
+      expect(
+        find.textContaining('Issue another invite for Theo'),
+        findsNothing,
+      );
     });
 
     testWidgets('takes "Not now" as a no', (tester) async {

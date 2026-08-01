@@ -48,11 +48,8 @@ Future<InviteRevealResult> showInviteReveal(
     // (The back gesture still works — Android's contract — and lands as
     // `dismissed`, which is exactly the recovery path.)
     dismissible: false,
-    builder: (context) => _InviteRevealSheet(
-      invite: invite,
-      signInUrl: signInUrl,
-      self: self,
-    ),
+    builder: (context) =>
+        _InviteRevealSheet(invite: invite, signInUrl: signInUrl, self: self),
   );
   return result ?? InviteRevealResult.dismissed;
 }
@@ -144,215 +141,220 @@ class _InviteRevealSheetState extends State<_InviteRevealSheet> {
         Navigator.of(context).pop(_result);
       },
       child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: lyc.brass,
-              child: Text(
-                widget.invite.user.initial,
-                style: TextStyle(
-                  color: lyc.onBrass,
-                  fontFamily: kDisplayFont,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: lyc.brass,
+                child: Text(
+                  widget.invite.user.initial,
+                  style: TextStyle(
+                    color: lyc.onBrass,
+                    fontFamily: kDisplayFont,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.self ? 'DEVICE KEY' : 'INVITE CREATED',
-                    style: TextStyle(
-                      fontFamily: kDisplayFont,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 2,
-                      color: lyc.brass,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.self ? 'DEVICE KEY' : 'INVITE CREATED',
+                      style: TextStyle(
+                        fontFamily: kDisplayFont,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 2,
+                        color: lyc.brass,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.self ? 'A key for your next device' : 'A key for $_name',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: kDisplayFont,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 20,
-                      color: lyc.text,
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.self
+                          ? 'A key for your next device'
+                          : 'A key for $_name',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: kDisplayFont,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                        color: lyc.text,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Close',
-              // Not unconditionally "dismissed": if they copied the key, they
-              // have it, and the ✕ is just how they tidied up.
-              onPressed: () => Navigator.of(context).pop(_result),
-              icon: Icon(Icons.close_rounded, size: 20, color: lyc.muted),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Text(
-          widget.self
-              ? 'Paste this on the device you\'re adding — another phone, a '
-                    'tablet, a browser — and it signs in as you: same shelf, same '
-                    "place in every book. It's the only credential, so treat it "
-                    'like a house key, not a link.'
-              : "Hand this key to $_name. When they paste it on their device, "
-                    "they're in. It's the only credential — treat it like a house "
-                    'key, not a link.',
-          style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
-        ),
-        const SizedBox(height: 20),
+              IconButton(
+                tooltip: 'Close',
+                // Not unconditionally "dismissed": if they copied the key, they
+                // have it, and the ✕ is just how they tidied up.
+                onPressed: () => Navigator.of(context).pop(_result),
+                icon: Icon(Icons.close_rounded, size: 20, color: lyc.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            widget.self
+                ? 'Paste this on the device you\'re adding — another phone, a '
+                      'tablet, a browser — and it signs in as you: same shelf, same '
+                      "place in every book. It's the only credential, so treat it "
+                      'like a house key, not a link.'
+                : "Hand this key to $_name. When they paste it on their device, "
+                      "they're in. It's the only credential — treat it like a house "
+                      'key, not a link.',
+            style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
+          ),
+          const SizedBox(height: 20),
 
-        Text(
-          widget.self ? 'THE DEVICE KEY' : 'THE INVITE KEY',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.4,
-            color: lyc.dim,
-          ),
-        ),
-        const SizedBox(height: 9),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          decoration: BoxDecoration(
-            color: lyc.bg,
-            border: Border.all(
-              color: (_copied ? lyc.success : lyc.brass).withValues(alpha: 0.42),
-            ),
-            borderRadius: BorderRadius.circular(LycRadii.card),
-          ),
-          // Selectable, so a blocked clipboard is survivable by hand.
-          child: SelectableText(
-            widget.invite.token,
+          Text(
+            widget.self ? 'THE DEVICE KEY' : 'THE INVITE KEY',
             style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 15,
-              height: 1.4,
-              color: _copied ? lyc.success : lyc.brassBright,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.4,
+              color: lyc.dim,
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _copy,
-            icon: Icon(
-              _copied ? Icons.check_rounded : Icons.copy_rounded,
-              size: 17,
+          const SizedBox(height: 9),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            decoration: BoxDecoration(
+              color: lyc.bg,
+              border: Border.all(
+                color: (_copied ? lyc.success : lyc.brass).withValues(
+                  alpha: 0.42,
+                ),
+              ),
+              borderRadius: BorderRadius.circular(LycRadii.card),
             ),
-            label: Text(_copied ? 'Copied' : 'Copy key'),
+            // Selectable, so a blocked clipboard is survivable by hand.
+            child: SelectableText(
+              widget.invite.token,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 15,
+                height: 1.4,
+                color: _copied ? lyc.success : lyc.brassBright,
+              ),
+            ),
           ),
-        ),
-
-        // The type-it-in path: a short code for when scanning and pasting are
-        // both off the table (reading it aloud, say). It expires far sooner than
-        // the key above.
-        const SizedBox(height: 16),
-        _PairingCode(
-          code: _groupedCode,
-          copied: _codeCopied,
-          onCopy: _copyCode,
-        ),
-
-        // The same key as a QR, so it can be scanned by the camera of whatever
-        // device is being signed in instead of copying text across machines
-        // (LYCM-88). The caller encodes the sign-in URL served by this library, so
-        // a stock camera app can complete the flow.
-        if (signInUrl != null && signInUrl.isNotEmpty)
-          _InviteQr(url: signInUrl, self: widget.self),
-
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 16,
-          runSpacing: 6,
-          children: const [
-            _Meta('Expires in 7 days'),
-            _Meta('Works once'),
-            _Meta('One device'),
-          ],
-        ),
-
-        const SizedBox(height: 18),
-        if (_copyFailed)
-          LycNotice(
-            tone: LycTone.error,
-            icon: Icons.error_outline_rounded,
-            child: Text(
-              "Couldn't reach the clipboard. Select the key above and copy it by "
-              'hand — this is the only time it exists.',
-              style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _copy,
+              icon: Icon(
+                _copied ? Icons.check_rounded : Icons.copy_rounded,
+                size: 17,
+              ),
+              label: Text(_copied ? 'Copied' : 'Copy key'),
             ),
-          )
-        else if (_copied)
-          LycNotice(
-            tone: LycTone.success,
-            icon: Icons.check_circle_outline_rounded,
-            child: Text(
-              widget.self
-                  ? 'Copied to clipboard — now paste it on the other device. '
-                        "Closing this is safe once it's there."
-                  : 'Copied to clipboard — now hand it to $_name. Closing this is '
-                        "safe once you've sent it.",
-              style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
-            ),
-          )
-        else
-          LycNotice(
-            tone: LycTone.warning,
-            icon: Icons.warning_amber_rounded,
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: "This is the only time you'll see this key.",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: lyc.brassBright,
+          ),
+
+          // The type-it-in path: a short code for when scanning and pasting are
+          // both off the table (reading it aloud, say). It expires far sooner than
+          // the key above.
+          const SizedBox(height: 16),
+          _PairingCode(
+            code: _groupedCode,
+            copied: _codeCopied,
+            onCopy: _copyCode,
+          ),
+
+          // The same key as a QR, so it can be scanned by the camera of whatever
+          // device is being signed in instead of copying text across machines
+          // (LYCM-88). The caller encodes the sign-in URL served by this library, so
+          // a stock camera app can complete the flow.
+          if (signInUrl != null && signInUrl.isNotEmpty)
+            _InviteQr(url: signInUrl, self: widget.self),
+
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 16,
+            runSpacing: 6,
+            children: const [
+              _Meta('Expires in 7 days'),
+              _Meta('Works once'),
+              _Meta('One device'),
+            ],
+          ),
+
+          const SizedBox(height: 18),
+          if (_copyFailed)
+            LycNotice(
+              tone: LycTone.error,
+              icon: Icons.error_outline_rounded,
+              child: Text(
+                "Couldn't reach the clipboard. Select the key above and copy it by "
+                'hand — this is the only time it exists.',
+                style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+              ),
+            )
+          else if (_copied)
+            LycNotice(
+              tone: LycTone.success,
+              icon: Icons.check_circle_outline_rounded,
+              child: Text(
+                widget.self
+                    ? 'Copied to clipboard — now paste it on the other device. '
+                          "Closing this is safe once it's there."
+                    : 'Copied to clipboard — now hand it to $_name. Closing this is '
+                          "safe once you've sent it.",
+                style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+              ),
+            )
+          else
+            LycNotice(
+              tone: LycTone.warning,
+              icon: Icons.warning_amber_rounded,
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: "This is the only time you'll see this key.",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: lyc.brassBright,
+                      ),
                     ),
-                  ),
-                  TextSpan(
-                    text: " Copy it before you close — we can't show it again. "
-                        'Lost it? '
-                        '${widget.self ? 'Just issue yourself another.' : 'Just issue $_name another.'}',
-                  ),
-                ],
+                    TextSpan(
+                      text:
+                          " Copy it before you close — we can't show it again. "
+                          'Lost it? '
+                          '${widget.self ? 'Just issue yourself another.' : 'Just issue $_name another.'}',
+                    ),
+                  ],
+                ),
+                style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
               ),
-              style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
             ),
-          ),
 
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton(
-                onPressed: _copyAndClose,
-                child: const Text('Copy & close'),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: _copyAndClose,
+                  child: const Text('Copy & close'),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            OutlinedButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(InviteRevealResult.saved),
-              child: const Text("I've saved it"),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 10),
+              OutlinedButton(
+                onPressed: () =>
+                    Navigator.of(context).pop(InviteRevealResult.saved),
+                child: const Text("I've saved it"),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -441,7 +443,10 @@ class _PairingCode extends StatelessWidget {
           children: [
             Expanded(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 13,
+                ),
                 decoration: BoxDecoration(
                   color: lyc.bg,
                   border: Border.all(color: lyc.borderStrong),
@@ -462,7 +467,10 @@ class _PairingCode extends StatelessWidget {
             const SizedBox(width: 10),
             OutlinedButton.icon(
               onPressed: onCopy,
-              icon: Icon(copied ? Icons.check_rounded : Icons.copy_rounded, size: 16),
+              icon: Icon(
+                copied ? Icons.check_rounded : Icons.copy_rounded,
+                size: 16,
+              ),
               label: Text(copied ? 'Copied' : 'Copy'),
             ),
           ],
@@ -546,7 +554,10 @@ class _InviteLostSheet extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: lyc.bg,
-            border: Border.all(color: lyc.borderStrong, style: BorderStyle.solid),
+            border: Border.all(
+              color: lyc.borderStrong,
+              style: BorderStyle.solid,
+            ),
             borderRadius: BorderRadius.circular(LycRadii.card),
           ),
           child: Text(
@@ -575,7 +586,9 @@ class _InviteLostSheet extends StatelessWidget {
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
           child: Text(
-            self ? 'Issue myself another key' : 'Issue another invite for $name',
+            self
+                ? 'Issue myself another key'
+                : 'Issue another invite for $name',
           ),
         ),
         const SizedBox(height: 8),

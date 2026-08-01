@@ -115,7 +115,9 @@ void main() {
     expect(find.text("Can't be removed"), findsOneWidget);
   });
 
-  testWidgets('a housemate is offered a re-invite, not a device key', (tester) async {
+  testWidgets('a housemate is offered a re-invite, not a device key', (
+    tester,
+  ) async {
     await pumpHousehold(tester);
 
     expect(find.text('Re-invite'), findsOneWidget);
@@ -124,7 +126,9 @@ void main() {
     expect(find.text('Add a device'), findsOneWidget);
   });
 
-  testWidgets('tapping it mints through the self route and reveals your key', (tester) async {
+  testWidgets('tapping it mints through the self route and reveals your key', (
+    tester,
+  ) async {
     await pumpHousehold(tester);
 
     await tester.tap(find.text('Add a device'));

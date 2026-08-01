@@ -40,7 +40,9 @@ void main() {
 
   test('an invite nobody redeemed is pending, with its real expiry', () {
     final mara = member(
-      inviteExpiresAt: now.add(const Duration(days: 7) - const Duration(seconds: 3)),
+      inviteExpiresAt: now.add(
+        const Duration(days: 7) - const Duration(seconds: 3),
+      ),
     );
     expect(
       memberSubtitle(mara, now: now),
@@ -54,7 +56,10 @@ void main() {
       sessionCount: 2,
       lastSeenAt: now.subtract(const Duration(hours: 2)),
     );
-    expect(memberSubtitle(theo, now: now), 'Active · 2 devices · last seen today');
+    expect(
+      memberSubtitle(theo, now: now),
+      'Active · 2 devices · last seen today',
+    );
   });
 
   test('a re-invited member who has signed in is active, not pending', () {

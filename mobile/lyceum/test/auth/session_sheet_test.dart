@@ -32,11 +32,20 @@ void main() {
 
   /// A server that signs us in and hands back an empty shelf, so the app settles
   /// signed-in and the only session ending is the one the test causes.
-  Future<http.Response> serving(http.Request req) async => switch (req.url.path) {
-    '/auth/me' => http.Response(owner, 200, headers: {'content-type': 'application/json'}),
-    '/library' => http.Response('[]', 200, headers: {'content-type': 'application/json'}),
-    _ => http.Response('not found', 404),
-  };
+  Future<http.Response> serving(http.Request req) async =>
+      switch (req.url.path) {
+        '/auth/me' => http.Response(
+          owner,
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+        '/library' => http.Response(
+          '[]',
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+        _ => http.Response('not found', 404),
+      };
 
   Future<ProviderContainer> pumpApp(WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -67,22 +76,23 @@ void main() {
     return container;
   }
 
-  testWidgets('a session that stops resolving raises the sheet, not an exception', (
-    tester,
-  ) async {
-    final container = await pumpApp(tester);
+  testWidgets(
+    'a session that stops resolving raises the sheet, not an exception',
+    (tester) async {
+      final container = await pumpApp(tester);
 
-    // A 401 arrives from somewhere in the app — a cover, a sync, a page turn.
-    await container
-        .read(authControllerProvider.notifier)
-        .unauthorized(hadToken: true);
-    await tester.pumpAndSettle();
+      // A 401 arrives from somewhere in the app — a cover, a sync, a page turn.
+      await container
+          .read(authControllerProvider.notifier)
+          .unauthorized(hadToken: true);
+      await tester.pumpAndSettle();
 
-    expect(tester.takeException(), isNull);
-    expect(find.text("You've been signed out."), findsOneWidget);
-    expect(find.textContaining('Your place is saved.'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
-  });
+      expect(tester.takeException(), isNull);
+      expect(find.text("You've been signed out."), findsOneWidget);
+      expect(find.textContaining('Your place is saved.'), findsOneWidget);
+      expect(find.text('Sign in'), findsOneWidget);
+    },
+  );
 
   testWidgets('dismissing it lands on the front door', (tester) async {
     final container = await pumpApp(tester);
@@ -101,7 +111,9 @@ void main() {
     expect(container.read(authControllerProvider).sessionEnded, isFalse);
   });
 
-  testWidgets('the front door is what a signed-out device sees', (tester) async {
+  testWidgets('the front door is what a signed-out device sees', (
+    tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final sp = await SharedPreferences.getInstance();
 

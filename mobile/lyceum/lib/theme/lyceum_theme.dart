@@ -44,15 +44,19 @@ ThemeData buildLyceumTheme(LyceumPalette p) {
     extensions: [p],
   );
 
-  TextStyle display(double size, FontWeight w, {Color? color, double? spacing}) =>
-      TextStyle(
-        fontFamily: kDisplayFont,
-        fontSize: size,
-        fontWeight: w,
-        height: 1.1,
-        letterSpacing: spacing,
-        color: color ?? p.text,
-      );
+  TextStyle display(
+    double size,
+    FontWeight w, {
+    Color? color,
+    double? spacing,
+  }) => TextStyle(
+    fontFamily: kDisplayFont,
+    fontSize: size,
+    fontWeight: w,
+    height: 1.1,
+    letterSpacing: spacing,
+    color: color ?? p.text,
+  );
 
   TextStyle body(double size, FontWeight w, {Color? color, double? spacing}) =>
       TextStyle(

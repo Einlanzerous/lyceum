@@ -39,7 +39,9 @@ Future<void> runInviteReveal(
   // Offer the key as a scannable QR too, pointing at this library's sign-in route
   // (LYCM-88). An empty server URL (shouldn't happen once signed in) omits the QR.
   final serverUrl = ref.read(serverUrlProvider);
-  final signInUrl = serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token);
+  final signInUrl = serverUrl.isEmpty
+      ? null
+      : inviteSignInUrl(serverUrl, invite.token);
 
   final result = await showInviteReveal(
     context,
@@ -64,7 +66,13 @@ Future<void> runInviteReveal(
         : await client.reinviteMember(invite.user.id);
     if (context.mounted) {
       // Same `self` all the way down: a re-issue of your own key is still yours.
-      await runInviteReveal(context, ref, fresh, self: self, onMinted: onMinted);
+      await runInviteReveal(
+        context,
+        ref,
+        fresh,
+        self: self,
+        onMinted: onMinted,
+      );
     }
   } catch (e) {
     if (context.mounted) {

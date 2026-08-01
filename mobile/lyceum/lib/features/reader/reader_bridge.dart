@@ -47,18 +47,18 @@ String readerBootstrapScript({
   'window.addEventListener("unhandledrejection",function(e){try{var r=e.reason||{};'
       'console.error("[reader] unhandled: "+(r.message||String(r))+(r.status?" (status "+r.status+")":""));'
       '}catch(_){}});'
-  // 1) Session, device id, theme and font into the page's localStorage — all
-  //    before the SPA's deferred module script boots and reads them.
-  'try{'
+      // 1) Session, device id, theme and font into the page's localStorage — all
+      //    before the SPA's deferred module script boots and reads them.
+      'try{'
       '$session'
       'localStorage.setItem(${jsonEncode(kDeviceIdKey)},${jsonEncode(deviceId)});'
       'localStorage.setItem("lyceum.theme",${jsonEncode(dark ? 'dark' : 'light')});'
       'localStorage.setItem("lyceum.readingFont",${jsonEncode(font.name)});'
       '}catch(e){}'
-  // 2) A one-time hook: when the SPA navigates away from a /reader route (its
-  //    own "Library" pill), tell the native side, so we pop back to the native
-  //    library instead of rendering the web shelf inside the WebView.
-  '(function(){if(window.__lyceumNavHook)return;window.__lyceumNavHook=true;'
+      // 2) A one-time hook: when the SPA navigates away from a /reader route (its
+      //    own "Library" pill), tell the native side, so we pop back to the native
+      //    library instead of rendering the web shelf inside the WebView.
+      '(function(){if(window.__lyceumNavHook)return;window.__lyceumNavHook=true;'
       'var notify=function(){try{if(!location.pathname.startsWith("/reader")){'
       'LyceumNav.postMessage("exit");}}catch(e){}};'
       'window.addEventListener("popstate",notify);'

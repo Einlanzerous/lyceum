@@ -28,10 +28,10 @@ class ThemeController extends Notifier<LyceumThemeMode> {
   }
 
   Future<void> toggle() => set(
-        state == LyceumThemeMode.dark
-            ? LyceumThemeMode.light
-            : LyceumThemeMode.dark,
-      );
+    state == LyceumThemeMode.dark
+        ? LyceumThemeMode.light
+        : LyceumThemeMode.dark,
+  );
 }
 
 final themeControllerProvider =

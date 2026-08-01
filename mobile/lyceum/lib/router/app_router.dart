@@ -72,7 +72,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/', name: 'library', builder: (_, _) => const LibraryScreen()),
+      GoRoute(
+        path: '/',
+        name: 'library',
+        builder: (_, _) => const LibraryScreen(),
+      ),
       GoRoute(
         path: '/sign-in',
         name: 'sign-in',
@@ -88,7 +92,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         name: 'household',
         builder: (_, _) => const HouseholdScreen(),
       ),
-      GoRoute(path: '/scan', name: 'scan', builder: (_, _) => const ScanScreen()),
+      GoRoute(
+        path: '/scan',
+        name: 'scan',
+        builder: (_, _) => const ScanScreen(),
+      ),
       GoRoute(
         path: '/reader/:id',
         name: 'reader',

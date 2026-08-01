@@ -229,8 +229,11 @@ class _SeriesSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final lyc = context.lyc;
     final client = ref.watch(lyceumClientProvider);
+    // The resume target comes off the group, so the sheet's Resume button, the
+    // tile's cover and the pinned Continue chip all name the same volume. The
+    // index is only for the "Resume book N" label.
+    final resumeBook = series.resumeBook;
     final resumeAt = resumeIndex(series.members);
-    final resumeBook = series.members[resumeAt];
 
     // Captured up front so it stays valid after the confirm dialog's await.
     final sheetNav = Navigator.of(context);

@@ -98,9 +98,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// hands back the parsed `lyc_…` token; fill the field and redeem it straight
   /// away, since scanning is an unambiguous "yes, this one".
   Future<void> _scan() async {
-    final token = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const ScanInviteScreen()),
-    );
+    final token = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const ScanInviteScreen()));
     if (token == null || token.isEmpty || !mounted) return;
     _invite.text = token;
     _invite.selection = TextSelection.collapsed(offset: _invite.text.length);
@@ -120,7 +120,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       final ctrl = ref.read(authControllerProvider.notifier);
       final raw = _invite.text;
       if (looksLikePairingCode(raw)) {
-        await ctrl.signInWithCode(normalizePairingCode(raw), deviceLabel: _deviceLabel);
+        await ctrl.signInWithCode(
+          normalizePairingCode(raw),
+          deviceLabel: _deviceLabel,
+        );
       } else {
         await ctrl.signIn(raw, deviceLabel: _deviceLabel);
       }
@@ -209,7 +212,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                           Center(
                             child: TextButton(
                               onPressed: () => setState(
-                                () => _showServerSettings = !_showServerSettings,
+                                () =>
+                                    _showServerSettings = !_showServerSettings,
                               ),
                               child: Text(
                                 _showServerSettings
@@ -258,7 +262,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   Widget _inviteField({required bool upgrade}) {
     final lyc = context.lyc;
     final rejected = _failure == _Failure.rejected;
-    final label = upgrade && !rejected ? 'Paste your invite to continue' : 'Invite key';
+    final label = upgrade && !rejected
+        ? 'Paste your invite to continue'
+        : 'Invite key';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -312,12 +318,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     children: [
                       IconButton(
                         onPressed: _submitting ? null : _scan,
-                        icon: Icon(Icons.qr_code_scanner_rounded, size: 18, color: lyc.brass),
+                        icon: Icon(
+                          Icons.qr_code_scanner_rounded,
+                          size: 18,
+                          color: lyc.brass,
+                        ),
                         tooltip: 'Scan invite QR',
                       ),
                       IconButton(
                         onPressed: _submitting ? null : _paste,
-                        icon: Icon(Icons.content_paste_rounded, size: 18, color: lyc.brass),
+                        icon: Icon(
+                          Icons.content_paste_rounded,
+                          size: 18,
+                          color: lyc.brass,
+                        ),
                         tooltip: 'Paste',
                       ),
                     ],
@@ -325,7 +339,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(LycRadii.card),
               borderSide: BorderSide(
-                color: rejected ? lyc.error.withValues(alpha: 0.55) : lyc.borderStrong,
+                color: rejected
+                    ? lyc.error.withValues(alpha: 0.55)
+                    : lyc.borderStrong,
               ),
             ),
             focusedBorder: OutlineInputBorder(
@@ -352,7 +368,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         autofocus: true,
         maxLength: 40,
         style: TextStyle(fontSize: 13, color: lyc.text),
-        buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+        buildCounter:
+            (_, {required currentLength, required isFocused, maxLength}) =>
+                null,
         decoration: const InputDecoration(
           isDense: true,
           labelText: 'Device name',
@@ -375,7 +393,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 const TextSpan(text: 'This device · '),
                 TextSpan(
                   text: _deviceLabel.isEmpty ? 'This device' : _deviceLabel,
-                  style: TextStyle(fontWeight: FontWeight.w700, color: lyc.reading),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: lyc.reading,
+                  ),
                 ),
                 const TextSpan(text: ' · '),
               ],
@@ -543,12 +564,17 @@ class _Headline extends StatelessWidget {
             TextSpan(
               children: [
                 const TextSpan(
-                  text: 'This library just turned on accounts. Sign in once on '
+                  text:
+                      'This library just turned on accounts. Sign in once on '
                       'this device to keep going — ',
                 ),
                 TextSpan(
-                  text: 'your shelf and your place in every book come with you.',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: lyc.reading),
+                  text:
+                      'your shelf and your place in every book come with you.',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: lyc.reading,
+                  ),
                 ),
               ],
             ),
@@ -556,9 +582,13 @@ class _Headline extends StatelessWidget {
             style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
           ),
           const SizedBox(height: 16),
-          _Promise('“$returningName” becomes your account name — you can change it any time.'),
+          _Promise(
+            '“$returningName” becomes your account name — you can change it any time.',
+          ),
           const SizedBox(height: 8),
-          const _Promise('Every bookmark and reading position stays exactly where it is.'),
+          const _Promise(
+            'Every bookmark and reading position stays exactly where it is.',
+          ),
         ] else
           Text(
             'Paste the invite a housemate gave you, or type the short code — or '
@@ -597,7 +627,10 @@ class _Promise extends StatelessWidget {
 /// A network failure is not a rejected key, and must never wear the red banner:
 /// nobody should go hunting for a fresh invite because their Wi-Fi dropped.
 class _UnreachableCard extends StatelessWidget {
-  const _UnreachableCard({required this.onRetry, required this.onServerAddress});
+  const _UnreachableCard({
+    required this.onRetry,
+    required this.onServerAddress,
+  });
   final VoidCallback onRetry;
   final VoidCallback onServerAddress;
 
@@ -629,7 +662,11 @@ class _UnreachableCard extends StatelessWidget {
                     Text(
                       "The server may be off, or this device isn't on the same "
                       'network.',
-                      style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.5,
+                        color: lyc.muted,
+                      ),
                     ),
                   ],
                 ),
@@ -640,7 +677,10 @@ class _UnreachableCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: FilledButton(onPressed: onRetry, child: const Text('Retry')),
+                child: FilledButton(
+                  onPressed: onRetry,
+                  child: const Text('Retry'),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -700,7 +740,8 @@ class _Foot extends StatelessWidget {
         TextSpan(
           children: [
             const TextSpan(
-              text: 'Still stuck? Whoever runs the library can issue another, or run ',
+              text:
+                  'Still stuck? Whoever runs the library can issue another, or run ',
             ),
             TextSpan(
               text: 'lyceum mint-token',
@@ -719,8 +760,9 @@ class _Foot extends StatelessWidget {
         'Owner? Your invite is in the server log on first boot. Everyone else: '
             'ask the owner.',
       (false, true) => 'Whitespace and line breaks are fine — we clean it up.',
-      _ => 'No invite? Ask whoever runs this library for one. There are no '
-          'passwords here.',
+      _ =>
+        'No invite? Ask whoever runs this library for one. There are no '
+            'passwords here.',
     };
     return Text(text, textAlign: TextAlign.center, style: style);
   }

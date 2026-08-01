@@ -362,7 +362,9 @@ async function onRemove(id: number): Promise<void> {
           :series="item.series"
           :open="openKey === item.key"
           :continue-book-id="
-            pinnedId != null && item.series.members.some((m) => m.id === pinnedId) ? pinnedId : null
+            pinnedId != null && item.series.members.some((m) => m.id === pinnedId)
+              ? item.series.resumeBook.id
+              : null
           "
           @toggle="toggleSeries(item.key)"
         />

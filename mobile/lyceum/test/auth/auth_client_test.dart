@@ -66,11 +66,14 @@ void main() {
   });
 
   group('401', () {
-    test('reports that we were holding a credential when one was rejected', () async {
-      final h = harness('lyc_stale', status: 401);
-      await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(h.fired, [true]);
-    });
+    test(
+      'reports that we were holding a credential when one was rejected',
+      () async {
+        final h = harness('lyc_stale', status: 401);
+        await h.client.get(Uri.parse('http://lib.test/library'));
+        expect(h.fired, [true]);
+      },
+    );
 
     test('reports that we were holding none when we were not', () async {
       // The distinction the controller turns into "was this an *event*?" — see
@@ -86,11 +89,14 @@ void main() {
       expect(h.fired, isEmpty);
     });
 
-    test('the response still comes back, so the caller errors normally', () async {
-      final h = harness('lyc_stale', status: 401);
-      final res = await h.client.get(Uri.parse('http://lib.test/library'));
-      expect(res.statusCode, 401);
-    });
+    test(
+      'the response still comes back, so the caller errors normally',
+      () async {
+        final h = harness('lyc_stale', status: 401);
+        final res = await h.client.get(Uri.parse('http://lib.test/library'));
+        expect(res.statusCode, 401);
+      },
+    );
   });
 
   group('suppression', () {
@@ -135,7 +141,9 @@ void main() {
     test('still re-arms after a suppressed call throws', () async {
       final h = harness('lyc_stale', status: 401);
       await expectLater(
-        h.client.suppressUnauthorized(() => Future<void>.error(StateError('boom'))),
+        h.client.suppressUnauthorized(
+          () => Future<void>.error(StateError('boom')),
+        ),
         throwsStateError,
       );
       await h.client.get(Uri.parse('http://lib.test/library'));

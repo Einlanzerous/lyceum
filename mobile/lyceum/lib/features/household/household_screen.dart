@@ -60,12 +60,12 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
   /// [runInviteReveal]. All this screen adds is re-reading the household, since an
   /// outstanding invite is what turns a row "pending".
   Future<void> _reveal(Invite invite, {required bool self}) => runInviteReveal(
-        context,
-        ref,
-        invite,
-        self: self,
-        onMinted: () => ref.invalidate(membersProvider),
-      );
+    context,
+    ref,
+    invite,
+    self: self,
+    onMinted: () => ref.invalidate(membersProvider),
+  );
 
   Future<void> _reinvite(Member m) async {
     try {
@@ -149,7 +149,9 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -161,7 +163,8 @@ class _HouseholdScreenState extends ConsumerState<HouseholdScreen> {
     // The auth-off state is not an error to apologise for — it is the server
     // refusing to mint credentials it cannot attribute. It replaces the whole
     // screen: there is no list to show and nothing here can be changed.
-    final adminOff = members.hasError && members.error is AdminDisabledException;
+    final adminOff =
+        members.hasError && members.error is AdminDisabledException;
 
     return Scaffold(
       body: SafeArea(
@@ -274,7 +277,9 @@ class _MemberCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 19,
-                backgroundColor: member.isPending ? lyc.surfaceRaised : lyc.brass,
+                backgroundColor: member.isPending
+                    ? lyc.surfaceRaised
+                    : lyc.brass,
                 child: Text(
                   member.account.initial,
                   style: TextStyle(
@@ -318,7 +323,11 @@ class _MemberCard extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       memberSubtitle(member),
-                      style: TextStyle(fontSize: 12, height: 1.4, color: lyc.dim),
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: lyc.dim,
+                      ),
                     ),
                   ],
                 ),
@@ -484,12 +493,16 @@ class _RemoveSheet extends StatelessWidget {
           TextSpan(
             children: [
               TextSpan(
-                text: "This deletes $name's reading positions and bookmarks on "
+                text:
+                    "This deletes $name's reading positions and bookmarks on "
                     'every book. ',
               ),
               TextSpan(
                 text: 'The shared shelf is untouched',
-                style: TextStyle(fontWeight: FontWeight.w700, color: lyc.reading),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: lyc.reading,
+                ),
               ),
               const TextSpan(
                 text: " — no titles are lost. This can't be undone.",

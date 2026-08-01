@@ -20,6 +20,15 @@ export interface SeriesGroup {
   progress: number
   /** The book whose cover represents the stack (first with a cover, else first). */
   coverBook: Book
+  /**
+   * The volume you are up to — resumeIndex applied to members. The card wears
+   * its cover, the drawer resumes into it, and pinnedBookId hands back its id
+   * when the volume you last read is finished (LYCM-108).
+   *
+   * coverBook is usually this book but not always: a resume volume with no cover
+   * art falls back to another member's, so the stack still shows a real cover.
+   */
+  resumeBook: Book
   finishedCount: number
 }
 
@@ -57,18 +66,100 @@ function normalizeKey(series: string): string {
 }
 
 /**
- * The id of the book to pin to the top of the shelf: the most-recently-read book
- * that is still in progress (your "continue reading"). Returns null when nothing
- * is mid-read.
+ * A series needs this many volumes to roll up into one card; below it its books
+ * stay loose. buildShelf and pinnedBookId have to agree on the threshold, so
+ * they share it.
+ */
+const SERIES_MIN_MEMBERS = 2
+
+/** Split books into series groups (keyed by normalized name) and loose books. */
+function groupBySeries(books: readonly Book[]): {
+  groups: Map<string, { name: string; members: Book[] }>
+  loose: Book[]
+} {
+  const groups = new Map<string, { name: string; members: Book[] }>()
+  const loose: Book[] = []
+  for (const b of books) {
+    const series = (b.series ?? '').trim()
+    if (!series) {
+      loose.push(b)
+      continue
+    }
+    const key = normalizeKey(series)
+    const g = groups.get(key)
+    if (g) g.members.push(b)
+    else groups.set(key, { name: series, members: [b] })
+  }
+  return { groups, loose }
+}
+
+/** Members in reading order: by series_index, then title. */
+function orderMembers(members: readonly Book[]): Book[] {
+  return [...members].sort((a, b) => {
+    const ai = a.series_index ?? Number.POSITIVE_INFINITY
+    const bi = b.series_index ?? Number.POSITIVE_INFINITY
+    if (ai !== bi) return ai - bi
+    return byTitle(a, b)
+  })
+}
+
+/**
+ * The books making up the shelf item that holds `book` — its series' members
+ * when that series rolls up into a card, else the book on its own.
+ */
+function itemMembers(book: Book, groups: Map<string, { members: Book[] }>): Book[] {
+  const g = groups.get(normalizeKey(book.series ?? ''))
+  return g && g.members.length >= SERIES_MIN_MEMBERS ? g.members : [book]
+}
+
+/**
+ * The book to continue — pinned to the top of the shelf, and what the grid
+ * card's "Continue" chip opens. Every view takes its pin from this one id, so
+ * the grid, the list and the chip cannot disagree about where you left off.
+ *
+ * It is *not* simply the last book you touched. The pin follows the most
+ * recently read book whose **shelf item** still has something left to read
+ * (LYCM-108): finish volume 2 of a trilogy and the series is still what you are
+ * reading, so its card stays pinned — and the id handed back is volume 3, not
+ * the volume you just closed.
+ *
+ * Two things are deliberately excluded:
+ *
+ * - **Dead ends.** A finished standalone or a fully-read series is skipped, and
+ *   the search falls through to the next most recent, so finishing a one-off
+ *   leaves whatever else you are part-way through at the top instead of
+ *   clearing the slot.
+ * - **Books you only opened.** read_at is stamped from any saved position,
+ *   including the progress=0 one a still-open reader flushes before pagination
+ *   settles (see GetFurthestPosition), so a book at 'not-started' has not
+ *   actually been read and must not take the pin from your real current read.
+ *
+ * Returns null when nothing you have read leads anywhere. It keys off the newest
+ * read_at, so reading anything else moves the pin on its own.
  */
 export function pinnedBookId(books: readonly Book[]): number | null {
+  const { groups } = groupBySeries(books)
+
   let best: Book | null = null
+  let bestItem: Book[] = []
   for (const b of books) {
     if (!b.read_at) continue
-    if (memberStatus(b) !== 'in-progress') continue // not finished, not unstarted
-    if (!best || b.read_at > (best.read_at ?? '')) best = b
+    if (memberStatus(b) === 'not-started') continue
+    const members = itemMembers(b, groups)
+    if (!members.some((m) => memberStatus(m) !== 'finished')) continue // dead end
+    if (!best || b.read_at > (best.read_at ?? '')) {
+      best = b
+      bestItem = members
+    }
   }
-  return best ? best.id : null
+  if (!best) return null
+
+  // Still part-way through it: that is exactly where you continue. Otherwise it
+  // is a finished volume of a series that (checked above) has one left, so hand
+  // back that volume rather than the one just closed.
+  if (memberStatus(best) !== 'finished') return best.id
+  const ordered = orderMembers(bestItem)
+  return ordered[resumeIndex(ordered)]!.id
 }
 
 function pickAuthor(members: Book[]): string {
@@ -89,12 +180,7 @@ function pickAuthor(members: Book[]): string {
 }
 
 function buildGroup(name: string, members: Book[]): SeriesGroup {
-  const ordered = [...members].sort((a, b) => {
-    const ai = a.series_index ?? Number.POSITIVE_INFINITY
-    const bi = b.series_index ?? Number.POSITIVE_INFINITY
-    if (ai !== bi) return ai - bi
-    return byTitle(a, b)
-  })
+  const ordered = orderMembers(members)
   // A marked-read volume counts as fully done in the aggregate even if its
   // scroll position never reached 100%.
   const progress =
@@ -111,6 +197,7 @@ function buildGroup(name: string, members: Book[]): SeriesGroup {
     members: ordered,
     progress,
     coverBook,
+    resumeBook: onBook,
     finishedCount,
   }
 }
@@ -134,27 +221,14 @@ export function buildShelf(
   sort: SortState,
   pinBookId?: number | null,
 ): ShelfItem[] {
-  const groups = new Map<string, { name: string; members: Book[] }>()
-  const loose: Book[] = []
-
-  for (const b of books) {
-    const series = (b.series ?? '').trim()
-    if (!series) {
-      loose.push(b)
-      continue
-    }
-    const key = normalizeKey(series)
-    const g = groups.get(key)
-    if (g) g.members.push(b)
-    else groups.set(key, { name: series, members: [b] })
-  }
+  const { groups, loose } = groupBySeries(books)
 
   const items: ShelfItem[] = []
   for (const b of loose) {
     items.push({ kind: 'book', key: `book-${b.id}`, book: b })
   }
   for (const [key, g] of groups) {
-    if (g.members.length === 1) {
+    if (g.members.length < SERIES_MIN_MEMBERS) {
       const only = g.members[0]!
       items.push({ kind: 'book', key: `book-${only.id}`, book: only })
     } else {

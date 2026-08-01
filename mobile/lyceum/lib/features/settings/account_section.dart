@@ -125,7 +125,8 @@ class _AccountSectionState extends ConsumerState<AccountSection> {
           Divider(height: 28, color: lyc.border),
           _Row(
             title: 'Sign out',
-            hint: 'This device only. Your other devices stay signed in and keep '
+            hint:
+                'This device only. Your other devices stay signed in and keep '
                 'syncing.',
             action: OutlinedButton(
               onPressed: _signingOut ? null : _signOut,
@@ -216,7 +217,9 @@ class _AccountSectionState extends ConsumerState<AccountSection> {
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _save(),
-          buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+          buildCounter:
+              (_, {required currentLength, required isFocused, maxLength}) =>
+                  null,
           style: TextStyle(
             fontFamily: kDisplayFont,
             fontWeight: FontWeight.w800,
@@ -237,7 +240,9 @@ class _AccountSectionState extends ConsumerState<AccountSection> {
             ),
             const SizedBox(width: 10),
             TextButton(
-              onPressed: _saving ? null : () => setState(() => _editing = false),
+              onPressed: _saving
+                  ? null
+                  : () => setState(() => _editing = false),
               child: const Text('Cancel'),
             ),
           ],
@@ -271,7 +276,8 @@ class DevicesSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         devices.when(
-          loading: () => Text('Loading…', style: TextStyle(fontSize: 13, color: lyc.dim)),
+          loading: () =>
+              Text('Loading…', style: TextStyle(fontSize: 13, color: lyc.dim)),
           error: (e, _) => Text(
             '$e',
             maxLines: 2,
@@ -490,7 +496,10 @@ class _SignOutSheet extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Sign out of Lyceum?', style: Theme.of(context).textTheme.titleLarge),
+        Text(
+          'Sign out of Lyceum?',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
         const SizedBox(height: 10),
         Text(
           'This signs out $subject only. Your other devices stay signed in. Your '

@@ -54,16 +54,19 @@ void main() {
   );
 
   group('load', () {
-    test('a 200 with no token held means the server does not enforce auth', () async {
-      final h = await build(handler: (_) async => json(owner));
-      await h.container.read(authControllerProvider.notifier).load();
+    test(
+      'a 200 with no token held means the server does not enforce auth',
+      () async {
+        final h = await build(handler: (_) async => json(owner));
+        await h.container.read(authControllerProvider.notifier).load();
 
-      final auth = h.container.read(authControllerProvider);
-      expect(auth.isSignedIn, isTrue);
-      expect(auth.isOwner, isTrue);
-      // The whole test for auth-off: signed in, holding nothing.
-      expect(h.container.read(enforcedProvider), isFalse);
-    });
+        final auth = h.container.read(authControllerProvider);
+        expect(auth.isSignedIn, isTrue);
+        expect(auth.isOwner, isTrue);
+        // The whole test for auth-off: signed in, holding nothing.
+        expect(h.container.read(enforcedProvider), isFalse);
+      },
+    );
 
     test('a token that resolves means enforcement is on', () async {
       final h = await build(
@@ -88,39 +91,56 @@ void main() {
   });
 
   group('signIn', () {
-    test('stores the session and adopts nothing when the name is real', () async {
-      final h = await build(
-        handler: (req) async => req.url.path == '/auth/session'
-            ? json({
-                'user': {...owner, 'display_name': 'Ada'},
-                'session_token': 'lyc_new',
-              })
-            : http.Response('unexpected ${req.url.path}', 500),
-      );
+    test(
+      'stores the session and adopts nothing when the name is real',
+      () async {
+        final h = await build(
+          handler: (req) async => req.url.path == '/auth/session'
+              ? json({
+                  'user': {...owner, 'display_name': 'Ada'},
+                  'session_token': 'lyc_new',
+                })
+              : http.Response('unexpected ${req.url.path}', 500),
+        );
 
-      await h.container
-          .read(authControllerProvider.notifier)
-          .signIn('  lyc_invite  ', deviceLabel: 'Pixel 8');
+        await h.container
+            .read(authControllerProvider.notifier)
+            .signIn('  lyc_invite  ', deviceLabel: 'Pixel 8');
 
-      expect(h.store.token, 'lyc_new');
-      expect(h.container.read(sessionTokenProvider), 'lyc_new');
-      expect(h.container.read(authControllerProvider).displayName, 'Ada');
-    });
+        expect(h.store.token, 'lyc_new');
+        expect(h.container.read(sessionTokenProvider), 'lyc_new');
+        expect(h.container.read(authControllerProvider).displayName, 'Ada');
+      },
+    );
 
-    test('a rejected invite throws instead of raising the signed-out sheet', () async {
-      final h = await build(
-        handler: (_) async => http.Response('invalid or already-used invite token', 401),
-      );
+    test(
+      'a rejected invite throws instead of raising the signed-out sheet',
+      () async {
+        final h = await build(
+          handler: (_) async =>
+              http.Response('invalid or already-used invite token', 401),
+        );
 
-      await expectLater(
-        h.container.read(authControllerProvider.notifier).signIn('lyc_bad'),
-        throwsA(isA<ApiException>().having((e) => e.isUnauthorized, 'is 401', isTrue)),
-      );
+        await expectLater(
+          h.container.read(authControllerProvider.notifier).signIn('lyc_bad'),
+          throwsA(
+            isA<ApiException>().having(
+              (e) => e.isUnauthorized,
+              'is 401',
+              isTrue,
+            ),
+          ),
+        );
 
-      final auth = h.container.read(authControllerProvider);
-      expect(auth.sessionEnded, isFalse, reason: 'a bad invite is not a session ending');
-      expect(h.store.token, isEmpty);
-    });
+        final auth = h.container.read(authControllerProvider);
+        expect(
+          auth.sessionEnded,
+          isFalse,
+          reason: 'a bad invite is not a session ending',
+        );
+        expect(h.store.token, isEmpty);
+      },
+    );
   });
 
   group('adoptLegacyName', () {
@@ -185,10 +205,16 @@ void main() {
       await h.container.read(authControllerProvider.notifier).load();
 
       expect(patched, isFalse);
-      expect(h.container.read(authControllerProvider).displayName, 'Ada Lovelace');
+      expect(
+        h.container.read(authControllerProvider).displayName,
+        'Ada Lovelace',
+      );
       // Still consumed — the fold-in happens once either way, or it would keep
       // trying on every boot forever.
-      expect(h.container.read(prefsProvider).getString('lyceum.profile_name'), isNull);
+      expect(
+        h.container.read(prefsProvider).getString('lyceum.profile_name'),
+        isNull,
+      );
     });
 
     test('a failed rename never blocks the sign-in', () async {
@@ -210,9 +236,8 @@ void main() {
   group('signOut', () {
     test('drops the local token', () async {
       final h = await build(
-        handler: (req) async => req.method == 'DELETE'
-            ? http.Response('', 204)
-            : json(owner),
+        handler: (req) async =>
+            req.method == 'DELETE' ? http.Response('', 204) : json(owner),
         initialToken: 'lyc_live',
       );
 
@@ -220,7 +245,10 @@ void main() {
       await h.container.read(authControllerProvider.notifier).signOut();
 
       expect(h.store.token, isEmpty);
-      expect(h.container.read(authControllerProvider).status, AuthStatus.signedOut);
+      expect(
+        h.container.read(authControllerProvider).status,
+        AuthStatus.signedOut,
+      );
     });
 
     test('drops it even when the server never hears about it', () async {
@@ -239,8 +267,15 @@ void main() {
         throwsA(isA<ApiException>()),
       );
 
-      expect(h.store.token, isEmpty, reason: 'the credential must be forgotten regardless');
-      expect(h.container.read(authControllerProvider).status, AuthStatus.signedOut);
+      expect(
+        h.store.token,
+        isEmpty,
+        reason: 'the credential must be forgotten regardless',
+      );
+      expect(
+        h.container.read(authControllerProvider).status,
+        AuthStatus.signedOut,
+      );
     });
 
     test('a 401 on the way out is not a session "ending"', () async {
@@ -261,7 +296,11 @@ void main() {
 
       final auth = h.container.read(authControllerProvider);
       expect(auth.status, AuthStatus.signedOut);
-      expect(auth.sessionEnded, isFalse, reason: 'no alarm sheet — they asked for this');
+      expect(
+        auth.sessionEnded,
+        isFalse,
+        reason: 'no alarm sheet — they asked for this',
+      );
       expect(h.store.token, isEmpty);
     });
   });
@@ -289,7 +328,10 @@ void main() {
     });
 
     test('a rejected credential clears it and raises the sheet', () async {
-      final h = await build(handler: (_) async => json(owner), initialToken: 'lyc_live');
+      final h = await build(
+        handler: (_) async => json(owner),
+        initialToken: 'lyc_live',
+      );
       final notifier = h.container.read(authControllerProvider.notifier);
       await notifier.load();
 
@@ -325,25 +367,40 @@ void main() {
 
       final auth = h.container.read(authControllerProvider);
       expect(auth.status, AuthStatus.signedOut, reason: 'front door, yes');
-      expect(auth.sessionEnded, isFalse, reason: 'but no alarm — nothing ended');
+      expect(
+        auth.sessionEnded,
+        isFalse,
+        reason: 'but no alarm — nothing ended',
+      );
     });
 
-    test('an auth-off server that switches enforcement on sends us to the door', () async {
-      // Signed in against LYCEUM_AUTH=false (served as the owner, holding no
-      // token). The operator flips enforcement on and restarts. The next request
-      // 401s. Nothing was "removed" — the door simply grew a lock.
-      final h = await build(handler: (_) async => json(owner));
-      final notifier = h.container.read(authControllerProvider.notifier);
-      await notifier.load();
-      expect(h.container.read(authControllerProvider).isSignedIn, isTrue);
-      expect(h.container.read(enforcedProvider), isFalse);
+    test(
+      'an auth-off server that switches enforcement on sends us to the door',
+      () async {
+        // Signed in against LYCEUM_AUTH=false (served as the owner, holding no
+        // token). The operator flips enforcement on and restarts. The next request
+        // 401s. Nothing was "removed" — the door simply grew a lock.
+        final h = await build(handler: (_) async => json(owner));
+        final notifier = h.container.read(authControllerProvider.notifier);
+        await notifier.load();
+        expect(h.container.read(authControllerProvider).isSignedIn, isTrue);
+        expect(h.container.read(enforcedProvider), isFalse);
 
-      await notifier.unauthorized(hadToken: false);
+        await notifier.unauthorized(hadToken: false);
 
-      final auth = h.container.read(authControllerProvider);
-      expect(auth.status, AuthStatus.signedOut, reason: 'not stranded on a dead shelf');
-      expect(auth.sessionEnded, isFalse, reason: 'no removal claim we cannot back');
-    });
+        final auth = h.container.read(authControllerProvider);
+        expect(
+          auth.status,
+          AuthStatus.signedOut,
+          reason: 'not stranded on a dead shelf',
+        );
+        expect(
+          auth.sessionEnded,
+          isFalse,
+          reason: 'no removal claim we cannot back',
+        );
+      },
+    );
   });
 
   group('the session belongs to the library that issued it', () {
@@ -374,7 +431,9 @@ void main() {
       await h.container.read(authControllerProvider.notifier).load();
       expect(h.container.read(enforcedProvider), isTrue);
 
-      await h.container.read(serverUrlProvider.notifier).set('http://other.test');
+      await h.container
+          .read(serverUrlProvider.notifier)
+          .set('http://other.test');
 
       expect(h.store.token, isEmpty);
       expect(h.container.read(enforcedProvider), isFalse);
@@ -387,9 +446,15 @@ void main() {
       );
       await h.container.read(authControllerProvider.notifier).load();
 
-      await h.container.read(serverUrlProvider.notifier).set('http://lib.test/');
+      await h.container
+          .read(serverUrlProvider.notifier)
+          .set('http://lib.test/');
 
-      expect(h.store.token, 'lyc_live', reason: 'same server, normalized — no-op');
+      expect(
+        h.store.token,
+        'lyc_live',
+        reason: 'same server, normalized — no-op',
+      );
     });
   });
 }
