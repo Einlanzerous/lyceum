@@ -67,7 +67,7 @@ func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, erro
 func truncate(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(ctx,
-		`TRUNCATE ingest_candidates, ingest_batches, reading_positions, devices, inventory, books RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE ingest_candidates, ingest_batches, reading_positions, devices, inventory, deleted_sources, books RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	// users is deliberately NOT truncated: migration 0011 seeds exactly one owner

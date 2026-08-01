@@ -33,7 +33,7 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	// relying on cascade let stale rows survive between tests.
 	_, err := pool.Exec(ctx,
 		`TRUNCATE reading_positions, devices, inventory_isbns, inventory,
-		         ingest_candidates, ingest_batches, books RESTART IDENTITY CASCADE`)
+		         ingest_candidates, ingest_batches, deleted_sources, books RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

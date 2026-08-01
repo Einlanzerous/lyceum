@@ -4,7 +4,11 @@ import { onBeforeUnmount, onMounted } from 'vue'
 // A small context menu anchored at a screen point, teleported to <body> so it
 // escapes the card's clipping/stacking. Closes on select, outside click, scroll,
 // or Escape.
-defineProps<{ x: number; y: number; items: ReadonlyArray<{ key: string; label: string }> }>()
+defineProps<{
+  x: number
+  y: number
+  items: ReadonlyArray<{ key: string; label: string; danger?: boolean }>
+}>()
 const emit = defineEmits<{ (e: 'select', key: string): void; (e: 'close'): void }>()
 
 function onDocPointer(): void {
@@ -36,6 +40,7 @@ onBeforeUnmount(() => {
         :key="item.key"
         type="button"
         class="tilemenu__item"
+        :class="{ 'tilemenu__item--danger': item.danger }"
         @click.prevent.stop="emit('select', item.key)"
       >
         {{ item.label }}
@@ -69,5 +74,9 @@ onBeforeUnmount(() => {
 }
 .tilemenu__item:hover {
   background: var(--surface);
+}
+/* Destructive entries read as destructive before they are clicked. */
+.tilemenu__item--danger {
+  color: var(--error);
 }
 </style>

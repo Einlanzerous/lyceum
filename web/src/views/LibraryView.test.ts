@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, RouterLinkStub } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import LibraryView from './LibraryView.vue'
+import BookCard from '@/components/BookCard.vue'
 import { useLibraryStore } from '@/stores/library'
 import { __resetServerCache, __setNativeShell } from '@/api/base'
 import { useServer } from '@/api/useServer'
@@ -171,5 +172,55 @@ describe('LibraryView', () => {
     expect(store.load).toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('Connect to your library')
     wrapper.unmount()
+  })
+
+  // LYCM-109: a duplicate that gets onto the shelf has to be removable.
+  describe('removing a book', () => {
+    async function openTileMenu(title: string) {
+      const wrapper = mountView(true)
+      const store = useLibraryStore()
+      store.books = books
+      store.loading = false
+      await flushPromises()
+
+      const card = wrapper.findAllComponents(BookCard).find((c) => c.props('book').title === title)!
+      await card.trigger('contextmenu')
+      return { wrapper, store }
+    }
+
+    function menuItem(label: string): HTMLButtonElement | undefined {
+      return Array.from(document.body.querySelectorAll<HTMLButtonElement>('.tilemenu__item')).find(
+        (b) => b.textContent?.trim() === label,
+      )
+    }
+
+    it('offers Remove in the tile menu and deletes once confirmed', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const { wrapper, store } = await openTileMenu('Dune')
+
+      const remove = menuItem('Remove from library')
+      expect(remove).toBeDefined()
+      remove!.click()
+      await flushPromises()
+
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(confirm.mock.calls[0]![0]).toContain('Dune')
+      expect(store.remove).toHaveBeenCalledWith(1)
+      confirm.mockRestore()
+      wrapper.unmount()
+    })
+
+    it('leaves the book alone when the confirm is dismissed', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const { wrapper, store } = await openTileMenu('Dune')
+
+      menuItem('Remove from library')!.click()
+      await flushPromises()
+
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(store.remove).not.toHaveBeenCalled()
+      confirm.mockRestore()
+      wrapper.unmount()
+    })
   })
 })

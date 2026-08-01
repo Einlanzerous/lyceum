@@ -34,6 +34,10 @@ const (
 	// ingestReplaced: an existing book at the same source path was updated in
 	// place (a re-stamped watched file), keeping its id and reading positions.
 	ingestReplaced
+	// ingestTombstoned: the content (or the path it arrived at) belongs to a book
+	// somebody deleted, and the file is still sitting in the watched tree. Nothing
+	// was written; the delete stands.
+	ingestTombstoned
 )
 
 // ingestEPUB is the single ingest path shared by HTTP upload and folder ingest:
@@ -57,18 +61,23 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		return store.Book{}, ingestDuplicate, fmt.Errorf("%w: %v", errNotEPUB, err)
 	}
 
+	// Canonicalize the path's Unicode spelling up front so every identity check
+	// below — and the value that lands in the column — uses one form (LYCM-109).
+	sourcePath = store.NormalizeSourcePath(sourcePath)
+
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
 
 	// Dedup on content hash before writing any blobs. If this exact content
 	// arrived via the watcher and the existing row has no source path yet — or
-	// has the same path under different casing (the acquisition pipeline re-cases
-	// folder names, LYCM-68) — adopt this path so a later re-stamp updates it in
-	// place instead of duplicating.
+	// has the same path respelled (the acquisition pipeline re-cases folder names,
+	// LYCM-68, and re-encodes accents, LYCM-109) — adopt this path so a later
+	// re-stamp updates it in place instead of duplicating.
 	switch existing, err := a.store.GetBookByHash(ctx, hash); {
 	case err == nil:
 		if sourcePath != "" && existing.SourcePath != sourcePath &&
-			(existing.SourcePath == "" || strings.EqualFold(existing.SourcePath, sourcePath)) {
+			(existing.SourcePath == "" ||
+				store.SourceKey(existing.SourcePath) == store.SourceKey(sourcePath)) {
 			if e := a.store.SetBookSourcePath(ctx, existing.ID, sourcePath); e != nil {
 				log.Printf("api: adopt source path for book %d: %v", existing.ID, e)
 			} else {
@@ -82,10 +91,20 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		return store.Book{}, ingestDuplicate, fmt.Errorf("lookup by hash: %w", err)
 	}
 
-	// New content from a watched path that already maps to a book means the file
-	// was re-stamped (metadata edit / re-encode): replace that book's content in
-	// place, keeping its id and reading positions.
 	if sourcePath != "" {
+		// The watcher re-offers every file in the tree on every scan, so content
+		// whose book was deleted has to be refused explicitly or the delete
+		// silently undoes itself on the next restart (LYCM-109).
+		switch tombstoned, err := a.store.IsSourceTombstoned(ctx, sourcePath, hash); {
+		case err != nil:
+			return store.Book{}, ingestDuplicate, fmt.Errorf("check tombstone: %w", err)
+		case tombstoned:
+			return store.Book{}, ingestTombstoned, nil
+		}
+
+		// New content from a watched path that already maps to a book means the
+		// file was re-stamped (metadata edit / re-encode): replace that book's
+		// content in place, keeping its id and reading positions.
 		switch existing, err := a.store.GetBookBySourcePath(ctx, sourcePath); {
 		case err == nil:
 			return a.replaceBook(ctx, existing, sourcePath, md, data, hash)
@@ -94,6 +113,12 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		default:
 			return store.Book{}, ingestDuplicate, fmt.Errorf("lookup by source path: %w", err)
 		}
+	} else if err := a.store.ClearTombstone(ctx, hash); err != nil {
+		// An upload is an explicit request for this book, so it lifts an earlier
+		// delete rather than being refused by it. Best effort: a stale tombstone
+		// only affects a later folder ingest, and the upload itself has already
+		// succeeded in every way that matters.
+		log.Printf("api: clear tombstone for upload %q: %v", source, err)
 	}
 
 	// Choose the source cover once (chooseCover may hit the network), run ingest

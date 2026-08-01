@@ -138,7 +138,7 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 		 ON CONFLICT (file_hash) DO NOTHING
 		 RETURNING `+bookColumns,
 		b.Title, nullString(b.Author), nullString(b.CoverPath),
-		b.FilePath, b.FileHash, b.SizeBytes, nullString(b.SourcePath),
+		b.FilePath, b.FileHash, b.SizeBytes, nullString(NormalizeSourcePath(b.SourcePath)),
 		nullString(b.Series), nullFloat(b.SeriesIndex),
 		b.ReviewState, marshalFlags(b.ReviewFlags)))
 	switch {
@@ -412,17 +412,30 @@ func (s *Store) SetCoverPath(ctx context.Context, bookID int64, coverPath string
 
 // GetBookBySourcePath returns the book folder-ingested from sourcePath, or
 // ErrNotFound. Only folder-ingested books carry a source_path (uploads have
-// none), so an empty path never matches. Matching is case-insensitive: the
-// acquisition pipeline re-cases folder names between imports (LYCM-68), and a
-// re-cased path must still resolve to the same book instead of duplicating it.
+// none), so an empty path never matches. Matching ignores both ways the
+// acquisition pipeline respells a path between imports: casing, because it
+// re-cases folder names (LYCM-68), and Unicode normalization form, because it
+// re-encodes accented characters (LYCM-109). Either respelling must resolve to
+// the same book instead of duplicating it.
+//
+// The column is normalized on write (and back-filled by migration 0013), so
+// normalize() here only matters for rows migration 0013 had to skip; it is
+// cheap at library scale and keeps those rows resolving to one book.
 // ORDER BY id keeps the result deterministic (the original row wins) for legacy
-// rows that already duplicated across casings.
+// rows that already duplicated across spellings.
+//
+// Both sides are folded by Postgres rather than passing a Go-lowercased key:
+// lower() is locale-dependent (under a C/POSIX ctype it leaves non-ASCII alone,
+// where Go's strings.ToLower does not), so mixing the two would make matching
+// hinge on the cluster's collation. Folding both sides the same way keeps this
+// correct wherever it runs, and normalize() is locale-independent regardless.
 func (s *Store) GetBookBySourcePath(ctx context.Context, sourcePath string) (Book, error) {
 	if sourcePath == "" {
 		return Book{}, ErrNotFound
 	}
 	b, err := scanBook(s.pool.QueryRow(ctx,
-		`SELECT `+bookColumns+` FROM books WHERE lower(source_path) = lower($1)
+		`SELECT `+bookColumns+` FROM books
+		  WHERE lower(normalize(source_path, NFC)) = lower(normalize($1, NFC))
 		  ORDER BY id LIMIT 1`, sourcePath))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound
@@ -440,7 +453,8 @@ func (s *Store) GetBookBySourcePath(ctx context.Context, sourcePath string) (Boo
 // path (callers treat that as best-effort).
 func (s *Store) SetBookSourcePath(ctx context.Context, id int64, sourcePath string) error {
 	ct, err := s.pool.Exec(ctx,
-		`UPDATE books SET source_path = $2 WHERE id = $1`, id, nullString(sourcePath))
+		`UPDATE books SET source_path = $2 WHERE id = $1`,
+		id, nullString(NormalizeSourcePath(sourcePath)))
 	if err != nil {
 		return fmt.Errorf("store: set source path: %w", err)
 	}

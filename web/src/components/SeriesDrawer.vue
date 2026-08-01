@@ -1,12 +1,39 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import { memberStatus, resumeIndex, type MemberStatus, type SeriesGroup } from '@/library/series'
+import TileMenu from '@/components/TileMenu.vue'
+import { bookMenuItems, isFinished } from '@/library/bookMenu'
 import type { Book } from '@/api/types'
 
 const props = defineProps<{ series: SeriesGroup; arrowLeftPct: number }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'set-finished', id: number, finished: boolean): void
+  (e: 'remove', id: number): void
+}>()
+
+// A book that belongs to a series is only ever drawn here, so without the same
+// tile menu the shelf offers no way to mark it read or remove it (LYCM-109).
+const menu = ref<{ x: number; y: number; book: Book } | null>(null)
+function openMenu(e: MouseEvent, book: Book): void {
+  menu.value = { x: e.clientX, y: e.clientY, book }
+}
+// Keyed off the explicit `finished` flag, not memberStatus() — that reports a
+// book at 99% as finished, which would label the toggle backwards and write back
+// the value the book already has.
+const menuItems = computed(() => (menu.value ? bookMenuItems(menu.value.book) : []))
+function onSelect(key: string): void {
+  const open = menu.value
+  menu.value = null
+  if (!open) return
+  if (key === 'finish') {
+    emit('set-finished', open.book.id, !isFinished(open.book))
+  } else if (key === 'remove') {
+    emit('remove', open.book.id)
+  }
+}
 
 const resumeAt = computed(() => resumeIndex(props.series.members))
 const resumeBook = computed<Book>(() => props.series.members[resumeAt.value]!)
@@ -49,7 +76,12 @@ function pct(b: Book): number {
 
         <ul class="drawer__grid">
           <li v-for="(member, i) in series.members" :key="member.id" class="drawer__item">
-            <RouterLink :to="`/reader/${member.id}`" class="drawer__link" :title="member.title">
+            <RouterLink
+              :to="`/reader/${member.id}`"
+              class="drawer__link"
+              :title="member.title"
+              @contextmenu.prevent="openMenu($event, member)"
+            >
               <div class="drawer__cover" :class="{ 'drawer__cover--fallback': !coverFor(member) }">
                 <img
                   v-if="coverFor(member)"
@@ -76,6 +108,15 @@ function pct(b: Book): number {
         </ul>
       </div>
     </div>
+
+    <TileMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      :items="menuItems"
+      @select="onSelect"
+      @close="menu = null"
+    />
   </div>
 </template>
 

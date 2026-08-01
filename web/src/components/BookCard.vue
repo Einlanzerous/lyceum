@@ -4,9 +4,13 @@ import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { Book } from '@/api/types'
 import TileMenu from '@/components/TileMenu.vue'
+import { bookMenuItems, isFinished } from '@/library/bookMenu'
 
 const props = defineProps<{ book: Book; pinned?: boolean }>()
-const emit = defineEmits<{ (e: 'set-finished', id: number, finished: boolean): void }>()
+const emit = defineEmits<{
+  (e: 'set-finished', id: number, finished: boolean): void
+  (e: 'remove', id: number): void
+}>()
 
 // Covers can 404 (e.g. a missing blob); fall back to the title treatment.
 const coverFailed = ref(false)
@@ -24,14 +28,18 @@ const cover = computed(() =>
 )
 
 // contextmenu fires on desktop right-click AND Android long-press, so one
-// handler gives the tile its "mark as read" affordance on both.
+// handler gives the tile its per-book actions on both.
 const menu = ref<{ x: number; y: number } | null>(null)
 function openMenu(e: MouseEvent): void {
   menu.value = { x: e.clientX, y: e.clientY }
 }
-function toggleFinished(): void {
-  emit('set-finished', props.book.id, !finished.value)
+
+const menuItems = computed(() => bookMenuItems(props.book))
+
+function onSelect(key: string): void {
   menu.value = null
+  if (key === 'finish') emit('set-finished', props.book.id, !isFinished(props.book))
+  else if (key === 'remove') emit('remove', props.book.id)
 }
 </script>
 
@@ -76,8 +84,8 @@ function toggleFinished(): void {
       v-if="menu"
       :x="menu.x"
       :y="menu.y"
-      :items="[{ key: 'finish', label: finished ? 'Mark as unread' : 'Mark as read' }]"
-      @select="toggleFinished"
+      :items="menuItems"
+      @select="onSelect"
       @close="menu = null"
     />
   </RouterLink>

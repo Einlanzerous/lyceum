@@ -215,6 +215,206 @@ func TestAdoptRecasedPathOnDuplicate(t *testing.T) {
 	}
 }
 
+// Unicode spellings of "/data/media/books/Victor Milán/knights.epub" — the
+// exact pair found duplicated in production (LYCM-109). The acquisition
+// pipeline wrote the composed form on the first import and the decomposed form
+// on a later one; they are different byte strings naming the same file.
+const (
+	// á composed, as the first import wrote it.
+	pathNFC = "/data/media/books/Victor Mil\u00e1n/knights.epub"
+	// The same name with á decomposed into a + combining acute, as a later
+	// import wrote it. Escaped so the difference survives review and any tool
+	// that might normalize this file.
+	pathNFD = "/data/media/books/Victor Mila\u0301n/knights.epub"
+)
+
+// TestReplaceOnRenormalizedPath is the LYCM-109 regression: a re-stamped file
+// whose path is respelled in NFD must update its book in place, exactly as a
+// re-cased path does (LYCM-68), instead of ingesting as a second book.
+func TestReplaceOnRenormalizedPath(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	ctx := context.Background()
+
+	v1 := epubWithIdentifier(t, "The Dinosaur Knights", "urn:isbn:9780765332677")
+	b1, result, err := a.ingestEPUB(ctx, v1, pathNFC, pathNFC)
+	if err != nil || result != ingestCreated {
+		t.Fatalf("first ingest: result=%v err=%v", result, err)
+	}
+
+	v2 := epubWithIdentifier(t, "The Dinosaur Knights (v2)", "urn:isbn:9780765332677")
+	b2, result, err := a.ingestEPUB(ctx, v2, pathNFD, pathNFD)
+	if err != nil {
+		t.Fatalf("re-normalized ingest err: %v", err)
+	}
+	if result != ingestReplaced {
+		t.Fatalf("re-normalized ingest result=%v, want ingestReplaced", result)
+	}
+	if b2.ID != b1.ID {
+		t.Fatalf("re-normalized path created a new id %d, want %d (no duplicate)", b2.ID, b1.ID)
+	}
+	// Stored in one canonical spelling, whichever form arrived.
+	if b2.SourcePath != pathNFC {
+		t.Fatalf("source_path=%q, want NFC-normalized %q", b2.SourcePath, pathNFC)
+	}
+
+	books, err := s.ListBooks(ctx)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("library has %d books after re-normalized re-ingest, want 1", len(books))
+	}
+}
+
+// TestAdoptRenormalizedPathOnDuplicate is the rename-only variant: identical
+// bytes reappear under a decomposed path. The hash dedup hits and no second row
+// appears; the stored path stays canonical.
+func TestAdoptRenormalizedPathOnDuplicate(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	ctx := context.Background()
+
+	data := epubWithIdentifier(t, "The Dinosaur Knights", "urn:isbn:9780765332677")
+	b1, result, err := a.ingestEPUB(ctx, data, pathNFC, pathNFC)
+	if err != nil || result != ingestCreated {
+		t.Fatalf("first ingest: result=%v err=%v", result, err)
+	}
+
+	b2, result, err := a.ingestEPUB(ctx, data, pathNFD, pathNFD)
+	if err != nil {
+		t.Fatalf("re-normalized duplicate ingest err: %v", err)
+	}
+	if result != ingestDuplicate {
+		t.Fatalf("re-normalized duplicate result=%v, want ingestDuplicate", result)
+	}
+	if b2.ID != b1.ID {
+		t.Fatalf("re-normalized duplicate created id %d, want %d", b2.ID, b1.ID)
+	}
+	if b2.SourcePath != pathNFC {
+		t.Fatalf("source_path=%q, want unchanged %q", b2.SourcePath, pathNFC)
+	}
+}
+
+// TestDeletedWatchedFileStaysDeleted covers the other half of LYCM-109: the
+// file behind a folder-ingested book lives in the acquisition stack's media
+// tree, which Lyceum does not delete from. So the watcher keeps offering it,
+// and only a tombstone stops the deleted book reappearing.
+func TestDeletedWatchedFileStaysDeleted(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	const path = "/data/media/books/unwanted/copy.epub"
+
+	data := epubWithIdentifier(t, "Unwanted", "urn:isbn:9780765332677")
+	b, result, err := a.ingestEPUB(ctx, data, path, path)
+	if err != nil || result != ingestCreated {
+		t.Fatalf("ingest: result=%v err=%v", result, err)
+	}
+	if code := deleteBook(t, srv.URL, b.ID); code != http.StatusNoContent {
+		t.Fatalf("delete: got %d, want 204", code)
+	}
+
+	// The next scan re-offers the very same file.
+	if _, result, err = a.ingestEPUB(ctx, data, path, path); err != nil {
+		t.Fatalf("re-offer after delete: %v", err)
+	}
+	if result != ingestTombstoned {
+		t.Fatalf("re-offer result=%v, want ingestTombstoned", result)
+	}
+
+	// A re-stamp (new bytes at the deleted path) must not undo the delete either.
+	restamped := epubWithIdentifier(t, "Unwanted (v2)", "urn:isbn:9780765332677")
+	if _, result, err = a.ingestEPUB(ctx, restamped, path, path); err != nil {
+		t.Fatalf("re-stamp after delete: %v", err)
+	}
+	if result != ingestTombstoned {
+		t.Fatalf("re-stamp result=%v, want ingestTombstoned", result)
+	}
+
+	books, err := s.ListBooks(ctx)
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 0 {
+		t.Fatalf("library has %d books after delete, want 0", len(books))
+	}
+}
+
+// TestUploadOverridesTombstone: uploading a file is an explicit request for
+// that book, so it outranks an earlier delete of the same content — otherwise a
+// deleted book could never be added back.
+func TestUploadOverridesTombstone(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	const path = "/data/media/books/second-thoughts/copy.epub"
+
+	data := epubWithIdentifier(t, "Second Thoughts", "urn:isbn:9780765332677")
+	b, _, err := a.ingestEPUB(ctx, data, path, path)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if code := deleteBook(t, srv.URL, b.ID); code != http.StatusNoContent {
+		t.Fatalf("delete: got %d, want 204", code)
+	}
+
+	// Upload path: no source path.
+	readded, result, err := a.ingestEPUB(ctx, data, "copy.epub", "")
+	if err != nil {
+		t.Fatalf("re-upload after delete: %v", err)
+	}
+	if result != ingestCreated {
+		t.Fatalf("re-upload result=%v, want ingestCreated", result)
+	}
+	if readded.ID == 0 {
+		t.Fatal("re-upload returned no book")
+	}
+
+	// The tombstone is gone, so the watched copy is welcome again too.
+	if _, result, err = a.ingestEPUB(ctx, data, path, path); err != nil {
+		t.Fatalf("watched re-offer after re-upload: %v", err)
+	}
+	if result != ingestDuplicate {
+		t.Fatalf("watched re-offer result=%v, want ingestDuplicate", result)
+	}
+}
+
+// TestDeletedUploadDoesNotBlockAcquisition: a tombstone exists to stop the
+// watcher re-offering a file, and an uploaded book has no file in the watched
+// tree. So deleting one must not leave a hash tombstone that silently refuses a
+// later, genuine acquisition of the same book — a trap with no UI to see or
+// lift it.
+func TestDeletedUploadDoesNotBlockAcquisition(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+
+	data := epubWithIdentifier(t, "Acquired Later", "urn:isbn:9780765332677")
+	uploaded, result, err := a.ingestEPUB(ctx, data, "acquired.epub", "")
+	if err != nil || result != ingestCreated {
+		t.Fatalf("upload: result=%v err=%v", result, err)
+	}
+	if code := deleteBook(t, srv.URL, uploaded.ID); code != http.StatusNoContent {
+		t.Fatalf("delete: got %d, want 204", code)
+	}
+
+	// Bindery later grabs the same book into the watched tree.
+	const path = "/data/media/books/acquired/copy.epub"
+	if _, result, err = a.ingestEPUB(ctx, data, path, path); err != nil {
+		t.Fatalf("acquisition after delete: %v", err)
+	}
+	if result != ingestCreated {
+		t.Fatalf("acquisition result=%v, want ingestCreated", result)
+	}
+}
+
 // TestDeleteBookEndpoint verifies DELETE /books/{id} removes the row and its
 // blobs (204), and 404s an unknown id.
 func TestDeleteBookEndpoint(t *testing.T) {

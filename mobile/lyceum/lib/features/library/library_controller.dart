@@ -38,6 +38,35 @@ class LibraryController extends AsyncNotifier<List<Book>> {
       rethrow;
     }
   }
+
+  /// Remove a book from the library for good (LYCM-109). The tile is dropped
+  /// optimistically and put back at its old place if the server refuses, so a
+  /// failed delete doesn't silently lose the book from the shelf.
+  Future<void> remove(int bookId) async {
+    final current = state.asData?.value;
+    if (current == null) return;
+    final index = current.indexWhere((b) => b.id == bookId);
+    if (index == -1) return;
+    final removed = current[index];
+    state = AsyncData([
+      for (final b in current)
+        if (b.id != bookId) b,
+    ]);
+    try {
+      await ref.read(lyceumClientProvider).deleteBook(bookId);
+    } catch (_) {
+      // Restore just this book, into whatever the shelf looks like now — a
+      // refresh or another removal may have landed while the request was in
+      // flight, and putting the whole pre-delete snapshot back would revert it.
+      final now = state.asData?.value ?? const <Book>[];
+      if (!now.any((b) => b.id == bookId)) {
+        state = AsyncData(
+          [...now]..insert(index.clamp(0, now.length), removed),
+        );
+      }
+      rethrow;
+    }
+  }
 }
 
 // retry: (_, _) => null disables Riverpod 3's automatic retry-on-failure for

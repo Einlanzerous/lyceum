@@ -164,6 +164,13 @@ func (w *Watcher) consider(ctx context.Context, path string, d fs.DirEntry) {
 		w.ok[path] = sig
 		delete(w.bad, path)
 		log.Printf("watch: re-stamped %s -> updated book %d", path, book.ID)
+	case result == ingestTombstoned:
+		// Deleted from the library on purpose while the file stayed in the tree
+		// (LYCM-109). Skipping is the point; say so once so it doesn't look like
+		// ingest is silently losing books.
+		w.ok[path] = sig
+		delete(w.bad, path)
+		log.Printf("watch: skipping %s — its book was deleted from the library; delete the file to stop it being offered", path)
 	default:
 		// Already in the library (deduped); remember it so we skip it next tick.
 		w.ok[path] = sig

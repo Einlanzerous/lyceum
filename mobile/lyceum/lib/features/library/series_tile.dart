@@ -232,8 +232,12 @@ class _SeriesSheet extends ConsumerWidget {
     final resumeAt = resumeIndex(series.members);
     final resumeBook = series.members[resumeAt];
 
+    // Captured up front so it stays valid after the confirm dialog's await.
+    final sheetNav = Navigator.of(context);
+    void closeSheet() => sheetNav.pop();
+
     void open(int bookId) {
-      Navigator.of(context).pop();
+      sheetNav.pop();
       context.push('/reader/$bookId');
     }
 
@@ -306,6 +310,17 @@ class _SeriesSheet extends ConsumerWidget {
                     book: b,
                     coverUrl: b.hasCover ? client.coverUrl(b.id) : null,
                     onTap: () => open(b.id),
+                    // A book in a series is only ever drawn here, so without
+                    // this its per-book actions are unreachable (LYCM-109).
+                    // A settled remove closes the sheet: `series` is a snapshot
+                    // taken when it opened, so the list would go stale — and a
+                    // failure message would be posted underneath it.
+                    onLongPress: () => showBookTileMenu(
+                      context,
+                      ref,
+                      b,
+                      onSettled: closeSheet,
+                    ),
                   );
                 },
               ),
@@ -323,11 +338,13 @@ class _MemberRow extends StatelessWidget {
     required this.book,
     required this.coverUrl,
     required this.onTap,
+    required this.onLongPress,
   });
   final int index;
   final Book book;
   final String? coverUrl;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -338,6 +355,7 @@ class _MemberRow extends StatelessWidget {
         : lyc.dim;
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
