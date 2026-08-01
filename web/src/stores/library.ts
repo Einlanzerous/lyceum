@@ -84,7 +84,13 @@ export const useLibraryStore = defineStore('library', {
       try {
         await deleteBook(bookId)
       } catch (err) {
-        this.books.splice(index, 0, removed)
+        // The shelf may have been replaced while the request was in flight (a
+        // load() landing, another tile going). Only put the book back if it is
+        // genuinely absent, and clamp the old index — blindly splicing at a
+        // stale position can duplicate it or drop it in the wrong slot.
+        if (!this.books.some((b) => b.id === bookId)) {
+          this.books.splice(Math.min(index, this.books.length), 0, removed!)
+        }
         throw err
       }
     },

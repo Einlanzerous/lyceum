@@ -14,14 +14,16 @@ String _pct(double v) => '${(v * 100).round()}%';
 /// Long-press action sheet for a library tile: mark the book read/unread, or
 /// remove it from the library. Mirrors the web tile menu (LYCM-109).
 ///
-/// [onRemoved] runs after a book is actually deleted. The series sheet uses it
-/// to close itself, since it renders a snapshot of the group taken when it
-/// opened and would otherwise keep offering the book that just went away.
+/// [onSettled] runs once a remove attempt resolves, whether or not it worked
+/// (but not if the confirm was dismissed). The series sheet uses it to close
+/// itself: it renders a snapshot of the group taken when it opened, so it would
+/// otherwise keep offering a book that just went away — and on failure it would
+/// cover the snackbar explaining why the book is still there.
 void showBookTileMenu(
   BuildContext context,
   WidgetRef ref,
   Book book, {
-  VoidCallback? onRemoved,
+  VoidCallback? onSettled,
 }) {
   showModalBottomSheet<void>(
     context: context,
@@ -60,7 +62,7 @@ void showBookTileMenu(
             ),
             onTap: () {
               Navigator.of(ctx).pop();
-              _confirmRemove(context, ref, book, onRemoved);
+              _confirmRemove(context, ref, book, onSettled);
             },
           ),
         ],
@@ -75,7 +77,7 @@ Future<void> _confirmRemove(
   BuildContext context,
   WidgetRef ref,
   Book book,
-  VoidCallback? onRemoved,
+  VoidCallback? onSettled,
 ) async {
   final messenger = ScaffoldMessenger.of(context);
   final confirmed = await showDialog<bool>(
@@ -99,12 +101,19 @@ Future<void> _confirmRemove(
     ),
   );
   if (confirmed != true) return;
+
+  Object? failure;
   try {
     await ref.read(libraryControllerProvider.notifier).remove(book.id);
-    onRemoved?.call();
   } catch (e) {
+    failure = e;
+  }
+  // Let the host get out of the way first, so the snackbar is not posted
+  // underneath a series sheet that is still covering the screen.
+  onSettled?.call();
+  if (failure != null) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Could not remove “${book.title}”: $e')),
+      SnackBar(content: Text('Could not remove “${book.title}”: $failure')),
     );
   }
 }

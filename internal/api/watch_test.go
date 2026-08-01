@@ -99,6 +99,52 @@ func TestWatcherReportsNonEPUBLandings(t *testing.T) {
 	}
 }
 
+// TestWatcherHonoursDeletedBooks is the restart scenario behind LYCM-109: the
+// file behind a deleted book stays in the watched tree (that media belongs to
+// the acquisition stack, not to Lyceum), and the watcher only remembers what it
+// has already seen in memory. So a delete that is not recorded survives exactly
+// until the next restart — a fresh Watcher over the same tree, as below.
+func TestWatcherHonoursDeletedBooks(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	path := filepath.Join(dir, "unwanted.epub")
+	writeFile(t, path, epubWithIdentifier(t, "Unwanted", "urn:isbn:9780140449334"))
+
+	NewWatcher(a, dir, 0).scanOnce(ctx)
+	books, err := s.ListBooks(ctx)
+	if err != nil {
+		t.Fatalf("ListBooks: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("after first scan: %d books, want 1", len(books))
+	}
+
+	// Delete it the way the shelf does, leaving the file on disk.
+	deleted, err := s.DeleteBook(ctx, books[0].ID)
+	if err != nil {
+		t.Fatalf("DeleteBook: %v", err)
+	}
+	if err := s.TombstoneSource(ctx, deleted.SourcePath, deleted.FileHash); err != nil {
+		t.Fatalf("TombstoneSource: %v", err)
+	}
+
+	// Restart: a new Watcher has no memory of the file and re-offers it.
+	NewWatcher(a, dir, 0).scanOnce(ctx)
+	if n := countBooks(t, s); n != 0 {
+		t.Fatalf("deleted book came back after a restart: %d books, want 0", n)
+	}
+
+	// Re-stamping the file (new bytes, same path) must not undo the delete either.
+	writeFile(t, path, epubWithIdentifier(t, "Unwanted (v2)", "urn:isbn:9780140449334"))
+	NewWatcher(a, dir, 0).scanOnce(ctx)
+	if n := countBooks(t, s); n != 0 {
+		t.Fatalf("re-stamping resurrected a deleted book: %d books, want 0", n)
+	}
+}
+
 func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o644); err != nil {

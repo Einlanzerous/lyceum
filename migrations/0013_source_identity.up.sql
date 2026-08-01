@@ -33,14 +33,18 @@ UPDATE books b
 --    bytes, wherever they land) and the source key (any bytes at the deleted
 --    book's path, i.e. a re-stamp). Lyceum never deletes from the watched tree
 --    itself — that media belongs to the acquisition stack.
+--    Only books with a watched file are tombstoned: an uploaded book has none,
+--    so a tombstone could not stop anything and would only sit there refusing
+--    some future legitimate acquisition of the same bytes.
 CREATE TABLE IF NOT EXISTS deleted_sources (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    -- lower(normalize(source_path, NFC)); '' for books that were uploaded
-    -- rather than folder-ingested, which tombstone on hash alone.
-    source_key TEXT NOT NULL DEFAULT '',
+    -- lower(normalize(source_path, NFC)), i.e. store.SourceKey of the deleted
+    -- book's watched path. Written and read only by that function, so the
+    -- folding stays self-consistent.
+    source_key TEXT NOT NULL,
     file_hash  TEXT NOT NULL UNIQUE,
+    -- Not read by the app; kept so an operator can see when a book was dropped.
     deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS deleted_sources_source_key
-    ON deleted_sources (source_key) WHERE source_key <> '';
+CREATE INDEX IF NOT EXISTS deleted_sources_source_key ON deleted_sources (source_key);

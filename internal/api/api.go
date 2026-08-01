@@ -46,7 +46,7 @@ type Store interface {
 	// otherwise the next scan brings the book straight back.
 	TombstoneSource(ctx context.Context, sourcePath, fileHash string) error
 	IsSourceTombstoned(ctx context.Context, sourcePath, fileHash string) (bool, error)
-	ClearTombstone(ctx context.Context, sourcePath, fileHash string) error
+	ClearTombstone(ctx context.Context, fileHash string) error
 
 	// Ingest QC review queue (LYCM-58): hold flagged ingests, then approve/edit.
 	ListPendingBooks(ctx context.Context) ([]store.Book, error)
@@ -498,9 +498,10 @@ func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	// Remember the deletion before cleaning up. Lyceum owns its blobs but not the
 	// watched media tree, so a folder-ingested book's file outlives the row and
-	// the watcher would re-ingest it on the next restart (LYCM-109). Logged, not
-	// fatal: the row really is gone either way, and failing the request would
-	// wrongly suggest the book is still there.
+	// the watcher would re-ingest it on the next restart (LYCM-109). An uploaded
+	// book has no watched file and so is not tombstoned — see TombstoneSource.
+	// Logged, not fatal: the row really is gone either way, and failing the
+	// request would wrongly suggest the book is still there.
 	if err := a.store.TombstoneSource(r.Context(), deleted.SourcePath, deleted.FileHash); err != nil {
 		log.Printf("api: delete book %d: tombstone source: %v", deleted.ID, err)
 	}

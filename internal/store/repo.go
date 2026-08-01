@@ -423,14 +423,20 @@ func (s *Store) SetCoverPath(ctx context.Context, bookID int64, coverPath string
 // cheap at library scale and keeps those rows resolving to one book.
 // ORDER BY id keeps the result deterministic (the original row wins) for legacy
 // rows that already duplicated across spellings.
+//
+// Both sides are folded by Postgres rather than passing a Go-lowercased key:
+// lower() is locale-dependent (under a C/POSIX ctype it leaves non-ASCII alone,
+// where Go's strings.ToLower does not), so mixing the two would make matching
+// hinge on the cluster's collation. Folding both sides the same way keeps this
+// correct wherever it runs, and normalize() is locale-independent regardless.
 func (s *Store) GetBookBySourcePath(ctx context.Context, sourcePath string) (Book, error) {
 	if sourcePath == "" {
 		return Book{}, ErrNotFound
 	}
 	b, err := scanBook(s.pool.QueryRow(ctx,
 		`SELECT `+bookColumns+` FROM books
-		  WHERE lower(normalize(source_path, NFC)) = $1
-		  ORDER BY id LIMIT 1`, sourceKey(sourcePath)))
+		  WHERE lower(normalize(source_path, NFC)) = lower(normalize($1, NFC))
+		  ORDER BY id LIMIT 1`, sourcePath))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound
 	}

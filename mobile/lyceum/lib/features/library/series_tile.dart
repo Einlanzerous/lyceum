@@ -312,13 +312,14 @@ class _SeriesSheet extends ConsumerWidget {
                     onTap: () => open(b.id),
                     // A book in a series is only ever drawn here, so without
                     // this its per-book actions are unreachable (LYCM-109).
-                    // Removing one closes the sheet: `series` is a snapshot
-                    // taken when it opened, so the list would go stale.
+                    // A settled remove closes the sheet: `series` is a snapshot
+                    // taken when it opened, so the list would go stale — and a
+                    // failure message would be posted underneath it.
                     onLongPress: () => showBookTileMenu(
                       context,
                       ref,
                       b,
-                      onRemoved: closeSheet,
+                      onSettled: closeSheet,
                     ),
                   );
                 },

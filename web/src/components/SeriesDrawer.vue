@@ -4,6 +4,7 @@ import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import { memberStatus, resumeIndex, type MemberStatus, type SeriesGroup } from '@/library/series'
 import TileMenu from '@/components/TileMenu.vue'
+import { bookMenuItems, isFinished } from '@/library/bookMenu'
 import type { Book } from '@/api/types'
 
 const props = defineProps<{ series: SeriesGroup; arrowLeftPct: number }>()
@@ -19,19 +20,16 @@ const menu = ref<{ x: number; y: number; book: Book } | null>(null)
 function openMenu(e: MouseEvent, book: Book): void {
   menu.value = { x: e.clientX, y: e.clientY, book }
 }
-const menuItems = computed(() => {
-  const done = menu.value ? memberStatus(menu.value.book) === 'finished' : false
-  return [
-    { key: 'finish', label: done ? 'Mark as unread' : 'Mark as read' },
-    { key: 'remove', label: 'Remove from library', danger: true },
-  ]
-})
+// Keyed off the explicit `finished` flag, not memberStatus() — that reports a
+// book at 99% as finished, which would label the toggle backwards and write back
+// the value the book already has.
+const menuItems = computed(() => (menu.value ? bookMenuItems(menu.value.book) : []))
 function onSelect(key: string): void {
   const open = menu.value
   menu.value = null
   if (!open) return
   if (key === 'finish') {
-    emit('set-finished', open.book.id, memberStatus(open.book) !== 'finished')
+    emit('set-finished', open.book.id, !isFinished(open.book))
   } else if (key === 'remove') {
     emit('remove', open.book.id)
   }

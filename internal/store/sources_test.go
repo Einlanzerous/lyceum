@@ -146,7 +146,7 @@ func TestTombstoneLifecycle(t *testing.T) {
 		t.Fatalf("re-TombstoneSource: %v", err)
 	}
 
-	if err := s.ClearTombstone(ctx, srcNFD, "hash-gone"); err != nil {
+	if err := s.ClearTombstone(ctx, "hash-gone"); err != nil {
 		t.Fatalf("ClearTombstone: %v", err)
 	}
 	got, err := s.IsSourceTombstoned(ctx, srcNFC, "hash-gone")
@@ -158,21 +158,22 @@ func TestTombstoneLifecycle(t *testing.T) {
 	}
 }
 
-// TestTombstoneUploadHasNoPath: a book that was uploaded rather than
-// folder-ingested tombstones on hash alone, and its empty source key must not
-// match every other path.
-func TestTombstoneUploadHasNoPath(t *testing.T) {
+// TestUploadedBookIsNotTombstoned: a tombstone exists to stop the watcher
+// re-offering a file. An uploaded book has no watched file, so deleting one must
+// not leave a hash tombstone behind to refuse a later acquisition of the same
+// bytes — invisibly, and with no way to lift it but re-uploading them.
+func TestUploadedBookIsNotTombstoned(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
 	if err := s.TombstoneSource(ctx, "", "hash-upload"); err != nil {
 		t.Fatalf("TombstoneSource: %v", err)
 	}
-	got, err := s.IsSourceTombstoned(ctx, "/data/media/books/unrelated.epub", "hash-different")
+	got, err := s.IsSourceTombstoned(ctx, "/data/media/books/acquired-later.epub", "hash-upload")
 	if err != nil {
 		t.Fatalf("IsSourceTombstoned: %v", err)
 	}
 	if got {
-		t.Error("an upload's empty source key matched an unrelated path")
+		t.Error("deleting an uploaded book blocked a later folder ingest of the same bytes")
 	}
 }

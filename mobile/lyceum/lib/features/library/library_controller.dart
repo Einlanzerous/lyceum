@@ -45,7 +45,9 @@ class LibraryController extends AsyncNotifier<List<Book>> {
   Future<void> remove(int bookId) async {
     final current = state.asData?.value;
     if (current == null) return;
-    if (!current.any((b) => b.id == bookId)) return;
+    final index = current.indexWhere((b) => b.id == bookId);
+    if (index == -1) return;
+    final removed = current[index];
     state = AsyncData([
       for (final b in current)
         if (b.id != bookId) b,
@@ -53,7 +55,15 @@ class LibraryController extends AsyncNotifier<List<Book>> {
     try {
       await ref.read(lyceumClientProvider).deleteBook(bookId);
     } catch (_) {
-      state = AsyncData(current);
+      // Restore just this book, into whatever the shelf looks like now — a
+      // refresh or another removal may have landed while the request was in
+      // flight, and putting the whole pre-delete snapshot back would revert it.
+      final now = state.asData?.value ?? const <Book>[];
+      if (!now.any((b) => b.id == bookId)) {
+        state = AsyncData(
+          [...now]..insert(index.clamp(0, now.length), removed),
+        );
+      }
       rethrow;
     }
   }

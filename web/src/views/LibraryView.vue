@@ -6,6 +6,8 @@ import SeriesCard from '@/components/SeriesCard.vue'
 import SeriesDrawer from '@/components/SeriesDrawer.vue'
 import SortControl from '@/components/SortControl.vue'
 import LibrarySearch from '@/components/LibrarySearch.vue'
+import TileMenu from '@/components/TileMenu.vue'
+import { bookMenuItems, isFinished } from '@/library/bookMenu'
 import { useLibraryStore } from '@/stores/library'
 import { listPendingReview } from '@/api/client'
 import { coverSrc } from '@/api/coverSrc'
@@ -167,6 +169,21 @@ function onServerSaved(): void {
 
 function onSetFinished(id: number, finished: boolean): void {
   void store.setFinished(id, finished)
+}
+
+// List rows are plain links, so they get the same menu the grid tiles carry —
+// otherwise mark-as-read and remove are unreachable in list view (LYCM-109).
+const rowMenu = ref<{ x: number; y: number; book: Book } | null>(null)
+const rowMenuItems = computed(() => (rowMenu.value ? bookMenuItems(rowMenu.value.book) : []))
+function openRowMenu(e: MouseEvent, book: Book): void {
+  rowMenu.value = { x: e.clientX, y: e.clientY, book }
+}
+function onRowMenuSelect(key: string): void {
+  const open = rowMenu.value
+  rowMenu.value = null
+  if (!open) return
+  if (key === 'finish') onSetFinished(open.book.id, !isFinished(open.book))
+  else if (key === 'remove') void onRemove(open.book.id)
 }
 
 // Removing a book destroys its file and everyone's place in it, so it always
@@ -364,7 +381,13 @@ async function onRemove(id: number): Promise<void> {
 
     <!-- List -->
     <div v-else class="lib__list">
-      <RouterLink v-for="book in listBooks" :key="book.id" :to="`/reader/${book.id}`" class="row">
+      <RouterLink
+        v-for="book in listBooks"
+        :key="book.id"
+        :to="`/reader/${book.id}`"
+        class="row"
+        @contextmenu.prevent="openRowMenu($event, book)"
+      >
         <div class="row__thumb" :class="{ 'row__thumb--fallback': !book.cover_url }">
           <img v-if="book.cover_url" :src="coverSrc(book.id)" :alt="''" loading="lazy" />
           <span v-else>{{ book.title.charAt(0) }}</span>
@@ -377,6 +400,15 @@ async function onRemove(id: number): Promise<void> {
           {{ formatProgress(book.progress) }}
         </div>
       </RouterLink>
+
+      <TileMenu
+        v-if="rowMenu"
+        :x="rowMenu.x"
+        :y="rowMenu.y"
+        :items="rowMenuItems"
+        @select="onRowMenuSelect"
+        @close="rowMenu = null"
+      />
     </div>
   </section>
 </template>

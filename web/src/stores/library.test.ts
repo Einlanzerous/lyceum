@@ -80,6 +80,30 @@ describe('library store', () => {
     expect(store.books.map((b) => b.id)).toEqual([1, 2, 3])
   })
 
+  it('remove() does not duplicate the book when a reload lands mid-flight', async () => {
+    // The shelf can be replaced while the DELETE is in flight. Rolling back by
+    // splicing at the pre-await index would then re-insert a book the reload
+    // already restored, or drop it in the wrong slot.
+    let reject: (e: Error) => void = () => {}
+    vi.mocked(deleteBook).mockReturnValue(
+      new Promise<void>((_, rej) => {
+        reject = rej
+      }),
+    )
+    const store = useLibraryStore()
+    store.books = [book(1), book(2), book(3)]
+
+    const pending = store.remove(2)
+    expect(store.books.map((b) => b.id)).toEqual([1, 3])
+
+    // A concurrent load() brings the full shelf back, book 2 included.
+    store.books = [book(1), book(2), book(3)]
+    reject(new ApiError(500, 'nope'))
+    await expect(pending).rejects.toThrow('nope')
+
+    expect(store.books.map((b) => b.id)).toEqual([1, 2, 3])
+  })
+
   it('remove() ignores an unknown id', async () => {
     const store = useLibraryStore()
     store.books = [book(1)]

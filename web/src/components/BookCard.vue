@@ -4,6 +4,7 @@ import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { Book } from '@/api/types'
 import TileMenu from '@/components/TileMenu.vue'
+import { bookMenuItems, isFinished } from '@/library/bookMenu'
 
 const props = defineProps<{ book: Book; pinned?: boolean }>()
 const emit = defineEmits<{
@@ -33,16 +34,11 @@ function openMenu(e: MouseEvent): void {
   menu.value = { x: e.clientX, y: e.clientY }
 }
 
-const menuItems = computed(() => [
-  { key: 'finish', label: finished.value ? 'Mark as unread' : 'Mark as read' },
-  // Removing a book is destructive and unreachable anywhere else on the shelf
-  // (LYCM-109); the view confirms before it happens.
-  { key: 'remove', label: 'Remove from library', danger: true },
-])
+const menuItems = computed(() => bookMenuItems(props.book))
 
 function onSelect(key: string): void {
   menu.value = null
-  if (key === 'finish') emit('set-finished', props.book.id, !finished.value)
+  if (key === 'finish') emit('set-finished', props.book.id, !isFinished(props.book))
   else if (key === 'remove') emit('remove', props.book.id)
 }
 </script>

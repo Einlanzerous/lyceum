@@ -384,6 +384,37 @@ func TestUploadOverridesTombstone(t *testing.T) {
 	}
 }
 
+// TestDeletedUploadDoesNotBlockAcquisition: a tombstone exists to stop the
+// watcher re-offering a file, and an uploaded book has no file in the watched
+// tree. So deleting one must not leave a hash tombstone that silently refuses a
+// later, genuine acquisition of the same book — a trap with no UI to see or
+// lift it.
+func TestDeletedUploadDoesNotBlockAcquisition(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "")
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+
+	data := epubWithIdentifier(t, "Acquired Later", "urn:isbn:9780765332677")
+	uploaded, result, err := a.ingestEPUB(ctx, data, "acquired.epub", "")
+	if err != nil || result != ingestCreated {
+		t.Fatalf("upload: result=%v err=%v", result, err)
+	}
+	if code := deleteBook(t, srv.URL, uploaded.ID); code != http.StatusNoContent {
+		t.Fatalf("delete: got %d, want 204", code)
+	}
+
+	// Bindery later grabs the same book into the watched tree.
+	const path = "/data/media/books/acquired/copy.epub"
+	if _, result, err = a.ingestEPUB(ctx, data, path, path); err != nil {
+		t.Fatalf("acquisition after delete: %v", err)
+	}
+	if result != ingestCreated {
+		t.Fatalf("acquisition result=%v, want ingestCreated", result)
+	}
+}
+
 // TestDeleteBookEndpoint verifies DELETE /books/{id} removes the row and its
 // blobs (204), and 404s an unknown id.
 func TestDeleteBookEndpoint(t *testing.T) {
