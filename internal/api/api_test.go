@@ -48,11 +48,21 @@ func testStore(t *testing.T) *store.Store {
 // other packages that share the single TEST_DATABASE_URL database when
 // `go test ./...` runs their test binaries in parallel.
 func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, error) {
+	return connectSchemaWith(ctx, dsn, schema, nil)
+}
+
+// connectSchemaWith is connectSchema with a hook to adjust the pool config
+// before it opens — a query tracer, a connection cap — for tests that observe or
+// constrain pool traffic rather than just use it.
+func connectSchemaWith(ctx context.Context, dsn, schema string, tune func(*pgxpool.Config)) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	if tune != nil {
+		tune(cfg)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err

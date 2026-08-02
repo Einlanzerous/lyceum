@@ -28,14 +28,21 @@ func (a *API) handleReviewList(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list pending books", err)
 		return
 	}
-	out := make([]bookJSON, 0, len(books))
-	for _, b := range books {
-		entry, err := a.bookJSONFor(ctx, b)
+	// The review queue is empty most of the time — it holds a book only between
+	// a flagged ingest and someone clearing it — and an empty queue needs no
+	// reader state. Without this the common case sweeps a reader's entire
+	// history to render nothing.
+	st := readerState{}
+	if len(books) > 0 {
+		st, err = a.readerStateAll(ctx)
 		if err != nil {
-			serverError(w, "assemble book", err)
+			serverError(w, "read reader state", err)
 			return
 		}
-		out = append(out, entry)
+	}
+	out := make([]bookJSON, 0, len(books))
+	for _, b := range books {
+		out = append(out, a.bookJSONFor(b, st))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -180,10 +187,10 @@ func (a *API) storeCover(ctx context.Context, b store.Book, art []byte) (store.B
 // writeBook renders a book as JSON (200), folding in its cover URL and review
 // state via bookJSONFor.
 func (a *API) writeBook(w http.ResponseWriter, r *http.Request, b store.Book) {
-	entry, err := a.bookJSONFor(r.Context(), b)
+	st, err := a.readerStateOne(r.Context(), b.ID)
 	if err != nil {
 		serverError(w, "assemble book", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	writeJSON(w, http.StatusOK, a.bookJSONFor(b, st))
 }
