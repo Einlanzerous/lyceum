@@ -1,0 +1,11 @@
+-- LYCM-114: retire books.finished_at, dead weight since 0014.
+--
+-- 0014 moved mark-as-read onto book_reads (book, user) but left this column
+-- standing, so that rolling back to a pre-LYCM-112 binary would still find the
+-- marks it had written. That window is closed: nothing has read or written the
+-- column since 0014, and a rollback that far back is no longer on the table.
+--
+-- This undoes 0006 completely, and makes 0014's back-fill non-repeatable — run
+-- by hand after this, it finds no column to read from. The migrator records
+-- applied versions, so an ordinary run never re-runs it.
+ALTER TABLE books DROP COLUMN IF EXISTS finished_at;
