@@ -29,6 +29,11 @@ type Store interface {
 	GetFurthestPosition(ctx context.Context, bookID, userID int64) (store.ReadingPosition, error)
 	IsBookFinished(ctx context.Context, bookID, userID int64) (bool, error)
 	SetBookFinished(ctx context.Context, bookID, userID int64, finished bool) error
+
+	// Batch forms of the two above, so listing a shelf costs a fixed number of
+	// queries rather than two per book (LYCM-115).
+	ListFurthestPositions(ctx context.Context, userID int64) (map[int64]store.ReadingPosition, error)
+	ListFinishedBooks(ctx context.Context, userID int64) (map[int64]bool, error)
 	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
@@ -346,13 +351,59 @@ type bookJSON struct {
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
 
+// readerState is one signed-in person's per-book state: how far they got in each
+// book and which ones they have marked read. The shelf is shared but this is
+// not (LYCM-801, LYCM-112), so it is always one user's.
+//
+// Assembling a list response reads it once up front (LYCM-115) instead of
+// querying per book, which made a shelf render 1+2N queries. Its zero value is a
+// reader with no history, which is also what every lookup on it returns for a
+// book they have never opened.
+type readerState struct {
+	positions map[int64]store.ReadingPosition
+	finished  map[int64]bool
+}
+
+// readerStateAll loads the caller's state across every book, for list responses.
+// ctx must come from a request handled behind requireUser.
+func (a *API) readerStateAll(ctx context.Context) (readerState, error) {
+	uid := userFrom(ctx).ID
+	positions, err := a.store.ListFurthestPositions(ctx, uid)
+	if err != nil {
+		return readerState{}, err
+	}
+	finished, err := a.store.ListFinishedBooks(ctx, uid)
+	if err != nil {
+		return readerState{}, err
+	}
+	return readerState{positions: positions, finished: finished}, nil
+}
+
+// readerStateOne loads the caller's state for a single book. Single-book
+// responses keep the per-book path: two indexed lookups beat sweeping a
+// reader's whole history to answer for one book.
+func (a *API) readerStateOne(ctx context.Context, bookID int64) (readerState, error) {
+	uid := userFrom(ctx).ID
+	st := readerState{}
+	if pos, err := a.store.GetFurthestPosition(ctx, bookID, uid); err == nil {
+		st.positions = map[int64]store.ReadingPosition{bookID: pos}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return readerState{}, err
+	}
+	done, err := a.store.IsBookFinished(ctx, bookID, uid)
+	if err != nil {
+		return readerState{}, err
+	}
+	st.finished = map[int64]bool{bookID: done}
+	return st, nil
+}
+
 // bookJSONFor assembles the wire shape for one book, folding in its cover URL,
 // series fields, latest reading position, and finished state.
 //
-// Progress, ReadAt and Finished are those of the signed-in user (LYCM-801,
-// LYCM-112): the shelf is shared, but each person sees their own place in it.
-// ctx must come from a request handled behind requireUser.
-func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
+// Progress, ReadAt and Finished come from st and are the signed-in user's; the
+// caller is responsible for having loaded st for that user.
+func (a *API) bookJSONFor(b store.Book, st readerState) bookJSON {
 	entry := bookJSON{
 		ID:      b.ID,
 		Title:   b.Title,
@@ -371,19 +422,13 @@ func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 		idx := b.SeriesIndex
 		entry.SeriesIndex = &idx
 	}
-	if pos, err := a.store.GetFurthestPosition(ctx, b.ID, userFrom(ctx).ID); err == nil {
+	if pos, ok := st.positions[b.ID]; ok {
 		p := pos.Progress
 		entry.Progress = &p
 		entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return bookJSON{}, err
 	}
-	finished, err := a.store.IsBookFinished(ctx, b.ID, userFrom(ctx).ID)
-	if err != nil {
-		return bookJSON{}, err
-	}
-	entry.Finished = finished
-	return entry, nil
+	entry.Finished = st.finished[b.ID]
+	return entry
 }
 
 func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
@@ -393,15 +438,15 @@ func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list books", err)
 		return
 	}
+	st, err := a.readerStateAll(ctx)
+	if err != nil {
+		serverError(w, "read reader state", err)
+		return
+	}
 
 	out := make([]bookJSON, 0, len(books))
 	for _, b := range books {
-		entry, err := a.bookJSONFor(ctx, b)
-		if err != nil {
-			serverError(w, "build book json", err)
-			return
-		}
-		out = append(out, entry)
+		out = append(out, a.bookJSONFor(b, st))
 	}
 
 	writeJSON(w, http.StatusOK, out)
@@ -424,12 +469,12 @@ func (a *API) handleGetBook(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "get book", err)
 		return
 	}
-	entry, err := a.bookJSONFor(r.Context(), b)
+	st, err := a.readerStateOne(r.Context(), b.ID)
 	if err != nil {
 		serverError(w, "build book json", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	writeJSON(w, http.StatusOK, a.bookJSONFor(b, st))
 }
 
 func (a *API) handleCover(w http.ResponseWriter, r *http.Request) {

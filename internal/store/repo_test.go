@@ -422,6 +422,173 @@ func TestGetFurthestPosition(t *testing.T) {
 	}
 }
 
+// TestFurthestPositionsMatchSingle is the anti-drift test for LYCM-115:
+// ListFurthestPositions answers the same question as GetFurthestPosition in
+// bulk, and the two ORDER BYs must not diverge. The seeded rows are the case
+// where a naive batch query goes wrong — the most recent write is the least far
+// along, so ordering by recency picks a different row than ordering by progress,
+// and only one of those is the resume anchor.
+func TestFurthestPositionsMatchSingle(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	owner := ownerID(ctx, t, s)
+
+	// Several books, so DISTINCT ON has to partition rather than just sort.
+	var books []Book
+	for _, h := range []string{"batch-pos-a", "batch-pos-b", "batch-pos-c"} {
+		b, err := s.InsertBook(ctx, sampleBook(h))
+		if err != nil {
+			t.Fatalf("InsertBook %s: %v", h, err)
+		}
+		books = append(books, b)
+	}
+	// An untouched book must be absent from the map, not present-and-zero: that
+	// is the bulk spelling of ErrNotFound, and the shelf renders "not started"
+	// from its absence.
+	untouched, err := s.InsertBook(ctx, sampleBook("batch-pos-untouched"))
+	if err != nil {
+		t.Fatalf("InsertBook untouched: %v", err)
+	}
+
+	for _, b := range books {
+		if _, err := s.UpsertPosition(ctx, ReadingPosition{
+			BookID: b.ID, UserID: owner, DeviceID: "device-a", CFI: "/90", Progress: 0.9,
+		}); err != nil {
+			t.Fatalf("upsert a: %v", err)
+		}
+		// Later write, earlier spot — the pre-pagination progress=0 flush.
+		if _, err := s.UpsertPosition(ctx, ReadingPosition{
+			BookID: b.ID, UserID: owner, DeviceID: "device-b", CFI: "/2", Progress: 0,
+		}); err != nil {
+			t.Fatalf("upsert b: %v", err)
+		}
+	}
+
+	got, err := s.ListFurthestPositions(ctx, owner)
+	if err != nil {
+		t.Fatalf("ListFurthestPositions: %v", err)
+	}
+	if len(got) != len(books) {
+		t.Fatalf("got %d positions, want %d", len(got), len(books))
+	}
+	if _, ok := got[untouched.ID]; ok {
+		t.Error("a book with no positions is present in the map; absence is how the shelf reads 'not started'")
+	}
+	for _, b := range books {
+		want, err := s.GetFurthestPosition(ctx, b.ID, owner)
+		if err != nil {
+			t.Fatalf("GetFurthestPosition(%d): %v", b.ID, err)
+		}
+		switch g := got[b.ID]; {
+		case g.ID != want.ID:
+			t.Errorf("book %d: batch picked position %d (%s @ %v), single picked %d (%s @ %v)",
+				b.ID, g.ID, g.DeviceID, g.Progress, want.ID, want.DeviceID, want.Progress)
+		case g.DeviceID != "device-a" || g.Progress != 0.9:
+			t.Errorf("book %d: batch = %q @ %v, want device-a @ 0.9", b.ID, g.DeviceID, g.Progress)
+		case g.CFI != want.CFI || !g.UpdatedAt.Equal(want.UpdatedAt):
+			t.Errorf("book %d: batch row differs from single beyond identity", b.ID)
+		}
+	}
+}
+
+// TestListFurthestPositionsPerUser: the batch sweep is scoped to one reader, the
+// property LYCM-801 established for the single-book form. Reading someone else's
+// map would put a housemate's bookmarks on your shelf.
+func TestListFurthestPositionsPerUser(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	owner := ownerID(ctx, t, s)
+
+	book, err := s.InsertBook(ctx, sampleBook("batch-pos-scope"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := s.UpsertPosition(ctx, ReadingPosition{
+		BookID: book.ID, UserID: owner, DeviceID: "d", CFI: "/50", Progress: 0.5,
+	}); err != nil {
+		t.Fatalf("upsert owner: %v", err)
+	}
+
+	maraPositions, err := s.ListFurthestPositions(ctx, mara.ID)
+	if err != nil {
+		t.Fatalf("ListFurthestPositions(mara): %v", err)
+	}
+	if len(maraPositions) != 0 {
+		t.Errorf("mara sees %d positions; the owner's reading is not hers", len(maraPositions))
+	}
+}
+
+// TestListFinishedBooks covers the batch form of IsBookFinished, including the
+// per-user scoping that is the whole point of LYCM-112.
+func TestListFinishedBooks(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	owner := ownerID(ctx, t, s)
+
+	read, err := s.InsertBook(ctx, sampleBook("batch-fin-read"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	unread, err := s.InsertBook(ctx, sampleBook("batch-fin-unread"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	empty, err := s.ListFinishedBooks(ctx, owner)
+	if err != nil {
+		t.Fatalf("ListFinishedBooks (none marked): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("got %d finished books before marking any, want 0", len(empty))
+	}
+
+	if err := s.SetBookFinished(ctx, read.ID, owner, true); err != nil {
+		t.Fatalf("SetBookFinished: %v", err)
+	}
+
+	got, err := s.ListFinishedBooks(ctx, owner)
+	if err != nil {
+		t.Fatalf("ListFinishedBooks: %v", err)
+	}
+	if !got[read.ID] {
+		t.Error("marked book missing from the owner's finished set")
+	}
+	if got[unread.ID] {
+		t.Error("unmarked book reported finished")
+	}
+	if len(got) != 1 {
+		t.Errorf("owner has %d finished books, want 1", len(got))
+	}
+
+	maraFinished, err := s.ListFinishedBooks(ctx, mara.ID)
+	if err != nil {
+		t.Fatalf("ListFinishedBooks(mara): %v", err)
+	}
+	if len(maraFinished) != 0 {
+		t.Errorf("mara has %d finished books; the owner's read is not hers", len(maraFinished))
+	}
+
+	// Un-marking deletes the row, so the id leaves the set entirely.
+	if err := s.SetBookFinished(ctx, read.ID, owner, false); err != nil {
+		t.Fatalf("SetBookFinished(false): %v", err)
+	}
+	after, err := s.ListFinishedBooks(ctx, owner)
+	if err != nil {
+		t.Fatalf("ListFinishedBooks after un-marking: %v", err)
+	}
+	if len(after) != 0 {
+		t.Errorf("un-marked book still in the finished set: %v", after)
+	}
+}
+
 func TestSaveBlobs(t *testing.T) {
 	s := newStore(t)
 

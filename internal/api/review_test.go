@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -14,6 +15,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/magos/lyceum/internal/coverart"
@@ -260,4 +262,65 @@ func TestRefetchCover(t *testing.T) {
 			t.Fatalf("refetch = status %d cover %q, want 200 with a cover", resp.StatusCode, got.CoverURL)
 		}
 	})
+}
+
+// TestReviewQueueReflectsAMarkedPendingBook documents why the review queue still
+// reads the caller's finished set in bulk (LYCM-115) rather than skipping the
+// lookup on the grounds that a pending book cannot be marked read.
+//
+// Nothing on the server enforces that. PUT /books/{id}/finished resolves the
+// book by id alone, and SetBookFinished sources its row from `books WHERE id =
+// $1` with no review_state filter, so a pending id is markable by any client
+// that has one. Only the UI makes it unreachable, by never listing pending books
+// on the shelf. Assuming the answer instead of asking would make the queue
+// disagree with GET /books/{id} about the same book.
+func TestReviewQueueReflectsAMarkedPendingBook(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	filePath, _, err := s.SaveBlobs("pending-finish-hash", epubBytes, nil)
+	if err != nil {
+		t.Fatalf("SaveBlobs: %v", err)
+	}
+	pending, err := s.InsertBook(ctx, store.Book{
+		Title:       "Held For Review",
+		FilePath:    filePath,
+		FileHash:    "pending-finish-hash",
+		SizeBytes:   int64(len(epubBytes)),
+		ReviewState: store.ReviewPending,
+		ReviewFlags: []string{"no_isbn"},
+	})
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	srv := newServer(t, s)
+
+	req, _ := http.NewRequest(http.MethodPut,
+		fmt.Sprintf("%s/books/%d/finished", srv.URL, pending.ID),
+		strings.NewReader(`{"finished":true}`))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT finished: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Skipf("marking a pending book returned %d; the ticket's premise holds and the "+
+			"review queue could skip the finished lookup", resp.StatusCode)
+	}
+
+	var queue []bookJSON
+	getJSON(t, srv.URL+"/ingest/review", &queue)
+	if len(queue) != 1 || queue[0].ID != pending.ID {
+		t.Fatalf("review queue = %+v, want the pending book", queue)
+	}
+	if !queue[0].Finished {
+		t.Error("review queue reports the book unread, but it was just marked read")
+	}
+
+	var single bookJSON
+	getJSON(t, fmt.Sprintf("%s/books/%d", srv.URL, pending.ID), &single)
+	if single.Finished != queue[0].Finished {
+		t.Errorf("GET /books/%d says finished=%v, review queue says %v; the two disagree",
+			pending.ID, single.Finished, queue[0].Finished)
+	}
 }

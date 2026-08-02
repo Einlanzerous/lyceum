@@ -341,6 +341,66 @@ func (s *Store) GetFurthestPosition(ctx context.Context, bookID, userID int64) (
 	return p, nil
 }
 
+// ListFurthestPositions returns one user's furthest position in every book they
+// have opened, keyed by book id — the batch form of GetFurthestPosition, for
+// callers rendering a whole shelf at once (LYCM-115). Books that user has never
+// opened are absent from the map, the bulk equivalent of ErrNotFound.
+//
+// DISTINCT ON keeps the first row per book under this ORDER BY, so everything
+// after `book_id,` has to stay exactly what GetFurthestPosition orders by. It is
+// load-bearing rather than cosmetic: sorting by write time instead of progress
+// would let a still-open reader that flushed a pre-pagination progress=0 clobber
+// the furthest read on another device. TestFurthestPositionsMatchSingle pins the
+// two against each other.
+func (s *Store) ListFurthestPositions(ctx context.Context, userID int64) (map[int64]ReadingPosition, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (book_id) `+positionColumns+`
+		 FROM reading_positions WHERE user_id = $1
+		 ORDER BY book_id, COALESCE(progress, 0) DESC, updated_at DESC, id DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list furthest positions: %w", err)
+	}
+	defer rows.Close()
+
+	positions := make(map[int64]ReadingPosition)
+	for rows.Next() {
+		p, err := scanPosition(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan position: %w", err)
+		}
+		positions[p.BookID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list furthest positions: %w", err)
+	}
+	return positions, nil
+}
+
+// ListFinishedBooks returns the ids of every book one user has marked read — the
+// batch form of IsBookFinished (LYCM-115). A book is absent rather than false
+// when unmarked, matching book_reads, where the row's existence is the fact.
+func (s *Store) ListFinishedBooks(ctx context.Context, userID int64) (map[int64]bool, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT book_id FROM book_reads WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list finished books: %w", err)
+	}
+	defer rows.Close()
+
+	finished := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scan finished book: %w", err)
+		}
+		finished[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list finished books: %w", err)
+	}
+	return finished, nil
+}
+
 // SaveBlobs writes the EPUB bytes and optional cover bytes under the store's
 // data directory, namespaced by fileHash so identical content shares a path.
 // It returns the EPUB path and the cover path (empty when cover is nil). The
