@@ -287,8 +287,62 @@ func TestPositionsAreScopedPerUser(t *testing.T) {
 	}
 }
 
+// TestFinishedIsScopedPerUser is the sibling of TestPositionsAreScopedPerUser
+// for mark-as-read, which stayed library-wide on books.finished_at until
+// LYCM-112: marking a book read is the reader's own statement about their own
+// reading, not an edit to the shared shelf.
+func TestFinishedIsScopedPerUser(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	owner := ownerID(ctx, t, s)
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	book, err := s.InsertBook(ctx, sampleBook("shared-finish-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+
+	if err := s.SetBookFinished(ctx, book.ID, owner, true); err != nil {
+		t.Fatalf("SetBookFinished(owner): %v", err)
+	}
+
+	finished, err := s.IsBookFinished(ctx, book.ID, owner)
+	if err != nil {
+		t.Fatalf("IsBookFinished(owner): %v", err)
+	}
+	if !finished {
+		t.Fatal("owner marked the book read but does not see it as finished")
+	}
+
+	finished, err = s.IsBookFinished(ctx, book.ID, mara.ID)
+	if err != nil {
+		t.Fatalf("IsBookFinished(mara): %v", err)
+	}
+	if finished {
+		t.Fatal("mara sees a book as finished because a housemate marked it read")
+	}
+
+	// Both can hold their own mark, and one clearing theirs leaves the other's.
+	if err := s.SetBookFinished(ctx, book.ID, mara.ID, true); err != nil {
+		t.Fatalf("SetBookFinished(mara): %v", err)
+	}
+	if err := s.SetBookFinished(ctx, book.ID, owner, false); err != nil {
+		t.Fatalf("SetBookFinished(owner, false): %v", err)
+	}
+	if finished, err := s.IsBookFinished(ctx, book.ID, mara.ID); err != nil || !finished {
+		t.Fatalf("mara finished = %v (err %v) after the owner unmarked; want true", finished, err)
+	}
+	if finished, err := s.IsBookFinished(ctx, book.ID, owner); err != nil || finished {
+		t.Fatalf("owner finished = %v (err %v) after unmarking; want false", finished, err)
+	}
+}
+
 // TestDeleteUserCascadesPositions guards the FK: removing someone must take
-// their bookmarks and credentials with them.
+// their bookmarks, read marks and credentials with them.
 func TestDeleteUserCascadesPositions(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
@@ -310,6 +364,9 @@ func TestDeleteUserCascadesPositions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
+	if err := s.SetBookFinished(ctx, book.ID, mara.ID, true); err != nil {
+		t.Fatalf("SetBookFinished: %v", err)
+	}
 
 	if err := s.DeleteUser(ctx, mara.ID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
@@ -322,6 +379,14 @@ func TestDeleteUserCascadesPositions(t *testing.T) {
 	}
 	if positions != 0 {
 		t.Fatalf("%d orphaned positions survived the user", positions)
+	}
+	var reads int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM book_reads WHERE user_id = $1`, mara.ID).Scan(&reads); err != nil {
+		t.Fatalf("count reads: %v", err)
+	}
+	if reads != 0 {
+		t.Fatalf("%d orphaned read marks survived the user", reads)
 	}
 	if _, err := s.UserByToken(ctx, session); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a deleted user's session still authenticates: %v", err)

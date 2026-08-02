@@ -27,6 +27,8 @@ type Store interface {
 	GetBook(ctx context.Context, id int64) (store.Book, error)
 	GetBookByHash(ctx context.Context, hash string) (store.Book, error)
 	GetFurthestPosition(ctx context.Context, bookID, userID int64) (store.ReadingPosition, error)
+	IsBookFinished(ctx context.Context, bookID, userID int64) (bool, error)
+	SetBookFinished(ctx context.Context, bookID, userID int64, finished bool) error
 	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
@@ -37,7 +39,6 @@ type Store interface {
 	GetBookBySourcePath(ctx context.Context, sourcePath string) (store.Book, error)
 	SetBookSourcePath(ctx context.Context, id int64, sourcePath string) error
 	UpdateBookContent(ctx context.Context, id int64, b store.Book) (store.Book, error)
-	SetBookFinished(ctx context.Context, id int64, finished bool) (store.Book, error)
 	DeleteBook(ctx context.Context, id int64) (store.Book, error)
 	RemoveBlobs(filePath string) error
 
@@ -332,8 +333,9 @@ type bookJSON struct {
 	// it lets the client pin the most-recently-read book to the top of the
 	// shelf. Omitted when the book has never been opened.
 	ReadAt string `json:"read_at,omitempty"`
-	// Finished is true when the book has been explicitly marked read, regardless
-	// of reading progress (LYCM mark-as-read).
+	// Finished is true when the caller has explicitly marked the book read,
+	// regardless of reading progress (LYCM mark-as-read). Like Progress it is the
+	// signed-in user's own, not the household's (LYCM-112).
 	Finished bool `json:"finished,omitempty"`
 	// ReviewState and ReviewFlags surface the ingest-QC status (LYCM-58). Shelf
 	// entries are always "published" so both are omitted there; the review queue
@@ -347,17 +349,16 @@ func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
 // bookJSONFor assembles the wire shape for one book, folding in its cover URL,
 // series fields, latest reading position, and finished state.
 //
-// Progress and ReadAt are those of the signed-in user (LYCM-801): the shelf is
-// shared, but each person sees their own place in it. ctx must come from a
-// request handled behind requireUser.
+// Progress, ReadAt and Finished are those of the signed-in user (LYCM-801,
+// LYCM-112): the shelf is shared, but each person sees their own place in it.
+// ctx must come from a request handled behind requireUser.
 func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 	entry := bookJSON{
-		ID:       b.ID,
-		Title:    b.Title,
-		Author:   b.Author,
-		AddedAt:  b.AddedAt.UTC().Format(time.RFC3339),
-		Series:   b.Series,
-		Finished: b.FinishedAt != nil,
+		ID:      b.ID,
+		Title:   b.Title,
+		Author:  b.Author,
+		AddedAt: b.AddedAt.UTC().Format(time.RFC3339),
+		Series:  b.Series,
 	}
 	if b.ReviewState == store.ReviewPending {
 		entry.ReviewState = b.ReviewState
@@ -377,6 +378,11 @@ func (a *API) bookJSONFor(ctx context.Context, b store.Book) (bookJSON, error) {
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return bookJSON{}, err
 	}
+	finished, err := a.store.IsBookFinished(ctx, b.ID, userFrom(ctx).ID)
+	if err != nil {
+		return bookJSON{}, err
+	}
+	entry.Finished = finished
 	return entry, nil
 }
 
@@ -452,11 +458,8 @@ func (a *API) handleFile(w http.ResponseWriter, r *http.Request) {
 	serveBlob(w, r, b.FilePath, "application/epub+zip")
 }
 
-// handleDelete removes a book and its on-disk blobs (LYCM-66). It responds 204
-// on success, 404 if no book has the id. Dependent rows are handled by the
-// schema FKs (reading_positions/deliveries cascade, inventory link nulled), so
-// this is safe without an explicit cleanup pass.
-// handleSetFinished marks a book read or unread. Body: {"finished": bool}.
+// handleSetFinished marks a book read or unread for the signed-in user, whose
+// mark is theirs alone (LYCM-112). Body: {"finished": bool}.
 func (a *API) handleSetFinished(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -470,7 +473,8 @@ func (a *API) handleSetFinished(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	switch _, err := a.store.SetBookFinished(r.Context(), id, req.Finished); {
+	ctx := r.Context()
+	switch err := a.store.SetBookFinished(ctx, id, userFrom(ctx).ID, req.Finished); {
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, "book not found", http.StatusNotFound)
 		return
@@ -481,6 +485,10 @@ func (a *API) handleSetFinished(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDelete removes a book and its on-disk blobs (LYCM-66). It responds 204
+// on success, 404 if no book has the id. Dependent rows are handled by the
+// schema FKs (reading_positions/book_reads/deliveries cascade, inventory link
+// nulled), so this is safe without an explicit cleanup pass.
 func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

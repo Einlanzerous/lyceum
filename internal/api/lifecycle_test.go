@@ -432,6 +432,11 @@ func TestDeleteBookEndpoint(t *testing.T) {
 	if !blobDirExists(t, b.FilePath) {
 		t.Fatalf("blob dir missing before delete")
 	}
+	// Someone has read it. The FK cascade is what keeps the read mark from
+	// outliving the book, as handleDelete's comment claims (LYCM-112).
+	if err := s.SetBookFinished(ctx, b.ID, ownerID(ctx, t, s), true); err != nil {
+		t.Fatalf("SetBookFinished: %v", err)
+	}
 
 	// Unknown id -> 404.
 	if code := deleteBook(t, srv.URL, b.ID+999); code != http.StatusNotFound {
@@ -447,6 +452,14 @@ func TestDeleteBookEndpoint(t *testing.T) {
 	}
 	if blobDirExists(t, b.FilePath) {
 		t.Errorf("blob dir %q still present after delete", filepath.Dir(b.FilePath))
+	}
+	var reads int
+	if err := s.Pool().QueryRow(ctx,
+		`SELECT count(*) FROM book_reads WHERE book_id = $1`, b.ID).Scan(&reads); err != nil {
+		t.Fatalf("count read marks: %v", err)
+	}
+	if reads != 0 {
+		t.Fatalf("%d read marks survived the deleted book", reads)
 	}
 
 	books, err := s.ListBooks(ctx)
