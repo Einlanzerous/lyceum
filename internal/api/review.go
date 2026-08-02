@@ -28,10 +28,17 @@ func (a *API) handleReviewList(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list pending books", err)
 		return
 	}
-	st, err := a.readerStateAll(ctx)
-	if err != nil {
-		serverError(w, "read reader state", err)
-		return
+	// The review queue is empty most of the time — it holds a book only between
+	// a flagged ingest and someone clearing it — and an empty queue needs no
+	// reader state. Without this the common case sweeps a reader's entire
+	// history to render nothing.
+	st := readerState{}
+	if len(books) > 0 {
+		st, err = a.readerStateAll(ctx)
+		if err != nil {
+			serverError(w, "read reader state", err)
+			return
+		}
 	}
 	out := make([]bookJSON, 0, len(books))
 	for _, b := range books {

@@ -479,14 +479,19 @@ func TestFurthestPositionsMatchSingle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetFurthestPosition(%d): %v", b.ID, err)
 		}
-		switch g := got[b.ID]; {
-		case g.ID != want.ID:
+		// Three independent properties, so three ifs: as switch cases the later
+		// ones would never run once an earlier one matched.
+		g := got[b.ID]
+		if g.ID != want.ID {
 			t.Errorf("book %d: batch picked position %d (%s @ %v), single picked %d (%s @ %v)",
 				b.ID, g.ID, g.DeviceID, g.Progress, want.ID, want.DeviceID, want.Progress)
-		case g.DeviceID != "device-a" || g.Progress != 0.9:
+		}
+		if g.DeviceID != "device-a" || g.Progress != 0.9 {
 			t.Errorf("book %d: batch = %q @ %v, want device-a @ 0.9", b.ID, g.DeviceID, g.Progress)
-		case g.CFI != want.CFI || !g.UpdatedAt.Equal(want.UpdatedAt):
-			t.Errorf("book %d: batch row differs from single beyond identity", b.ID)
+		}
+		if g.CFI != want.CFI || !g.UpdatedAt.Equal(want.UpdatedAt) {
+			t.Errorf("book %d: batch row differs from single beyond identity (cfi %q vs %q)",
+				b.ID, g.CFI, want.CFI)
 		}
 	}
 }
@@ -558,10 +563,10 @@ func TestListFinishedBooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFinishedBooks: %v", err)
 	}
-	if !got[read.ID] {
+	if _, ok := got[read.ID]; !ok {
 		t.Error("marked book missing from the owner's finished set")
 	}
-	if got[unread.ID] {
+	if _, ok := got[unread.ID]; ok {
 		t.Error("unmarked book reported finished")
 	}
 	if len(got) != 1 {

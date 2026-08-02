@@ -379,7 +379,7 @@ func (s *Store) ListFurthestPositions(ctx context.Context, userID int64) (map[in
 // ListFinishedBooks returns the ids of every book one user has marked read — the
 // batch form of IsBookFinished (LYCM-115). A book is absent rather than false
 // when unmarked, matching book_reads, where the row's existence is the fact.
-func (s *Store) ListFinishedBooks(ctx context.Context, userID int64) (map[int64]bool, error) {
+func (s *Store) ListFinishedBooks(ctx context.Context, userID int64) (map[int64]struct{}, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT book_id FROM book_reads WHERE user_id = $1`, userID)
 	if err != nil {
@@ -387,13 +387,13 @@ func (s *Store) ListFinishedBooks(ctx context.Context, userID int64) (map[int64]
 	}
 	defer rows.Close()
 
-	finished := make(map[int64]bool)
+	finished := make(map[int64]struct{})
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("store: scan finished book: %w", err)
 		}
-		finished[id] = true
+		finished[id] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list finished books: %w", err)

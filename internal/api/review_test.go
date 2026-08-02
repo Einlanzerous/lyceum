@@ -303,9 +303,12 @@ func TestReviewQueueReflectsAMarkedPendingBook(t *testing.T) {
 		t.Fatalf("PUT finished: %v", err)
 	}
 	resp.Body.Close()
+	// Not a Skip: this is the only test justifying the review queue's finished
+	// lookup, and skipping here would turn it green precisely when the premise it
+	// guards against changed.
 	if resp.StatusCode != http.StatusNoContent {
-		t.Skipf("marking a pending book returned %d; the ticket's premise holds and the "+
-			"review queue could skip the finished lookup", resp.StatusCode)
+		t.Fatalf("PUT finished on a pending book = %d, want 204; if the server now "+
+			"refuses this, the review queue can stop asking (see handleReviewList)", resp.StatusCode)
 	}
 
 	var queue []bookJSON

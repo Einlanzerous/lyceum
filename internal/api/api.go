@@ -33,7 +33,7 @@ type Store interface {
 	// Batch forms of the two above, so listing a shelf costs a fixed number of
 	// queries rather than two per book (LYCM-115).
 	ListFurthestPositions(ctx context.Context, userID int64) (map[int64]store.ReadingPosition, error)
-	ListFinishedBooks(ctx context.Context, userID int64) (map[int64]bool, error)
+	ListFinishedBooks(ctx context.Context, userID int64) (map[int64]struct{}, error)
 	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
@@ -361,7 +361,7 @@ func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
 // book they have never opened.
 type readerState struct {
 	positions map[int64]store.ReadingPosition
-	finished  map[int64]bool
+	finished  map[int64]struct{}
 }
 
 // readerStateAll loads the caller's state across every book, for list responses.
@@ -394,7 +394,9 @@ func (a *API) readerStateOne(ctx context.Context, bookID int64) (readerState, er
 	if err != nil {
 		return readerState{}, err
 	}
-	st.finished = map[int64]bool{bookID: done}
+	if done {
+		st.finished = map[int64]struct{}{bookID: {}}
+	}
 	return st, nil
 }
 
@@ -427,7 +429,7 @@ func (a *API) bookJSONFor(b store.Book, st readerState) bookJSON {
 		entry.Progress = &p
 		entry.ReadAt = pos.UpdatedAt.UTC().Format(time.RFC3339)
 	}
-	entry.Finished = st.finished[b.ID]
+	_, entry.Finished = st.finished[b.ID]
 	return entry
 }
 
@@ -438,10 +440,15 @@ func (a *API) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list books", err)
 		return
 	}
-	st, err := a.readerStateAll(ctx)
-	if err != nil {
-		serverError(w, "read reader state", err)
-		return
+	// An empty shelf needs no reader state, and loading it would sweep the
+	// caller's whole history to answer for nothing.
+	st := readerState{}
+	if len(books) > 0 {
+		st, err = a.readerStateAll(ctx)
+		if err != nil {
+			serverError(w, "read reader state", err)
+			return
+		}
 	}
 
 	out := make([]bookJSON, 0, len(books))

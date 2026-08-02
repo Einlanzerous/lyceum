@@ -53,26 +53,19 @@ func tracedStore(t *testing.T) (*store.Store, *queryCounter) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("ParseConfig: %v", err)
-	}
 	counter := &queryCounter{}
-	cfg.ConnConfig.RuntimeParams["search_path"] = "lyceum_test_api_qc"
-	cfg.ConnConfig.Tracer = counter
-	// One connection: a second would re-prepare this test's statements on first
-	// use, and while that does not raise the trace count it makes the two halves
-	// of the comparison run against different connection state for no reason.
-	cfg.MaxConns = 1
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err := connectSchemaWith(ctx, dsn, "lyceum_test_api_qc", func(cfg *pgxpool.Config) {
+		cfg.ConnConfig.Tracer = counter
+		// One connection: a second would re-prepare this test's statements on
+		// first use, and while that does not raise the trace count it makes the
+		// two halves of the comparison run against different connection state
+		// for no reason.
+		cfg.MaxConns = 1
+	})
 	if err != nil {
-		t.Fatalf("pool: %v", err)
+		t.Fatalf("connectSchemaWith: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS lyceum_test_api_qc"); err != nil {
-		t.Fatalf("create schema: %v", err)
-	}
 	if err := store.Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -137,11 +130,23 @@ func TestLibraryQueryCountIsFlat(t *testing.T) {
 		return counter.take()
 	}
 
+	// Warm the memoised owner row before counting anything: with user auth off
+	// every request resolves the caller through it, and it loads lazily, so a
+	// cold first render carries one extra query unrelated to shelf size.
+	var warm []bookJSON
+	getJSON(t, srv.URL+"/library", &warm)
+
+	// An empty shelf must not load reader state at all: there is nothing to fold
+	// it into, and loading it sweeps the caller's whole history to render `[]`.
+	// This is the steady state of /ingest/review, which shares the code path.
+	counter.take()
+	var empty []bookJSON
+	getJSON(t, srv.URL+"/library", &empty)
+	if n := counter.take(); n != 1 {
+		t.Errorf("empty shelf cost %d queries, want 1 (list books, no reader state)", n)
+	}
+
 	seed("qc-hash-1", "A Wizard of Earthsea")
-	// Warm the memoised owner row first: with user auth off every request
-	// resolves the caller through it, and it is loaded lazily, so a cold first
-	// render carries one extra query that has nothing to do with shelf size.
-	render(1)
 	one := render(1)
 
 	for i := 2; i <= 5; i++ {
