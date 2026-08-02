@@ -78,6 +78,21 @@ func tableExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, name str
 	return exists
 }
 
+// columnExists reports whether a table in the test schema has a given column.
+func columnExists(ctx context.Context, t *testing.T, pool *pgxpool.Pool, table, column string) bool {
+	t.Helper()
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			 WHERE table_schema = current_schema()
+			   AND table_name = $1 AND column_name = $2)`, table, column).Scan(&exists)
+	if err != nil {
+		t.Fatalf("check column %s.%s: %v", table, column, err)
+	}
+	return exists
+}
+
 func TestMigrate(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
@@ -91,6 +106,12 @@ func TestMigrate(t *testing.T) {
 		if !tableExists(ctx, t, pool, tbl) {
 			t.Errorf("expected table %q to exist after Migrate", tbl)
 		}
+	}
+
+	// 0015 retires books.finished_at; book_reads carries mark-as-read now, and a
+	// column nothing reads is one a later query can quietly start trusting.
+	if columnExists(ctx, t, pool, "books", "finished_at") {
+		t.Error("books.finished_at still exists after Migrate; 0015 should have dropped it")
 	}
 
 	// schema_migrations should record version 0001.
@@ -175,7 +196,13 @@ func TestBookReadsBackfill(t *testing.T) {
 	}
 
 	// Rewind to just before 0014: one book marked on books.finished_at, and no
-	// book_reads table at all.
+	// book_reads table at all. 0015 has since dropped that column, so putting it
+	// back is part of the rewind, and both versions have to be unrecorded for
+	// Migrate to replay the pair.
+	if _, err := pool.Exec(ctx,
+		`ALTER TABLE books ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ`); err != nil {
+		t.Fatalf("restore legacy finished_at column: %v", err)
+	}
 	if _, err := pool.Exec(ctx,
 		`UPDATE books SET finished_at = now() WHERE id = $1`, read.ID); err != nil {
 		t.Fatalf("seed legacy finished_at: %v", err)
@@ -184,8 +211,8 @@ func TestBookReadsBackfill(t *testing.T) {
 		t.Fatalf("drop book_reads: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`DELETE FROM schema_migrations WHERE version = '0014'`); err != nil {
-		t.Fatalf("unrecord 0014: %v", err)
+		`DELETE FROM schema_migrations WHERE version IN ('0014', '0015')`); err != nil {
+		t.Fatalf("unrecord 0014/0015: %v", err)
 	}
 
 	if err := Migrate(ctx, pool); err != nil {
@@ -212,6 +239,13 @@ func TestBookReadsBackfill(t *testing.T) {
 	}
 	if rows != 1 {
 		t.Fatalf("back-fill wrote %d rows, want 1", rows)
+	}
+
+	// 0015 follows 0014 in the same replay, so the column it drops must be gone
+	// again — and 0014 must have read it before that happened, which the
+	// back-fill assertions above just showed.
+	if columnExists(ctx, t, pool, "books", "finished_at") {
+		t.Error("books.finished_at survived the replay; 0015 should follow 0014")
 	}
 }
 
