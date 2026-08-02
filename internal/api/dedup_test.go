@@ -284,11 +284,223 @@ func TestDuplicateOfClearsWhenTheMatchIsDeleted(t *testing.T) {
 // conflict message these cases are about.
 func uploadResult(t *testing.T, srv *httptest.Server, filename string, data []byte) (int, string) {
 	t.Helper()
-	resp := postUpload(t, srv, filename, data)
+	return uploadResultTo(t, srv, "/upload", filename, data)
+}
+
+// uploadResultTo is uploadResult against an explicit path, for the query
+// parameters postUpload's fixed "/upload" cannot carry.
+func uploadResultTo(t *testing.T, srv *httptest.Server, path, filename string, data []byte) (int, string) {
+	t.Helper()
+	body, ct := multipartUpload(t, filename, data)
+	resp, err := http.Post(srv.URL+path, ct, body)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read upload response: %v", err)
 	}
 	return resp.StatusCode, strings.TrimSpace(string(raw))
+}
+
+// TestRefusedUploadKeepsTheTombstone: the upload branch lifts an earlier delete
+// so a re-upload works, but it must not do that for an upload it then refuses.
+// Clearing it on the way to a 409 leaves the watcher free to re-ingest a
+// deliberately deleted book on its next tick — the LYCM-109 regression, reached
+// through a door LYCM-113 opened.
+func TestRefusedUploadKeepsTheTombstone(t *testing.T) {
+	s := testStore(t)
+	a := dedupAPI(t, s)
+	ctx := context.Background()
+
+	// A book ingested from the watched tree, then deleted: the delete leaves a
+	// tombstone so the next scan does not bring it straight back.
+	watched := dedupEPUB(t, "Annihilation", "Jeff VanderMeer", "", 0, "tomb1", realISBN)
+	book, _, err := a.ingestEPUB(ctx, watched, "ann.epub", "/media/ann.epub")
+	if err != nil {
+		t.Fatalf("seed ingest: %v", err)
+	}
+	if _, err := s.DeleteBook(ctx, book.ID); err != nil {
+		t.Fatalf("DeleteBook: %v", err)
+	}
+	if err := s.TombstoneSource(ctx, "/media/ann.epub", book.FileHash); err != nil {
+		t.Fatalf("TombstoneSource: %v", err)
+	}
+
+	// Something else of the same work is now on the shelf, so an upload of the
+	// deleted file is refused as a duplicate.
+	if _, _, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Annihilation", "Jeff VanderMeer", "", 0, "tomb2", realISBN),
+		"ann-other.epub", "/media/ann-other.epub"); err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+	if status, body := uploadResult(t, srv, "ann.epub", watched); status != http.StatusConflict {
+		t.Fatalf("upload = %d, want 409 (body %q)", status, body)
+	}
+
+	// The refusal wrote nothing, so the tombstone still stands and the watcher
+	// still refuses the file sitting in the tree.
+	tombstoned, err := s.IsSourceTombstoned(ctx, "/media/ann.epub", book.FileHash)
+	if err != nil {
+		t.Fatalf("IsSourceTombstoned: %v", err)
+	}
+	if !tombstoned {
+		t.Error("a refused upload cleared the deletion tombstone; the watcher will re-ingest the deleted book")
+	}
+	if _, result, err := a.ingestEPUB(ctx, watched, "ann.epub", "/media/ann.epub"); err != nil || result != ingestTombstoned {
+		t.Errorf("watcher re-offer = %v (err %v), want ingestTombstoned", result, err)
+	}
+}
+
+// TestForceUploadKeepsBothCopies: without an override the only remedy the
+// conflict can offer is deleting the existing book, which takes its reading
+// positions and read marks with it (LYCM-112) — the very thing the folder path's
+// review hold exists to avoid.
+func TestForceUploadKeepsBothCopies(t *testing.T) {
+	s := testStore(t)
+	a := dedupAPI(t, s)
+	ctx := context.Background()
+
+	if _, _, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Piranesi", "Susanna Clarke", "", 0, "force1", realISBN),
+		"piranesi.epub", "/media/piranesi.epub"); err != nil {
+		t.Fatalf("seed ingest: %v", err)
+	}
+
+	srv := httptest.NewServer(a.Handler())
+	defer srv.Close()
+	second := dedupEPUB(t, "Piranesi", "Susanna Clarke", "", 0, "force2", realISBN)
+
+	// The conflict has to say how to proceed, or the override may as well not
+	// exist.
+	status, body := uploadResult(t, srv, "piranesi-2.epub", second)
+	if status != http.StatusConflict {
+		t.Fatalf("unforced upload = %d, want 409", status)
+	}
+	if !strings.Contains(body, "force") {
+		t.Errorf("conflict body = %q, want it to mention the override", body)
+	}
+
+	if status, body := uploadResultTo(t, srv, "/upload?force=true", "piranesi-2.epub", second); status != http.StatusCreated {
+		t.Fatalf("forced upload = %d, want 201 (body %q)", status, body)
+	}
+
+	var shelf []bookJSON
+	getJSON(t, srv.URL+"/library", &shelf)
+	if len(shelf) != 2 {
+		t.Errorf("shelf has %d books after a forced upload, want 2", len(shelf))
+	}
+}
+
+// phantomShelf makes ListDedupCandidates report a book that is not there,
+// standing in for the window between the snapshot and the insert: the matched
+// book is deleted in between, which is exactly what resolving a duplicate looks
+// like while another ingest is in flight.
+type phantomShelf struct {
+	Store
+	phantom store.BookIdentity
+}
+
+func (p phantomShelf) ListDedupCandidates(ctx context.Context) ([]store.BookIdentity, error) {
+	rows, err := p.Store.ListDedupCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(rows, p.phantom), nil
+}
+
+// TestIngestSurvivesAMatchThatDisappears: duplicate_of is a self-FK, so writing
+// it as part of the insert makes a match deleted in the meantime fail the whole
+// ingest — and on the folder path a failed ingest parks the file in the
+// watcher's bad-signature set, where it re-errors on every scan until the file
+// changes. The pointer is advisory; it must not be able to cost a book.
+func TestIngestSurvivesAMatchThatDisappears(t *testing.T) {
+	s := testStore(t)
+	a := New(phantomShelf{
+		Store:   s,
+		phantom: store.BookIdentity{ID: 999999, Title: "Dune", Author: "Frank Herbert"},
+	}, "", WithCoverFetcher(&fakeFetcher{data: solidPNG(t, 366, 600)}), WithIngestQC(true))
+	ctx := context.Background()
+
+	book, result, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Dune", "Frank Herbert", "", 0, "phantom", realISBN),
+		"dune.epub", "/media/dune.epub")
+	if err != nil || result != ingestCreated {
+		t.Fatalf("ingest matching a since-deleted book: result=%v err=%v", result, err)
+	}
+	if book.DuplicateOf != 0 {
+		t.Errorf("duplicate_of = %d, want 0; it points at a book that does not exist", book.DuplicateOf)
+	}
+	// And it publishes rather than sitting in the queue: there is no longer
+	// anything to compare it against.
+	if slices.Contains(book.ReviewFlags, ingestqc.FlagPossibleDuplicate) {
+		t.Errorf("flags = %v; held against a book that is gone", book.ReviewFlags)
+	}
+}
+
+// TestIngestAfterTheMatchIsDeleted is the same property one step earlier, where
+// the book is already gone before the snapshot is taken.
+func TestIngestAfterTheMatchIsDeleted(t *testing.T) {
+	s := testStore(t)
+	a := dedupAPI(t, s)
+	ctx := context.Background()
+
+	first, _, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Dune", "Frank Herbert", "", 0, "mid1", realISBN),
+		"dune.epub", "/media/dune.epub")
+	if err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	if _, err := s.DeleteBook(ctx, first.ID); err != nil {
+		t.Fatalf("DeleteBook: %v", err)
+	}
+
+	second, result, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Dune", "Frank Herbert", "", 0, "mid2", realISBN),
+		"dune-2.epub", "/media/dune-2.epub")
+	if err != nil || result != ingestCreated {
+		t.Fatalf("ingest after the match was deleted: result=%v err=%v", result, err)
+	}
+	if second.DuplicateOf != 0 {
+		t.Errorf("duplicate_of = %d, want 0; it points at a deleted book", second.DuplicateOf)
+	}
+}
+
+// TestApproveClearsTheDuplicatePointer: "Keep both" publishes the newcomer, and a
+// book on the shelf must not go on asserting that it is a copy of another.
+func TestApproveClearsTheDuplicatePointer(t *testing.T) {
+	s := testStore(t)
+	a := dedupAPI(t, s)
+	ctx := context.Background()
+
+	first, _, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Dune", "Frank Herbert", "", 0, "appr1", realISBN),
+		"dune.epub", "/media/dune.epub")
+	if err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	second, _, err := a.ingestEPUB(ctx,
+		dedupEPUB(t, "Dune", "Frank Herbert", "", 0, "appr2", realISBN),
+		"dune-2.epub", "/media/dune-2.epub")
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if second.DuplicateOf != first.ID {
+		t.Fatalf("duplicate_of = %d, want %d", second.DuplicateOf, first.ID)
+	}
+
+	approved, err := s.ApproveBook(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("ApproveBook: %v", err)
+	}
+	if approved.DuplicateOf != 0 {
+		t.Errorf("approved book still points at book %d", approved.DuplicateOf)
+	}
+	if len(approved.ReviewFlags) != 0 {
+		t.Errorf("approved book kept flags %v", approved.ReviewFlags)
+	}
 }

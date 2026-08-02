@@ -282,7 +282,9 @@ class LyceumClient {
   }
 
   /// `POST /upload` — multipart, field name `file`. A 409 means the book is
-  /// already on the shelf (surfaced via [ApiException.isDuplicate]).
+  /// already on the shelf, or is a different file of one that is (LYCM-113);
+  /// both surface via [ApiException.isDuplicate], and the two are told apart by
+  /// [ApiException.message], which carries the server's plain-text reason.
   Future<Book> uploadBook({
     required String filename,
     String? path,

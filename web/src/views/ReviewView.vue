@@ -35,6 +35,18 @@ function flagLabel(code: string): string {
   return FLAG_LABELS[code] ?? code
 }
 
+/**
+ * Whether a book is held as a suspected duplicate.
+ *
+ * Keyed on the flag, not on `duplicate_of`. The pointer is nulled when the book
+ * it named is deleted and the field is `omitempty`, so gating on it would hide
+ * the panel in exactly the case the panel exists to explain — the flag outlives
+ * the pointer by design.
+ */
+function isDuplicate(b: Book): boolean {
+  return (b.review_flags ?? []).includes('possible_duplicate')
+}
+
 const books = ref<Book[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -73,18 +85,26 @@ async function load(): Promise<void> {
  */
 async function loadMatches(list: Book[]): Promise<void> {
   const flagged = list.filter((b) => b.duplicate_of)
-  const loaded = await Promise.all(
-    flagged.map(async (b) => {
-      try {
-        return [b.id, await getBook(b.duplicate_of as number)] as const
-      } catch {
-        // Deleted between the ingest and now — resolving one duplicate by
-        // deleting the older book is exactly what this queue is for.
-        return [b.id, null] as const
-      }
-    }),
+  // Three copies of one book point at the same original, so fetch each target
+  // once rather than once per row holding it.
+  const targets = [...new Set(flagged.map((b) => b.duplicate_of as number))]
+  const fetched = new Map(
+    await Promise.all(
+      targets.map(async (id) => {
+        try {
+          return [id, await getBook(id)] as const
+        } catch {
+          // Deleted between the ingest and now — resolving one duplicate by
+          // deleting the older book is exactly what this queue is for.
+          return [id, null] as const
+        }
+      }),
+    ),
   )
-  matches.value = { ...matches.value, ...Object.fromEntries(loaded) }
+  matches.value = {
+    ...matches.value,
+    ...Object.fromEntries(flagged.map((b) => [b.id, fetched.get(b.duplicate_of as number) ?? null])),
+  }
 }
 
 onMounted(load)
@@ -99,6 +119,8 @@ function coverSrcFor(b: Book): string {
 /** Remove a row from the list once it leaves the queue (approve/delete). */
 function drop(id: number): void {
   books.value = books.value.filter((b) => b.id !== id)
+  const { [id]: _gone, ...rest } = matches.value
+  matches.value = rest
 }
 
 async function run(id: number, action: string, fn: () => Promise<void>): Promise<void> {
@@ -196,7 +218,7 @@ function onDelete(b: Book): Promise<void> {
             <span v-for="f in b.review_flags ?? []" :key="f" class="chip">{{ flagLabel(f) }}</span>
           </div>
 
-          <div v-if="b.duplicate_of" class="dup">
+          <div v-if="isDuplicate(b)" class="dup">
             <p class="dup__lead">This looks like another copy of a book you already have.</p>
             <div v-if="matches[b.id]" class="dup__pair">
               <div class="dup__side">
@@ -224,7 +246,7 @@ function onDelete(b: Book): Promise<void> {
                 <p class="dup__author">{{ b.author }}</p>
               </div>
             </div>
-            <p v-else-if="matches[b.id] === null" class="dup__lead dup__lead--gone">
+            <p v-else-if="!b.duplicate_of || matches[b.id] === null" class="dup__lead dup__lead--gone">
               The book this matched has since been deleted, so there is probably nothing left to
               decide — approve it onto the shelf.
             </p>
@@ -268,7 +290,7 @@ function onDelete(b: Book): Promise<void> {
               :disabled="!!busy[b.id]"
               @click="onApprove(b)"
             >
-              {{ b.duplicate_of ? 'Keep both' : 'Approve' }}
+              {{ isDuplicate(b) ? 'Keep both' : 'Approve' }}
             </button>
             <button
               type="button"
@@ -276,7 +298,7 @@ function onDelete(b: Book): Promise<void> {
               :disabled="!!busy[b.id]"
               @click="onDelete(b)"
             >
-              {{ b.duplicate_of ? 'Delete this copy' : 'Delete' }}
+              {{ isDuplicate(b) ? 'Delete this copy' : 'Delete' }}
             </button>
           </div>
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"sort"
 	"text/tabwriter"
 	"time"
@@ -80,22 +81,24 @@ type duplicatePair struct {
 // to want gone — rather than twice, once from each side.
 //
 // Ids ascend with insertion, so the prefix of the sorted slice is "everything
-// that was already here". Each book is matched against that prefix only.
-func findDuplicatePairs(candidates []dedup.Candidate) []duplicatePair {
-	sorted := make([]dedup.Candidate, len(candidates))
-	copy(sorted, candidates)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
-
-	byID := make(map[int64]dedup.Candidate, len(sorted))
-	for _, c := range sorted {
-		byID[c.ID] = c
+// that was already here". Each book is matched against that prefix only. The
+// sort is defensive: ListDedupCandidates happens to return id order today, and
+// the reported side of every pair should not depend on that.
+func findDuplicatePairs(rows []store.BookIdentity) []duplicatePair {
+	sorted := make([]dedup.Candidate, len(rows))
+	for i, r := range rows {
+		sorted[i] = dedup.Candidate(r)
 	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 
 	var pairs []duplicatePair
 	for i, c := range sorted {
-		if m, ok := dedup.Find(c, sorted[:i]); ok {
-			pairs = append(pairs, duplicatePair{later: c, earlier: byID[m.BookID], reason: m.Reason})
+		m, ok := dedup.Find(c, sorted[:i])
+		if !ok {
+			continue
 		}
+		j := slices.IndexFunc(sorted[:i], func(e dedup.Candidate) bool { return e.ID == m.BookID })
+		pairs = append(pairs, duplicatePair{later: c, earlier: sorted[j], reason: m.Reason})
 	}
 	return pairs
 }

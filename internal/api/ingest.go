@@ -9,6 +9,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/coverimg"
@@ -47,6 +48,30 @@ const (
 	ingestPossibleDuplicate
 )
 
+// workIDResolveTimeout bounds the work-key lookup. It sits ahead of the insert
+// (duplicate detection needs the key), so it has to be short enough that a slow
+// resolver cannot hold an ingest open.
+const workIDResolveTimeout = 10 * time.Second
+
+// ingestConfig carries the per-call overrides an ingest can take. It exists as
+// options rather than parameters because only one caller ever sets one.
+type ingestConfig struct {
+	// allowDuplicate skips duplicate detection entirely, for an uploader who has
+	// looked at the conflict and wants both copies anyway (LYCM-113).
+	allowDuplicate bool
+}
+
+// ingestOption overrides one part of an ingest.
+type ingestOption func(*ingestConfig)
+
+// allowDuplicate keeps a second copy of a book already present, instead of
+// refusing the upload. The alternative on offer — delete the existing book —
+// destroys its reading positions and read marks, which is a steep price for
+// wanting a better scan or another translation.
+func allowDuplicate() ingestOption {
+	return func(c *ingestConfig) { c.allowDuplicate = true }
+}
+
 // ingestEPUB is the single ingest path shared by HTTP upload and folder ingest:
 // it validates the bytes are a real EPUB, content-addresses them by SHA-256,
 // deduplicates on the hash, persists the blob + cover + row, links the book to
@@ -58,7 +83,11 @@ const (
 // content but a path already mapped to a book, the book is updated in place
 // rather than duplicated (LYCM-66). The returned ingestResult reports which
 // happened.
-func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath string) (book store.Book, result ingestResult, err error) {
+func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath string, opts ...ingestOption) (book store.Book, result ingestResult, err error) {
+	var cfg ingestConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	if len(data) == 0 {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("%w: empty input", errNotEPUB)
 	}
@@ -120,40 +149,67 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		default:
 			return store.Book{}, ingestDuplicate, fmt.Errorf("lookup by source path: %w", err)
 		}
-	} else if err := a.store.ClearTombstone(ctx, hash); err != nil {
-		// An upload is an explicit request for this book, so it lifts an earlier
-		// delete rather than being refused by it. Best effort: a stale tombstone
-		// only affects a later folder ingest, and the upload itself has already
-		// succeeded in every way that matters.
-		log.Printf("api: clear tombstone for upload %q: %v", source, err)
 	}
 
-	// Resolve the work key once. Duplicate detection and inventory linking both
-	// want it and resolving is a network call, so it is hoisted here rather than
-	// paid for twice.
+	// Resolve the work key once: duplicate detection and inventory linking both
+	// want it, and resolving is a network call.
+	//
+	// Detached from the request context and separately bounded. Hoisting a
+	// network call ahead of the insert would otherwise widen the window in which
+	// a client disconnect cancels ctx and loses an upload that was already
+	// complete — before LYCM-113 this call happened after the row was persisted,
+	// where a cancellation cost only the inventory link.
 	workID := ""
 	if code, ok := isbn.FirstFrom(md.Identifiers); ok {
-		workID = a.resolveWorkID(ctx, code)
+		resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workIDResolveTimeout)
+		workID = a.resolveWorkID(resolveCtx, code)
+		cancel()
 	}
 
 	// Everything above only catches the same *bytes* arriving again — under a
 	// new path, a respelled one (LYCM-66/68/109), or after a delete. Two
 	// genuinely different files of one book still pass all of it, and the shelf
 	// shows the book twice. Look for one before writing any blobs (LYCM-113).
-	dup, isDup := a.findDuplicate(ctx, md, source, workID)
-	if isDup && sourcePath == "" {
-		// An upload is a person handing over one specific file, so the answer is
-		// an immediate conflict naming what it collides with — not a queue entry
-		// they would have to go and find. Nothing is written.
+	//
+	// Skipped for a folder ingest when QC is off: there would be no queue to hold
+	// the result in, so scanning the whole library would buy a log line.
+	dup, isDup := dedup.Match{}, false
+	if !cfg.allowDuplicate && (sourcePath == "" || a.ingestQC) {
+		dup, isDup = a.findDuplicate(ctx, md, source, workID)
+	}
+	if isDup {
+		// Re-read the match. ListDedupCandidates is a snapshot, and the book it
+		// named can be gone by now — resolving a duplicate by deleting the older
+		// copy is exactly what the review queue is for.
 		switch existing, err := a.store.GetBook(ctx, dup.BookID); {
 		case err == nil:
-			return existing, ingestPossibleDuplicate, nil
+			if sourcePath == "" {
+				// An upload is a person handing over one specific file, so the
+				// answer is an immediate conflict naming what it collides with —
+				// not a queue entry they would have to go and find. Nothing is
+				// written; ?force=true overrides.
+				return existing, ingestPossibleDuplicate, nil
+			}
 		case errors.Is(err, store.ErrNotFound):
-			// Deleted between the match and now. Nothing to conflict with, so
-			// let the upload proceed rather than refusing it for a ghost.
 			isDup = false
 		default:
 			return store.Book{}, ingestDuplicate, fmt.Errorf("load duplicate %d: %w", dup.BookID, err)
+		}
+	}
+
+	if sourcePath == "" {
+		// An upload is an explicit request for this book, so it lifts an earlier
+		// delete rather than being refused by it.
+		//
+		// Deferred until after every refusal above: those write nothing, and
+		// clearing the tombstone for an upload that is then refused would let the
+		// watcher re-ingest a deliberately deleted book on its next tick — the
+		// LYCM-109 regression, reintroduced through a door LYCM-113 opened.
+		//
+		// Best effort from here: a stale tombstone only affects a later folder
+		// ingest, and this upload is about to succeed.
+		if err := a.store.ClearTombstone(ctx, hash); err != nil {
+			log.Printf("api: clear tombstone for upload %q: %v", source, err)
 		}
 	}
 
@@ -164,16 +220,10 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 
 	// A suspected duplicate is held for a person to decide: two files of one work
 	// are often deliberate — a better scan, a different translation — so the
-	// queue offers the choice instead of collapsing them. With QC off there is no
-	// queue to hold it in, and the book publishes as it would have before.
-	duplicateOf := int64(0)
-	if isDup && a.ingestQC {
+	// queue offers the choice instead of collapsing them.
+	if isDup {
 		reviewState = store.ReviewPending
 		reviewFlags = append(reviewFlags, ingestqc.FlagPossibleDuplicate)
-		duplicateOf = dup.BookID
-	} else if isDup {
-		log.Printf("ingest: %q looks like a copy of book %d (%s); publishing anyway, ingest QC is off",
-			ingestTitle(md, source), dup.BookID, dup.Reason)
 	}
 
 	filePath, coverPath, err := a.store.SaveBlobs(hash, data, a.normalizeCover(md.Title, chosen))
@@ -193,13 +243,26 @@ func (a *API) ingestEPUB(ctx context.Context, data []byte, source, sourcePath st
 		SeriesIndex: md.SeriesIndex,
 		ReviewState: reviewState,
 		ReviewFlags: reviewFlags,
-		DuplicateOf: duplicateOf,
 	})
 	if err != nil {
 		return store.Book{}, ingestDuplicate, fmt.Errorf("insert book: %w", err)
 	}
 	if reviewState == store.ReviewPending {
 		log.Printf("ingest: %q held for review (flags=%v)", saved.Title, reviewFlags)
+	}
+
+	// Point the held book at what it matched, after the insert rather than as
+	// part of it. duplicate_of is a self-FK, so carrying it into InsertBook makes
+	// a deleted match fail the whole ingest — and for a folder ingest that parks
+	// the path in the watcher's bad-signature set, where it re-errors until the
+	// file changes. The pointer is advisory: losing it costs the review UI its
+	// side-by-side comparison, which it already handles.
+	if isDup {
+		if err := a.store.SetDuplicateOf(ctx, saved.ID, dup.BookID); err != nil {
+			log.Printf("api: record duplicate %d -> %d: %v", saved.ID, dup.BookID, err)
+		} else {
+			saved.DuplicateOf = dup.BookID
+		}
 	}
 
 	// Best effort: stamp the ISBN/ingested state onto inventory. Never fails the
@@ -286,13 +349,17 @@ func (a *API) findDuplicate(ctx context.Context, md *epub.Metadata, source, work
 		log.Printf("api: list dedup candidates: %v", err)
 		return dedup.Match{}, false
 	}
+	shelf := make([]dedup.Candidate, len(candidates))
+	for i, c := range candidates {
+		shelf[i] = dedup.Candidate(c)
+	}
 	return dedup.Find(dedup.Candidate{
 		Title:       ingestTitle(md, source),
 		Author:      strings.TrimSpace(md.Author),
 		Series:      strings.TrimSpace(md.Series),
 		SeriesIndex: md.SeriesIndex,
 		WorkID:      workID,
-	}, candidates)
+	}, shelf)
 }
 
 // coverForIngest returns the cover bytes to store for a freshly-parsed EPUB: it

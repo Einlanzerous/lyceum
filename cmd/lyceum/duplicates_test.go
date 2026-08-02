@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/magos/lyceum/internal/dedup"
+	"github.com/magos/lyceum/internal/store"
 )
 
 // TestFindDuplicatePairsReportsEachPairOnce: matching every book against every
@@ -11,7 +12,7 @@ import (
 // double-counts is one nobody trusts. Each book is checked only against those
 // added before it.
 func TestFindDuplicatePairsReportsEachPairOnce(t *testing.T) {
-	pairs := findDuplicatePairs([]dedup.Candidate{
+	pairs := findDuplicatePairs([]store.BookIdentity{
 		{ID: 3, Title: "Piranesi", Author: "Susanna Clarke"},
 		{ID: 1, Title: "Piranesi", Author: "Susanna Clarke"},
 		{ID: 2, Title: "Dune", Author: "Frank Herbert"},
@@ -33,7 +34,7 @@ func TestFindDuplicatePairsReportsEachPairOnce(t *testing.T) {
 
 // TestFindDuplicatePairsCleanLibrary: the expected answer on a healthy shelf.
 func TestFindDuplicatePairsCleanLibrary(t *testing.T) {
-	pairs := findDuplicatePairs([]dedup.Candidate{
+	pairs := findDuplicatePairs([]store.BookIdentity{
 		{ID: 1, Title: "Piranesi", Author: "Susanna Clarke"},
 		{ID: 2, Title: "Dune", Author: "Frank Herbert"},
 		{ID: 3, Title: "Dune Messiah", Author: "Frank Herbert"},
@@ -47,7 +48,7 @@ func TestFindDuplicatePairsCleanLibrary(t *testing.T) {
 // pairs, both pointing at the original, so deleting the two later ids resolves
 // the lot in one pass.
 func TestFindDuplicatePairsTripleCopy(t *testing.T) {
-	pairs := findDuplicatePairs([]dedup.Candidate{
+	pairs := findDuplicatePairs([]store.BookIdentity{
 		{ID: 1, Title: "Dune", Author: "Frank Herbert"},
 		{ID: 2, Title: "Dune", Author: "Frank Herbert"},
 		{ID: 3, Title: "Dune", Author: "Frank Herbert"},

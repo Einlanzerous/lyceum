@@ -154,3 +154,76 @@ func TestFindNoMatch(t *testing.T) {
 		t.Errorf("unrelated book matched %+v", m)
 	}
 }
+
+// TestFoldKeepsNonLatinCombiningMarks: dropping every nonspacing mark after NFD
+// is right for a Latin accent and wrong everywhere else. Japanese dakuten,
+// Hebrew niqqud and Arabic harakat are part of the letter, not decoration on it,
+// and folding them away invents duplicates out of unrelated books.
+func TestFoldKeepsNonLatinCombiningMarks(t *testing.T) {
+	cases := []struct {
+		name    string
+		a, b    string
+		wantSam bool
+	}{
+		{"dakuten distinguishes kana", "ばか", "はか", false},
+		{"same kana still matches itself", "ばか", "ばか", true},
+		{"hebrew niqqud", "שָׁלוֹם", "שלום", false},
+		// The Latin case this is all in service of still folds.
+		{"latin accent still folds", "Misérables", "Miserables", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := NormalizeTitle(tc.a), NormalizeTitle(tc.b)
+			if (a == b) != tc.wantSam {
+				t.Errorf("NormalizeTitle(%q)=%q, NormalizeTitle(%q)=%q; equal=%v want %v",
+					tc.a, a, tc.b, b, a == b, tc.wantSam)
+			}
+		})
+	}
+}
+
+// TestFindIndexesOnlyCountWithinOneSeries: a series index means something only
+// relative to the series it counts within. Comparing #1 of one series against #2
+// of another is comparing numbers that were never on the same scale, and letting
+// that rule a pair out would hide a real duplicate.
+func TestFindIndexesOnlyCountWithinOneSeries(t *testing.T) {
+	// Same book, filed under two different series names by two packagers — a
+	// real disagreement, not two volumes.
+	shelf := []Candidate{{ID: 1, Title: "The Eye of the World", Author: "Robert Jordan",
+		Series: "The Wheel of Time", SeriesIndex: 1}}
+	incoming := Candidate{Title: "The Eye of the World", Author: "Robert Jordan",
+		Series: "Wheel of Time (UK)", SeriesIndex: 2}
+
+	if _, ok := Find(incoming, shelf); !ok {
+		t.Error("indexes from two different series ruled out a title+author match")
+	}
+
+	// A book carrying a stray index but no series must not be ruled out either.
+	loose := Candidate{Title: "The Eye of the World", Author: "Robert Jordan", SeriesIndex: 4}
+	if _, ok := Find(loose, shelf); !ok {
+		t.Error("an index with no series named ruled out a title+author match")
+	}
+}
+
+// TestFindWorkIDRespectsSeriesVolumes: the work-key path is a second door into
+// the same match, and it has to honour the same series guard. A resolver that
+// groups a whole series under one work key would otherwise flag every volume
+// against the first.
+func TestFindWorkIDRespectsSeriesVolumes(t *testing.T) {
+	shelf := []Candidate{{ID: 1, Title: "The Eye of the World", Author: "Robert Jordan",
+		Series: "The Wheel of Time", SeriesIndex: 1, WorkID: "/works/OL7W"}}
+	volume2 := Candidate{Title: "The Great Hunt", Author: "Robert Jordan",
+		Series: "The Wheel of Time", SeriesIndex: 2, WorkID: "/works/OL7W"}
+
+	if m, ok := Find(volume2, shelf); ok {
+		t.Errorf("volume 2 matched book %d on a shared work key (%s); it is a different volume",
+			m.BookID, m.Reason)
+	}
+
+	// A genuine second copy of volume 1 still matches on the work key.
+	reissue := Candidate{Title: "Eye of the World (Reissue)", Author: "Robert Jordan",
+		Series: "The Wheel of Time", SeriesIndex: 1, WorkID: "/works/OL7W"}
+	if m, ok := Find(reissue, shelf); !ok || m.Reason != ReasonWorkID {
+		t.Errorf("reissue of volume 1 = %+v (ok=%v), want a work-key match", m, ok)
+	}
+}

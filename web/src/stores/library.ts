@@ -5,7 +5,13 @@ import type { Book } from '@/api/types'
 /** Outcome of an upload attempt, so the view can message each case distinctly. */
 export type UploadResult =
   | { kind: 'added'; book: Book }
-  | { kind: 'duplicate' }
+  /**
+   * The server refused the upload with a 409. That now covers two cases — the
+   * same content again, and a different file of a book already here (LYCM-113)
+   * — so the server's own message is carried through rather than collapsed to
+   * "already present", which is no longer true of the second.
+   */
+  | { kind: 'duplicate'; message: string }
   | { kind: 'error'; message: string }
 
 interface LibraryState {
@@ -37,7 +43,8 @@ export const useLibraryStore = defineStore('library', {
 
     /**
      * Upload one EPUB and fold the new book into the grid without a reload. A
-     * 409 is an expected outcome (the book is already present), not an error.
+     * 409 is an expected outcome — the book is already present, or looks like a
+     * copy of one that is — not an error.
      */
     async upload(file: File): Promise<UploadResult> {
       try {
@@ -49,7 +56,7 @@ export const useLibraryStore = defineStore('library', {
         return { kind: 'added', book }
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
-          return { kind: 'duplicate' }
+          return { kind: 'duplicate', message: err.message }
         }
         return { kind: 'error', message: err instanceof Error ? err.message : 'upload failed' }
       }

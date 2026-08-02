@@ -67,9 +67,18 @@ const (
 func Find(incoming Candidate, existing []Candidate) (Match, bool) {
 	if incoming.WorkID != "" {
 		for _, c := range existing {
-			if c.ID != incoming.ID && c.WorkID == incoming.WorkID {
-				return Match{BookID: c.ID, Reason: ReasonWorkID}, true
+			if c.ID == incoming.ID || c.WorkID != incoming.WorkID {
+				continue
 			}
+			// The series guard applies here too. A work key is usually per-title
+			// so volumes rarely share one, but where a resolver does group a
+			// series under a single work, matching on it alone would flag every
+			// volume against the first — the failure this package cares most
+			// about, reached by the one path that used to skip the check.
+			if differentVolumes(incoming, c) {
+				continue
+			}
+			return Match{BookID: c.ID, Reason: ReasonWorkID}, true
 		}
 	}
 
@@ -99,11 +108,19 @@ func Find(incoming Candidate, existing []Candidate) (Match, bool) {
 // comparison: The Wheel of Time #3 is not another copy of #4 however the two
 // titles normalize.
 //
-// It takes an index disagreement to rule a pair out. A missing or zero index is
-// no evidence either way — SeriesIndex is 0 when the position is unknown, so
+// Both books must name the same series. An index only means anything relative to
+// the series it counts within, so comparing #3 of one against #3 of another —
+// or against a standalone that happens to carry a stray index — is comparing
+// numbers that were never on the same scale.
+//
+// And it takes a disagreement to rule a pair out. A missing or zero index is no
+// evidence either way: SeriesIndex is 0 when the position is unknown, so
 // treating that as "different" would disable title matching for every series
 // book whose EPUB omits the number.
 func differentVolumes(a, b Candidate) bool {
+	if a.Series == "" || fold(a.Series) != fold(b.Series) {
+		return false
+	}
 	return a.SeriesIndex != 0 && b.SeriesIndex != 0 && a.SeriesIndex != b.SeriesIndex
 }
 
@@ -188,17 +205,29 @@ func fold(s string) string {
 
 	var b strings.Builder
 	b.Grow(len(s))
+	latinBase := false
 	for _, r := range s {
 		switch {
 		case unicode.Is(unicode.Mn, r):
-			// A combining mark the decomposition split off. Dropping it is what
-			// makes the two spellings of an accent compare equal.
+			// A combining mark the decomposition split off. Dropped only when it
+			// sits on a Latin letter, where it is an accent and the two spellings
+			// of "é" have to agree.
+			//
+			// Elsewhere a nonspacing mark is not decoration but part of the
+			// letter: dropping U+3099 folds ばか into はか, and the same goes for
+			// Hebrew niqqud and Arabic harakat. Inventing a duplicate is worse
+			// than missing one, and this package is built the other way round.
+			if !latinBase {
+				b.WriteRune(r)
+			}
 		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			latinBase = unicode.Is(unicode.Latin, r)
 			b.WriteRune(unicode.ToLower(r))
 		default:
 			// Punctuation and whitespace alike become a single space; the join
 			// below collapses the runs. This is what makes "Dr. Jekyll" and "Dr
 			// Jekyll" agree.
+			latinBase = false
 			b.WriteRune(' ')
 		}
 	}

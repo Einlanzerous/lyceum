@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
-	"github.com/magos/lyceum/internal/dedup"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -36,9 +35,10 @@ type Store interface {
 	ListFurthestPositions(ctx context.Context, userID int64) (map[int64]store.ReadingPosition, error)
 	ListFinishedBooks(ctx context.Context, userID int64) (map[int64]struct{}, error)
 
-	// ListDedupCandidates supplies the shelf for duplicate matching at ingest
-	// (LYCM-113).
-	ListDedupCandidates(ctx context.Context) ([]dedup.Candidate, error)
+	// Duplicate detection at ingest (LYCM-113): the shelf to match against, and
+	// the pointer recording what a held book matched.
+	ListDedupCandidates(ctx context.Context) ([]store.BookIdentity, error)
+	SetDuplicateOf(ctx context.Context, id, duplicateOf int64) error
 	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)

@@ -59,7 +59,7 @@ describe('library store', () => {
     vi.mocked(uploadBook).mockRejectedValue(new ApiError(409, 'book already exists'))
     const store = useLibraryStore()
     const result = await store.upload(new File(['x'], 'dupe.epub'))
-    expect(result).toEqual({ kind: 'duplicate' })
+    expect(result).toMatchObject({ kind: 'duplicate' })
     expect(store.books).toEqual([])
   })
 

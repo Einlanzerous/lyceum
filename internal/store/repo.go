@@ -12,8 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/magos/lyceum/internal/dedup"
 )
 
 // ErrNotFound is returned by the Get* methods when no matching row exists.
@@ -348,6 +346,36 @@ func (s *Store) GetFurthestPosition(ctx context.Context, bookID, userID int64) (
 	return p, nil
 }
 
+// BookIdentity is the slice of a book that duplicate matching compares
+// (LYCM-113). It mirrors dedup.Candidate but is declared here so the store stays
+// a data layer: every other method in this file returns store types, and having
+// the lowest layer import a matching package to name its own rows inverts that.
+type BookIdentity struct {
+	ID          int64
+	Title       string
+	Author      string
+	Series      string
+	SeriesIndex float64
+	// WorkID is the resolver work key from the book's inventory row, or "" when
+	// it has no ISBN the resolver recognised.
+	WorkID string
+}
+
+// SetDuplicateOf points a held book at the one it looks like a copy of, or
+// clears the pointer with 0 (LYCM-113).
+//
+// Separate from InsertBook because duplicate_of is a self-FK: writing it as part
+// of the insert makes a match deleted in the meantime fail the entire ingest,
+// and on the folder path that parks the file in the watcher's bad-signature set
+// until it changes. Here the failure costs only the pointer.
+func (s *Store) SetDuplicateOf(ctx context.Context, id, duplicateOf int64) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE books SET duplicate_of = $2 WHERE id = $1`, id, nullInt64(duplicateOf)); err != nil {
+		return fmt.Errorf("store: set duplicate of: %w", err)
+	}
+	return nil
+}
+
 // ListDedupCandidates returns every book's identity for duplicate matching
 // (LYCM-113): the fields dedup.Find compares, plus the resolver work key the
 // book's inventory row carries.
@@ -361,7 +389,7 @@ func (s *Store) GetFurthestPosition(ctx context.Context, bookID, userID int64) (
 // carry several ISBN rows (LYCM-35 groups editions), and a plain join would
 // return it once per row. Ordering work_id descending with nulls last means a
 // book with any resolved work key contributes it rather than an empty string.
-func (s *Store) ListDedupCandidates(ctx context.Context) ([]dedup.Candidate, error) {
+func (s *Store) ListDedupCandidates(ctx context.Context) ([]BookIdentity, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT DISTINCT ON (b.id)
 		        b.id, b.title, COALESCE(b.author, ''),
@@ -375,9 +403,9 @@ func (s *Store) ListDedupCandidates(ctx context.Context) ([]dedup.Candidate, err
 	}
 	defer rows.Close()
 
-	var out []dedup.Candidate
+	var out []BookIdentity
 	for rows.Next() {
-		var c dedup.Candidate
+		var c BookIdentity
 		if err := rows.Scan(&c.ID, &c.Title, &c.Author, &c.Series, &c.SeriesIndex, &c.WorkID); err != nil {
 			return nil, fmt.Errorf("store: scan dedup candidate: %w", err)
 		}
@@ -617,7 +645,8 @@ func (s *Store) UpdateBookSeries(ctx context.Context, id int64, series string, i
 // row, or ErrNotFound if the id is gone.
 func (s *Store) ApproveBook(ctx context.Context, id int64) (Book, error) {
 	b, err := scanBook(s.pool.QueryRow(ctx,
-		`UPDATE books SET review_state = 'published', review_flags = '[]'::jsonb
+		`UPDATE books SET review_state = 'published', review_flags = '[]'::jsonb,
+		        duplicate_of = NULL
 		 WHERE id = $1 RETURNING `+bookColumns, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound

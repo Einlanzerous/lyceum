@@ -95,6 +95,33 @@ describe('ReviewView duplicate decision (LYCM-113)', () => {
     expect(wrapper.text()).toContain('has since been deleted')
   })
 
+  it('still explains the hold once the server has dropped the pointer', async () => {
+    // The real steady state after the match is deleted: duplicate_of is nulled
+    // by the FK and omitted from the wire, leaving only the flag. Gating the
+    // panel on the pointer hid it exactly here.
+    const orphaned: Book = { ...held }
+    delete orphaned.duplicate_of
+    vi.mocked(client.listPendingReview).mockResolvedValue([orphaned])
+
+    const wrapper = mount(ReviewView, { global })
+    await flushPromises()
+
+    expect(client.getBook).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('has since been deleted')
+    expect(wrapper.findAll('button').map((b) => b.text())).toContain('Keep both')
+  })
+
+  it('fetches a shared counterpart once, however many rows point at it', async () => {
+    const second: Book = { ...held, id: 4, author: 'S. Clarke' }
+    vi.mocked(client.listPendingReview).mockResolvedValue([held, second])
+    vi.mocked(client.getBook).mockResolvedValue(onShelf)
+
+    mount(ReviewView, { global })
+    await flushPromises()
+
+    expect(vi.mocked(client.getBook).mock.calls).toEqual([[1]])
+  })
+
   it('renders the queue even while the counterpart is still loading', async () => {
     vi.mocked(client.listPendingReview).mockResolvedValue([held])
     // Never resolves: the comparison must not hold the whole queue behind it.
