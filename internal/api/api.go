@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
+	"github.com/magos/lyceum/internal/dedup"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -34,6 +35,10 @@ type Store interface {
 	// queries rather than two per book (LYCM-115).
 	ListFurthestPositions(ctx context.Context, userID int64) (map[int64]store.ReadingPosition, error)
 	ListFinishedBooks(ctx context.Context, userID int64) (map[int64]struct{}, error)
+
+	// ListDedupCandidates supplies the shelf for duplicate matching at ingest
+	// (LYCM-113).
+	ListDedupCandidates(ctx context.Context) ([]dedup.Candidate, error)
 	GetPosition(ctx context.Context, bookID, userID int64, deviceID string) (store.ReadingPosition, error)
 	UpsertPositionLWW(ctx context.Context, p store.ReadingPosition) (store.ReadingPosition, error)
 	InsertBook(ctx context.Context, b store.Book) (store.Book, error)
@@ -347,6 +352,11 @@ type bookJSON struct {
 	// carries "pending" plus the detected issue codes.
 	ReviewState string   `json:"review_state,omitempty"`
 	ReviewFlags []string `json:"review_flags,omitempty"`
+	// DuplicateOf names the book a possible_duplicate entry in ReviewFlags is
+	// about (LYCM-113), so the review UI can show the two side by side. Omitted
+	// unless the book is held as a suspected duplicate, and omitted again once
+	// the book it pointed at is deleted.
+	DuplicateOf int64 `json:"duplicate_of,omitempty"`
 }
 
 func coverURL(id int64) string { return fmt.Sprintf("/books/%d/cover", id) }
@@ -416,6 +426,7 @@ func (a *API) bookJSONFor(b store.Book, st readerState) bookJSON {
 	if b.ReviewState == store.ReviewPending {
 		entry.ReviewState = b.ReviewState
 		entry.ReviewFlags = b.ReviewFlags
+		entry.DuplicateOf = b.DuplicateOf
 	}
 	if b.CoverPath != "" {
 		entry.CoverURL = coverURL(b.ID)

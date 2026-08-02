@@ -24,6 +24,13 @@ export interface Book {
   review_state?: string
   /** Detected issue codes for a pending book, e.g. ["no_isbn","suspicious_title"]. */
   review_flags?: string[]
+  /**
+   * Id of the book a `possible_duplicate` flag is about (LYCM-113), so the
+   * review queue can show the suspected pair side by side. Omitted unless the
+   * book is held as a duplicate, and omitted again once the book it named has
+   * been deleted.
+   */
+  duplicate_of?: number
 }
 
 /** A device's reading position within a book (GET/PUT /sync). */

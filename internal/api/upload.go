@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -47,6 +48,15 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		serverError(w, "ingest epub", err)
+		return
+	case result == ingestPossibleDuplicate:
+		// A different file that looks like a book already here (LYCM-113). The
+		// review queue only holds new folder ingests, and an uploader is standing
+		// right there, so say what it collided with rather than filing it
+		// somewhere they would have to go looking.
+		http.Error(w, fmt.Sprintf(
+			"looks like another copy of %q by %s (book %d); delete that one first if this should replace it",
+			saved.Title, saved.Author, saved.ID), http.StatusConflict)
 		return
 	case result != ingestCreated:
 		http.Error(w, "book already exists", http.StatusConflict)
