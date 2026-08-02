@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.4](https://github.com/Einlanzerous/lyceum/compare/v1.7.3...v1.7.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **library:** keep a series pinned after finishing a volume (LYCM-108) ([#68](https://github.com/Einlanzerous/lyceum/issues/68)) ([1398330](https://github.com/Einlanzerous/lyceum/commit/1398330b585f8f52698e7edb39b46310419772d2))
+* **library:** mark-as-read becomes yours, not the household's (LYCM-112) ([#69](https://github.com/Einlanzerous/lyceum/issues/69)) ([8e7ff7a](https://github.com/Einlanzerous/lyceum/commit/8e7ff7aa02b5064e5346d27084931abb64281de8))
+* **library:** match watched paths across Unicode forms, and let you delete books (LYCM-109) ([#66](https://github.com/Einlanzerous/lyceum/issues/66)) ([e981121](https://github.com/Einlanzerous/lyceum/commit/e9811217b6389a9a7682844d1341e17e68774c3b))
+
 ## [1.7.3](https://github.com/Einlanzerous/lyceum/compare/v1.7.2...v1.7.3) (2026-07-31)
 
 
