@@ -8,6 +8,14 @@
 --
 -- Run this before 0014's down, which drops book_reads and expects to find the
 -- column already carrying those marks.
+--
+-- Wrapped because nothing in the repo applies down migrations — they are run by
+-- hand, where each statement otherwise commits on its own. Run in the wrong
+-- order, after book_reads is already gone, the UPDATE fails while the ALTER has
+-- already committed, leaving an added-but-empty column that reads exactly like
+-- "nobody had finished anything".
+BEGIN;
+
 ALTER TABLE books ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
 
 UPDATE books b
@@ -16,3 +24,5 @@ UPDATE books b
  WHERE r.book_id = b.id
    AND r.user_id = u.id
    AND u.is_owner;
+
+COMMIT;

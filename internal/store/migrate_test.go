@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/magos/lyceum/migrations"
 )
 
 // testSchema isolates this package's test binary in its own Postgres schema so
@@ -108,6 +111,12 @@ func TestMigrate(t *testing.T) {
 		}
 	}
 
+	// books.title is the positive control: every other columnExists assertion in
+	// this file passes when the column is absent, so a helper that always said
+	// "no" would satisfy them all without testing anything.
+	if !columnExists(ctx, t, pool, "books", "title") {
+		t.Error("columnExists reports books.title missing; the helper is broken")
+	}
 	// 0015 retires books.finished_at; book_reads carries mark-as-read now, and a
 	// column nothing reads is one a later query can quietly start trusting.
 	if columnExists(ctx, t, pool, "books", "finished_at") {
@@ -247,6 +256,123 @@ func TestBookReadsBackfill(t *testing.T) {
 	if columnExists(ctx, t, pool, "books", "finished_at") {
 		t.Error("books.finished_at survived the replay; 0015 should follow 0014")
 	}
+}
+
+// runDown applies one embedded *.down.sql. Migrate loads *.up.sql only, so this
+// is the sole path by which a down migration is ever executed in this repo.
+func runDown(ctx context.Context, t *testing.T, pool *pgxpool.Pool, name string) {
+	t.Helper()
+	body, err := fs.ReadFile(migrations.FS, name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	if _, err := pool.Exec(ctx, string(body)); err != nil {
+		t.Fatalf("run %s: %v", name, err)
+	}
+}
+
+// TestDropFinishedAtDown exercises 0015's down, the one down migration in the
+// repo that moves data rather than dropping what its up created. Nothing runs
+// the downs — so untested, its first execution would be by hand, against a live
+// database, mid-rollback. It has to carry the owner's reads back into the column
+// and leave everyone else's behind, and 0014's down after it has to find them
+// there.
+func TestDropFinishedAtDown(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	cleanState(ctx, t, pool)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	truncateAll(ctx, t, pool)
+
+	// The downs leave the schema behind the versions schema_migrations records,
+	// which Migrate would then skip straight past. Rebuild for whatever runs
+	// next in this persistent schema.
+	t.Cleanup(func() {
+		cleanState(ctx, t, pool)
+		if err := Migrate(ctx, pool); err != nil {
+			t.Fatalf("restore schema after down migrations: %v", err)
+		}
+	})
+
+	s := New(pool, t.TempDir())
+	ownerRead, err := s.InsertBook(ctx, sampleBook("down-owner-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	maraRead, err := s.InsertBook(ctx, sampleBook("down-mara-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	unread, err := s.InsertBook(ctx, sampleBook("down-unread-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	owner, err := s.GetOwner(ctx)
+	if err != nil {
+		t.Fatalf("GetOwner: %v", err)
+	}
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := s.SetBookFinished(ctx, ownerRead.ID, owner.ID, true); err != nil {
+		t.Fatalf("SetBookFinished owner: %v", err)
+	}
+	if err := s.SetBookFinished(ctx, maraRead.ID, mara.ID, true); err != nil {
+		t.Fatalf("SetBookFinished mara: %v", err)
+	}
+
+	var want time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT finished_at FROM book_reads WHERE book_id = $1 AND user_id = $2`,
+		ownerRead.ID, owner.ID).Scan(&want); err != nil {
+		t.Fatalf("read owner's finish date: %v", err)
+	}
+
+	runDown(ctx, t, pool, "0015_drop_book_finished.down.sql")
+
+	if !columnExists(ctx, t, pool, "books", "finished_at") {
+		t.Fatal("0015's down did not restore books.finished_at")
+	}
+	// The owner's own finish date, not the moment of the rollback: that date is
+	// the answer to "when did you finish this", and re-stamping it loses the
+	// only record of one.
+	if got := finishedAt(ctx, t, pool, ownerRead.ID); got == nil || !got.Equal(want) {
+		t.Errorf("owner's book finished_at = %v, want %v", got, want)
+	}
+	// Mara's read must not become the library-wide flag — that is LYCM-112's bug
+	// reintroduced by the rollback that was supposed to be safe.
+	if got := finishedAt(ctx, t, pool, maraRead.ID); got != nil {
+		t.Errorf("a non-owner's read leaked into the shared flag: finished_at = %v, want NULL", got)
+	}
+	if got := finishedAt(ctx, t, pool, unread.ID); got != nil {
+		t.Errorf("never-read book finished_at = %v, want NULL", got)
+	}
+
+	// 0014's down completes the unwind to the pre-LYCM-112 shape: book_reads
+	// gone, the marks still standing in the column 0015's down refilled.
+	runDown(ctx, t, pool, "0014_book_reads.down.sql")
+
+	if tableExists(ctx, t, pool, "book_reads") {
+		t.Error("0014's down left book_reads standing")
+	}
+	if got := finishedAt(ctx, t, pool, ownerRead.ID); got == nil || !got.Equal(want) {
+		t.Errorf("after both downs, owner's book finished_at = %v, want %v", got, want)
+	}
+}
+
+// finishedAt reads books.finished_at, which exists only between 0015's down and
+// 0014's down. A nil return is SQL NULL: not finished.
+func finishedAt(ctx context.Context, t *testing.T, pool *pgxpool.Pool, bookID int64) *time.Time {
+	t.Helper()
+	var at *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT finished_at FROM books WHERE id = $1`, bookID).Scan(&at); err != nil {
+		t.Fatalf("read books.finished_at for %d: %v", bookID, err)
+	}
+	return at
 }
 
 func TestConnectBadDSN(t *testing.T) {
