@@ -32,7 +32,7 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	// left to CASCADE: this persistent test schema predates some of their FKs, so
 	// relying on cascade let stale rows survive between tests.
 	_, err := pool.Exec(ctx,
-		`TRUNCATE reading_positions, devices, inventory_isbns, inventory,
+		`TRUNCATE reading_positions, book_reads, devices, inventory_isbns, inventory,
 		         ingest_candidates, ingest_batches, deleted_sources, books RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -237,32 +237,62 @@ func TestSetBookFinished(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 
+	owner := ownerID(ctx, t, s)
+
 	book, err := s.InsertBook(ctx, sampleBook("finish-h1"))
 	if err != nil {
 		t.Fatalf("InsertBook: %v", err)
 	}
-	if book.FinishedAt != nil {
-		t.Fatalf("new book FinishedAt = %v, want nil", book.FinishedAt)
+	isFinished := func(when string) bool {
+		t.Helper()
+		finished, err := s.IsBookFinished(ctx, book.ID, owner)
+		if err != nil {
+			t.Fatalf("IsBookFinished (%s): %v", when, err)
+		}
+		return finished
+	}
+	if isFinished("before marking") {
+		t.Fatal("a freshly inserted book reports finished")
 	}
 
-	done, err := s.SetBookFinished(ctx, book.ID, true)
-	if err != nil {
+	if err := s.SetBookFinished(ctx, book.ID, owner, true); err != nil {
 		t.Fatalf("SetBookFinished(true): %v", err)
 	}
-	if done.FinishedAt == nil {
-		t.Fatalf("marked book FinishedAt = nil, want a timestamp")
+	if !isFinished("after marking") {
+		t.Fatal("book not finished after marking")
 	}
 
-	cleared, err := s.SetBookFinished(ctx, book.ID, false)
-	if err != nil {
+	// Marking twice is not a conflict — it just re-stamps the row.
+	if err := s.SetBookFinished(ctx, book.ID, owner, true); err != nil {
+		t.Fatalf("SetBookFinished(true) again: %v", err)
+	}
+	if !isFinished("after re-marking") {
+		t.Fatal("book not finished after re-marking")
+	}
+
+	if err := s.SetBookFinished(ctx, book.ID, owner, false); err != nil {
 		t.Fatalf("SetBookFinished(false): %v", err)
 	}
-	if cleared.FinishedAt != nil {
-		t.Fatalf("unmarked book FinishedAt = %v, want nil", cleared.FinishedAt)
+	if isFinished("after unmarking") {
+		t.Fatal("book still finished after unmarking")
 	}
 
-	if _, err := s.SetBookFinished(ctx, 999999, true); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetBookFinished(missing) err = %v, want ErrNotFound", err)
+	// Unmarking a book that was never marked is a no-op, not an error.
+	if err := s.SetBookFinished(ctx, book.ID, owner, false); err != nil {
+		t.Fatalf("SetBookFinished(false) on an unmarked book: %v", err)
+	}
+
+	// A missing book id is ErrNotFound in both directions. The clear path is the
+	// interesting one: nothing was deleted either way, so only the books lookup
+	// tells "no such book" apart from "was not marked".
+	if err := s.SetBookFinished(ctx, 999999, owner, true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetBookFinished(missing, true) err = %v, want ErrNotFound", err)
+	}
+	if err := s.SetBookFinished(ctx, 999999, owner, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetBookFinished(missing, false) err = %v, want ErrNotFound", err)
+	}
+	if finished, err := s.IsBookFinished(ctx, 999999, owner); err != nil || finished {
+		t.Fatalf("IsBookFinished(missing) = %v, %v; want false, nil", finished, err)
 	}
 }
 

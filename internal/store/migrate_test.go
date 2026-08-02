@@ -59,7 +59,7 @@ func connectSchema(ctx context.Context, dsn, schema string) (*pgxpool.Pool, erro
 func cleanState(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx, `
-		DROP TABLE IF EXISTS reading_positions, devices, inventory, deliveries, books, schema_migrations CASCADE`)
+		DROP TABLE IF EXISTS reading_positions, book_reads, devices, inventory, deliveries, books, schema_migrations CASCADE`)
 	if err != nil {
 		t.Fatalf("clean state: %v", err)
 	}
@@ -141,6 +141,78 @@ func countUpMigrations() (int, error) {
 		return 0, err
 	}
 	return len(migs), nil
+}
+
+// TestBookReadsBackfill runs migration 0014 over the state every existing
+// install upgrades from: books marked read the old, library-wide way (LYCM-112).
+// Those marks belong to the owner, the only person the pre-accounts flag could
+// have meant — and to nobody else, or the fix would hand every housemate a shelf
+// full of books they never read.
+func TestBookReadsBackfill(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	cleanState(ctx, t, pool)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// cleanState leaves users standing (0011 seeds the owner and the schema
+	// insists on exactly one), so clear the housemates a previous case in this
+	// persistent schema left behind.
+	truncateAll(ctx, t, pool)
+
+	s := New(pool, t.TempDir())
+	read, err := s.InsertBook(ctx, sampleBook("backfill-read-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	unread, err := s.InsertBook(ctx, sampleBook("backfill-unread-hash"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Rewind to just before 0014: one book marked on books.finished_at, and no
+	// book_reads table at all.
+	if _, err := pool.Exec(ctx,
+		`UPDATE books SET finished_at = now() WHERE id = $1`, read.ID); err != nil {
+		t.Fatalf("seed legacy finished_at: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DROP TABLE book_reads`); err != nil {
+		t.Fatalf("drop book_reads: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM schema_migrations WHERE version = '0014'`); err != nil {
+		t.Fatalf("unrecord 0014: %v", err)
+	}
+
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("re-Migrate: %v", err)
+	}
+
+	owner, err := s.GetOwner(ctx)
+	if err != nil {
+		t.Fatalf("GetOwner: %v", err)
+	}
+	if finished, err := s.IsBookFinished(ctx, read.ID, owner.ID); err != nil || !finished {
+		t.Fatalf("owner finished = %v (err %v) for a book marked read before 0014; want true", finished, err)
+	}
+	if finished, err := s.IsBookFinished(ctx, unread.ID, owner.ID); err != nil || finished {
+		t.Fatalf("owner finished = %v (err %v) for a never-marked book; want false", finished, err)
+	}
+	if finished, err := s.IsBookFinished(ctx, read.ID, mara.ID); err != nil || finished {
+		t.Fatalf("mara finished = %v (err %v); the back-fill handed her the owner's read", finished, err)
+	}
+
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM book_reads`).Scan(&rows); err != nil {
+		t.Fatalf("count book_reads: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("back-fill wrote %d rows, want 1", rows)
+	}
 }
 
 func TestConnectBadDSN(t *testing.T) {

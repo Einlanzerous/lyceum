@@ -489,6 +489,68 @@ func TestSyncIsPrivatePerUser(t *testing.T) {
 	}
 }
 
+// TestFinishedIsPrivatePerUser is TestSyncIsPrivatePerUser for the other half of
+// reading state (LYCM-112). `finished` outranks the progress heuristic in both
+// clients, so while it was library-wide a housemate's mark-as-read put a ✓ Read
+// pill on everyone's tile, offered them "Mark as unread" for a book they had
+// never opened, and could empty their pinned "continue reading" slot (LYCM-108).
+func TestFinishedIsPrivatePerUser(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	srv := authServer(t, s)
+
+	book := seedBook(t, s, "shared-finish-hash", "Dune", "Herbert", nil)
+
+	mara, err := s.CreateUser(ctx, "mara@example.com", "Mara")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ownerToken := signIn(t, s, srv, ownerID(ctx, t, s))
+	maraToken := signIn(t, s, srv, mara.ID)
+
+	finishedFor := func(token string) bool {
+		t.Helper()
+		lib := decode[[]bookJSON](t, do(t, http.MethodGet, srv.URL+"/library", token, nil))
+		if len(lib) != 1 {
+			t.Fatalf("library returned %d books, want 1 (the shelf is shared)", len(lib))
+		}
+		return lib[0].Finished
+	}
+
+	mark := func(token string, finished bool) {
+		t.Helper()
+		url := srv.URL + "/books/" + strconv.FormatInt(book.ID, 10) + "/finished"
+		if resp := do(t, http.MethodPut, url, token, map[string]bool{"finished": finished}); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("PUT finished=%t = %d, want 204", finished, resp.StatusCode)
+		}
+	}
+
+	// The owner finishes the book. Mara, who has never opened it, must not.
+	mark(ownerToken, true)
+	if !finishedFor(ownerToken) {
+		t.Fatal("owner's shelf does not show the book they just marked read")
+	}
+	if finishedFor(maraToken) {
+		t.Fatal("mara's shelf shows the book as read because the owner finished it")
+	}
+
+	// She reads it herself later; the owner clearing his mark leaves hers.
+	mark(maraToken, true)
+	mark(ownerToken, false)
+	if !finishedFor(maraToken) {
+		t.Fatal("mara's mark was cleared by the owner unmarking his")
+	}
+	if finishedFor(ownerToken) {
+		t.Fatal("owner's shelf still shows the book as read after unmarking")
+	}
+
+	// GET /books/{id} is what the reader polls, and must agree with the shelf.
+	one := decode[bookJSON](t, do(t, http.MethodGet, srv.URL+"/books/"+strconv.FormatInt(book.ID, 10), ownerToken, nil))
+	if one.Finished {
+		t.Fatal("GET /books/{id} reports finished for the owner, who unmarked it")
+	}
+}
+
 // TestDisplayNameRoundTrip covers the LYCM-700 local label folding into the
 // account: the name now lives on the server and follows the person.
 func TestDisplayNameRoundTrip(t *testing.T) {

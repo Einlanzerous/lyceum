@@ -38,10 +38,6 @@ type Book struct {
 	Series      string
 	SeriesIndex float64
 	AddedAt     time.Time
-	// FinishedAt is when the book was marked read, or nil when it is not
-	// finished. It is an explicit signal independent of reading progress, since
-	// epub.js progress rarely reaches 1.0 (back matter inflates the denominator).
-	FinishedAt *time.Time
 	// ReviewState is the ingest-QC lifecycle (LYCM-58): ReviewPublished (on the
 	// shelf) or ReviewPending (held for review because ingest flagged an issue).
 	// ReviewFlags carries the detected issue codes for a pending book.
@@ -100,7 +96,7 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // text columns are coalesced so they scan cleanly into Go strings.
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
 	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''),
-	COALESCE(series, ''), COALESCE(series_index, 0), added_at, finished_at,
+	COALESCE(series, ''), COALESCE(series_index, 0), added_at,
 	COALESCE(review_state, 'published'), review_flags`
 
 func scanBook(row pgx.Row) (Book, error) {
@@ -108,7 +104,7 @@ func scanBook(row pgx.Row) (Book, error) {
 	var reviewFlags []byte
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
 		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath,
-		&b.Series, &b.SeriesIndex, &b.AddedAt, &b.FinishedAt,
+		&b.Series, &b.SeriesIndex, &b.AddedAt,
 		&b.ReviewState, &reviewFlags)
 	if err != nil {
 		return Book{}, err
@@ -546,23 +542,66 @@ func (s *Store) UpdateBookMeta(ctx context.Context, id int64, title, author stri
 	return b, nil
 }
 
-// SetBookFinished marks a book read (finished_at = now) or clears it (NULL),
-// returning the updated row. Idempotent re-marks refresh the timestamp. Returns
-// ErrNotFound if the id is gone.
-func (s *Store) SetBookFinished(ctx context.Context, id int64, finished bool) (Book, error) {
-	var at any
+// SetBookFinished records that one user has finished a book, or clears that
+// record. Re-marking just refreshes the timestamp. Returns ErrNotFound if the
+// book id is gone.
+//
+// Finished-ness is the reader's, not the book's (LYCM-112): the shelf is shared
+// but being done with a book is not, exactly as with reading positions. It lived
+// on books.finished_at until migration 0014, from before accounts existed, and
+// one housemate marking a book read marked it read for the whole household.
+func (s *Store) SetBookFinished(ctx context.Context, bookID, userID int64, finished bool) error {
 	if finished {
-		at = time.Now().UTC()
+		// Sourcing the row from books rather than VALUES means a missing book id
+		// yields no row — and so ErrNotFound — instead of a foreign-key error.
+		var at time.Time
+		err := s.pool.QueryRow(ctx,
+			`INSERT INTO book_reads (book_id, user_id, finished_at)
+			 SELECT id, $2, now() FROM books WHERE id = $1
+			 ON CONFLICT (book_id, user_id) DO UPDATE SET finished_at = now()
+			 RETURNING finished_at`, bookID, userID).Scan(&at)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("store: set book finished: %w", err)
+		}
+		return nil
 	}
-	b, err := scanBook(s.pool.QueryRow(ctx,
-		`UPDATE books SET finished_at = $2 WHERE id = $1 RETURNING `+bookColumns, id, at))
+
+	// Un-marking deletes the row: book_reads records reads, and "unread" is the
+	// absence of one. The books CTE is what keeps a missing book id
+	// distinguishable from a book this user never marked — a bare DELETE reports
+	// zero rows for both. A data-modifying CTE runs to completion whether or not
+	// the outer query reads it, so the delete still happens.
+	var id int64
+	err := s.pool.QueryRow(ctx,
+		`WITH target AS (SELECT id FROM books WHERE id = $1),
+		      cleared AS (
+		          DELETE FROM book_reads
+		           WHERE book_id = (SELECT id FROM target) AND user_id = $2
+		      )
+		 SELECT id FROM target`, bookID, userID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Book{}, ErrNotFound
+		return ErrNotFound
 	}
 	if err != nil {
-		return Book{}, fmt.Errorf("store: set book finished: %w", err)
+		return fmt.Errorf("store: clear book finished: %w", err)
 	}
-	return b, nil
+	return nil
+}
+
+// IsBookFinished reports whether one user has marked a book read. A book id that
+// does not exist is simply not finished: callers have already resolved the book,
+// and there is no read state to report for one that is gone.
+func (s *Store) IsBookFinished(ctx context.Context, bookID, userID int64) (bool, error) {
+	var finished bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM book_reads WHERE book_id = $1 AND user_id = $2)`,
+		bookID, userID).Scan(&finished); err != nil {
+		return false, fmt.Errorf("store: is book finished: %w", err)
+	}
+	return finished, nil
 }
 
 // DeleteBook removes a book row and returns the deleted row so the caller can
