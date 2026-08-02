@@ -543,7 +543,7 @@ func (s *Store) UpdateBookMeta(ctx context.Context, id int64, title, author stri
 }
 
 // SetBookFinished records that one user has finished a book, or clears that
-// record. Re-marking just refreshes the timestamp. Returns ErrNotFound if the
+// record. Marking an already-marked book is a no-op. Returns ErrNotFound if the
 // book id is gone.
 //
 // Finished-ness is the reader's, not the book's (LYCM-112): the shelf is shared
@@ -554,11 +554,17 @@ func (s *Store) SetBookFinished(ctx context.Context, bookID, userID int64, finis
 	if finished {
 		// Sourcing the row from books rather than VALUES means a missing book id
 		// yields no row — and so ErrNotFound — instead of a foreign-key error.
+		//
+		// Marking a book already marked keeps the first finish date rather than
+		// re-stamping it: that date is the answer to "when did you finish this",
+		// and for a book carried over by migration 0014 it is the only surviving
+		// record of one. The no-op SET is what keeps the row RETURNING — DO NOTHING
+		// reports no rows, which this function would read as "no such book".
 		var at time.Time
 		err := s.pool.QueryRow(ctx,
 			`INSERT INTO book_reads (book_id, user_id, finished_at)
 			 SELECT id, $2, now() FROM books WHERE id = $1
-			 ON CONFLICT (book_id, user_id) DO UPDATE SET finished_at = now()
+			 ON CONFLICT (book_id, user_id) DO UPDATE SET finished_at = book_reads.finished_at
 			 RETURNING finished_at`, bookID, userID).Scan(&at)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound

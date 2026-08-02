@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -262,12 +263,29 @@ func TestSetBookFinished(t *testing.T) {
 		t.Fatal("book not finished after marking")
 	}
 
-	// Marking twice is not a conflict — it just re-stamps the row.
+	// Marking twice is not a conflict, and keeps the original finish date: for a
+	// book the 0014 back-fill carried over, re-stamping would erase the only
+	// record of when it was actually read.
+	var firstMark time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT finished_at FROM book_reads WHERE book_id = $1 AND user_id = $2`,
+		book.ID, owner).Scan(&firstMark); err != nil {
+		t.Fatalf("read finished_at: %v", err)
+	}
 	if err := s.SetBookFinished(ctx, book.ID, owner, true); err != nil {
 		t.Fatalf("SetBookFinished(true) again: %v", err)
 	}
 	if !isFinished("after re-marking") {
 		t.Fatal("book not finished after re-marking")
+	}
+	var secondMark time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT finished_at FROM book_reads WHERE book_id = $1 AND user_id = $2`,
+		book.ID, owner).Scan(&secondMark); err != nil {
+		t.Fatalf("read finished_at after re-marking: %v", err)
+	}
+	if !secondMark.Equal(firstMark) {
+		t.Fatalf("re-marking moved the finish date from %v to %v", firstMark, secondMark)
 	}
 
 	if err := s.SetBookFinished(ctx, book.ID, owner, false); err != nil {
