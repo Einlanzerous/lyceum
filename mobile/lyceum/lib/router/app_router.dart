@@ -8,6 +8,7 @@ import '../features/auth/sign_in_screen.dart';
 import '../features/household/household_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/reader/reader_screen.dart';
+import '../features/review/review_screen.dart';
 import '../features/scan/scan_screen.dart';
 import '../features/settings/settings_screen.dart';
 
@@ -96,6 +97,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/scan',
         name: 'scan',
         builder: (_, _) => const ScanScreen(),
+      ),
+      GoRoute(
+        path: '/review',
+        name: 'review',
+        builder: (_, _) => const ReviewScreen(),
       ),
       GoRoute(
         path: '/reader/:id',

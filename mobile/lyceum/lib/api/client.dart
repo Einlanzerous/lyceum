@@ -17,6 +17,11 @@ class ApiException implements Exception {
   bool get isUnauthorized => statusCode == 401;
   bool get isTooManyRequests => statusCode == 429;
 
+  /// A feature the server was built without, rather than a failure: cover
+  /// re-fetch answers 503 when no art source is configured (LYCM-58). Worth
+  /// telling apart, because "try again" is the wrong advice for it.
+  bool get isUnavailable => statusCode == 503;
+
   @override
   String toString() => 'ApiException($statusCode): $message';
 }
@@ -351,6 +356,86 @@ class LyceumClient {
   Future<void> deleteBook(int id) async {
     final r = await _http.delete(_uri('/books/$id')).timeout(timeout);
     if (r.statusCode != 204) _throw(r);
+  }
+
+  /// `GET /books/{id}` — one book's wire shape, for the review queue's
+  /// suspected-duplicate comparison (LYCM-113).
+  Future<Book> getBook(int id) async {
+    final r = await _http.get(_uri('/books/$id')).timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// `GET /ingest/review` — books ingest held back for a human look (LYCM-58),
+  /// newest first, each carrying its `review_flags`.
+  Future<List<Book>> listPendingReview() async {
+    final r = await _http.get(_uri('/ingest/review')).timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    final data = jsonDecode(r.body) as List<dynamic>;
+    return data
+        .map((e) => Book.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  /// `POST /books/{id}/approve` — publish a held book onto the shelf, clearing
+  /// its flags. Returns the updated book (200).
+  Future<Book> approveBook(int id) async {
+    final r = await _http.post(_uri('/books/$id/approve')).timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// `PATCH /books/{id}` — correct the title/author a converted file mangled
+  /// (LYCM-58). Title is required server-side; it does not change review state.
+  Future<Book> updateBookMeta(int id, String title, String author) async {
+    final r = await _http
+        .patch(
+          _uri('/books/$id'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'title': title, 'author': author}),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// `POST /books/{id}/cover/refetch` — re-derive the cover from the external
+  /// art source. **503** when the server has no cover fetcher configured and
+  /// **404** when the source has nothing for this book; both are ordinary
+  /// answers rather than faults, and the screen says so.
+  Future<Book> refetchCover(int id) async {
+    final r = await _http
+        .post(_uri('/books/$id/cover/refetch'))
+        .timeout(timeout);
+    if (r.statusCode != 200) _throw(r);
+    return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  /// `POST /books/{id}/cover` — replace the cover with an uploaded image
+  /// (multipart, field `file`). The server normalizes it before storing, so the
+  /// bytes served afterwards are not the bytes sent.
+  Future<Book> replaceCover(
+    int id, {
+    required String filename,
+    String? path,
+    List<int>? bytes,
+  }) async {
+    final req = http.MultipartRequest('POST', _uri('/books/$id/cover'));
+    if (bytes != null) {
+      req.files.add(
+        http.MultipartFile.fromBytes('file', bytes, filename: filename),
+      );
+    } else if (path != null) {
+      req.files.add(
+        await http.MultipartFile.fromPath('file', path, filename: filename),
+      );
+    } else {
+      throw ArgumentError('replaceCover needs either bytes or a path');
+    }
+    final streamed = await _http.send(req).timeout(timeout);
+    final r = await http.Response.fromStream(streamed);
+    if (r.statusCode != 200) _throw(r);
+    return Book.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
   }
 
   /// `POST /ingest/batches` — flush a set of scanned ISBNs as one review batch

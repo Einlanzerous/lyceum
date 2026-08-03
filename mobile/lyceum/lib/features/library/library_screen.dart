@@ -8,6 +8,7 @@ import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../widgets/brand_mark.dart';
+import '../review/review_controller.dart';
 import '../settings/server_settings.dart';
 import 'book_card.dart';
 import 'library_controller.dart';
@@ -83,6 +84,17 @@ class _TopBar extends ConsumerWidget {
           const BrandMark(),
           const Spacer(),
           if (ref.watch(hasBackendProvider)) ...[
+            // Only offered when something is actually waiting. An always-present
+            // entry to a screen that reads "nothing to review" most of the time
+            // is a permanent nudge about a job that is already done.
+            if (ref.watch(pendingReviewCountProvider) > 0) ...[
+              _IconPill(
+                icon: Icons.rate_review_outlined,
+                badge: ref.watch(pendingReviewCountProvider),
+                onTap: () => context.push('/review'),
+              ),
+              const SizedBox(width: 10),
+            ],
             _IconPill(
               icon: Icons.qr_code_scanner,
               onTap: () => context.push('/scan'),
@@ -111,24 +123,60 @@ class _TopBar extends ConsumerWidget {
 }
 
 /// Small circular icon button (used for the grid/list toggle in the header).
+///
+/// [badge] draws a count over the corner when non-null and positive — the review
+/// queue's "how many are waiting".
 class _IconPill extends StatelessWidget {
-  const _IconPill({required this.icon, required this.onTap});
+  const _IconPill({required this.icon, required this.onTap, this.badge});
   final IconData icon;
   final VoidCallback onTap;
+  final int? badge;
   @override
   Widget build(BuildContext context) {
     final lyc = context.lyc;
+    final count = badge ?? 0;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: lyc.borderStrong),
-        ),
-        child: Icon(icon, size: 18, color: lyc.muted),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          _pill(lyc),
+          if (count > 0)
+            Positioned(
+              top: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                constraints: const BoxConstraints(minWidth: 18),
+                decoration: BoxDecoration(
+                  color: lyc.brass,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$count',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: lyc.onBrass,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
+    );
+  }
+
+  Widget _pill(LyceumPalette lyc) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: lyc.borderStrong),
+      ),
+      child: Icon(icon, size: 18, color: lyc.muted),
     );
   }
 }
