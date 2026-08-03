@@ -22,7 +22,12 @@ class ReviewController extends AsyncNotifier<List<Book>> {
   }
 
   Future<void> refresh() async {
-    state = const AsyncLoading();
+    // No AsyncLoading here. Blanking the state swaps the whole queue for the
+    // "Loading…" note, which on a pull-to-refresh reads as though everything
+    // just left the queue — and the RefreshIndicator is already drawing the
+    // spinner. The rows simply stay put until the new list lands.
+    // (copyWithPrevious would say this more explicitly, but it is
+    // package-internal in riverpod 3.3.2.)
     state = await AsyncValue.guard(
       () => ref.read(lyceumClientProvider).listPendingReview(),
     );
@@ -117,10 +122,23 @@ final pendingReviewCountProvider = Provider<int>(
 /// Fetched per id rather than per row, so three copies of one book cost one
 /// request. Null when that book has since been deleted — the flag outlives the
 /// pointer by design, and the card says so instead of showing nothing.
-final duplicateOfProvider = FutureProvider.family<Book?, int>((ref, id) async {
-  try {
-    return await ref.watch(lyceumClientProvider).getBook(id);
-  } catch (_) {
-    return null;
-  }
-});
+final duplicateOfProvider = FutureProvider.autoDispose.family<Book?, int>(
+  // No automatic retry. riverpod 3 retries a failed provider on a backoff by
+  // default, which here means a 500 is quietly re-requested behind a panel that
+  // has already told the reader to pull to refresh — two mechanisms racing at
+  // the same job, one of them invisible. The refresh is the retry.
+  retry: (_, _) => null,
+  (ref, id) async {
+    try {
+      return await ref.watch(lyceumClientProvider).getBook(id);
+    } on ApiException catch (e) {
+      // 404 is the answer, not a fault: the matched book was deleted, and the
+      // panel says so. Anything else — a 500, a timeout, a dropped
+      // connection — must surface as an error instead, because the "deleted"
+      // copy tells someone to approve a book the server is still holding as a
+      // duplicate, at the moment the app knows least.
+      if (e.isNotFound) return null;
+      rethrow;
+    }
+  },
+);

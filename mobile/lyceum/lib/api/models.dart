@@ -62,8 +62,6 @@ class Book {
   /// outlive its pointer — the review UI has to handle the flag alone.
   final int? duplicateOf;
 
-  bool get isPending => reviewState == 'pending';
-
   bool get hasCover => coverUrl.isNotEmpty;
 
   Book copyWith({bool? finished}) => Book(

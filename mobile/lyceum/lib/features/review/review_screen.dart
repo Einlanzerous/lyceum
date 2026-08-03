@@ -71,7 +71,12 @@ class ReviewScreen extends ConsumerWidget {
                 ],
                 AsyncData(:final value) => [
                   for (final b in value) ...[
-                    _ReviewCard(book: b),
+                    // Keyed by id, not position. Without this Flutter reconciles
+                    // the rows by index, so approving one book hands its State —
+                    // including the edit fields, which initialize once — to the
+                    // book that moves up into its slot. Saving that card would
+                    // then write the approved book's title onto a different one.
+                    _ReviewCard(key: ValueKey(b.id), book: b),
                     const SizedBox(height: 16),
                   ],
                 ],
@@ -93,7 +98,7 @@ String _message(Object error) => switch (error) {
 };
 
 class _ReviewCard extends ConsumerStatefulWidget {
-  const _ReviewCard({required this.book});
+  const _ReviewCard({super.key, required this.book});
   final Book book;
 
   @override
@@ -114,6 +119,15 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
   String? _busy;
   String? _error;
 
+  /// Bumped whenever this card changes the cover bytes.
+  ///
+  /// A replaced or re-fetched cover keeps its URL — the id is stable and the
+  /// server writes new bytes underneath it — and Flutter's image cache is keyed
+  /// on (url, scale), so without a changing query the screen keeps showing the
+  /// old picture and the re-fetch looks like it did nothing. Which is the whole
+  /// point of the button for a book held on low_quality_cover.
+  int _coverBust = 0;
+
   @override
   void dispose() {
     _title.dispose();
@@ -123,39 +137,49 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
 
   /// Runs one card action, holding the card busy and surfacing any failure
   /// inline rather than as a toast that outlives the row it was about.
-  Future<void> _run(String label, Future<void> Function() action) async {
+  /// [progress] and [verb] are separate because one string cannot be both:
+  /// "Working… (cover)" and "Could not cover." are what a single label buys.
+  Future<void> _run(
+    String progress,
+    String verb,
+    Future<void> Function() action,
+  ) async {
     setState(() {
-      _busy = label;
+      _busy = progress;
       _error = null;
     });
     try {
       await action();
     } catch (e) {
-      if (mounted) setState(() => _error = _actionMessage(e, label));
+      if (mounted) setState(() => _error = _actionMessage(e, verb));
     } finally {
       if (mounted) setState(() => _busy = null);
     }
   }
 
-  String _actionMessage(Object e, String label) => switch (e) {
+  String _actionMessage(Object e, String verb) => switch (e) {
     // 503 is a server built without an art source, not a transient fault, so
     // "try again" would be the wrong advice.
     ApiException(isUnavailable: true) =>
       'This server has no cover art source configured.',
-    ApiException(isNotFound: true) when label == 'cover' =>
+    ApiException(isNotFound: true) when verb.contains('cover') =>
       'No cover art found for this book.',
     ApiException(:final message) when message.isNotEmpty => message,
-    _ => 'Could not $label.',
+    // Timeouts and socket errors land here — the likeliest failure of the lot.
+    _ => 'Could not $verb.',
   };
 
   /// Approve and delete both take the book out of the queue, and approve puts it
   /// on the shelf — so the library is re-read either way rather than left
   /// showing a stale grid.
-  Future<void> _leaveQueue(String label, Future<void> Function() action) =>
-      _run(label, () async {
-        await action();
-        ref.invalidate(libraryControllerProvider);
-      });
+  Future<void> _leaveQueue(
+    String progress,
+    String verb,
+    Future<void> Function() action,
+  ) => _run(progress, verb, () async {
+    await action();
+    ref.invalidate(libraryControllerProvider);
+  });
 
   Future<void> _pickCover() async {
     const images = XTypeGroup(
@@ -170,12 +194,12 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
     // one shape.
     final bytes = await file.readAsBytes();
     if (!mounted) return;
-    await _run(
-      'upload the cover',
-      () => ref
+    await _run('Uploading the cover', 'upload the cover', () async {
+      await ref
           .read(reviewControllerProvider.notifier)
-          .replaceCover(widget.book.id, filename: file.name, bytes: bytes),
-    );
+          .replaceCover(widget.book.id, filename: file.name, bytes: bytes);
+      if (mounted) setState(() => _coverBust++);
+    });
   }
 
   @override
@@ -197,7 +221,7 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Cover(book: b, width: 72),
+              _Cover(book: b, width: 72, bust: _coverBust),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -237,7 +261,8 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                 'Save details',
                 enabled: !busy,
                 onTap: () => _run(
-                  'save',
+                  'Saving the details',
+                  'save the details',
                   () => ref
                       .read(reviewControllerProvider.notifier)
                       .saveMeta(b.id, _title.text.trim(), _author.text.trim()),
@@ -247,10 +272,14 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                 'Re-fetch cover',
                 enabled: !busy,
                 onTap: () => _run(
-                  'cover',
-                  () => ref
-                      .read(reviewControllerProvider.notifier)
-                      .refetchCover(b.id),
+                  'Re-fetching the cover',
+                  're-fetch the cover',
+                  () async {
+                    await ref
+                        .read(reviewControllerProvider.notifier)
+                        .refetchCover(b.id);
+                    if (mounted) setState(() => _coverBust++);
+                  },
                 ),
               ),
               _Action('Upload cover', enabled: !busy, onTap: _pickCover),
@@ -261,7 +290,8 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                 enabled: !busy,
                 primary: true,
                 onTap: () => _leaveQueue(
-                  'approve',
+                  'Approving',
+                  'approve this book',
                   () =>
                       ref.read(reviewControllerProvider.notifier).approve(b.id),
                 ),
@@ -276,7 +306,8 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                   final ok = await _confirmDelete(context, b.title);
                   if (!ok) return;
                   await _leaveQueue(
-                    'delete',
+                    'Deleting',
+                    'delete this book',
                     () => ref
                         .read(reviewControllerProvider.notifier)
                         .discard(b.id),
@@ -287,7 +318,7 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
           ),
           if (_busy != null) ...[
             const SizedBox(height: 10),
-            Text('Working… ($_busy)', style: TextStyle(color: lyc.muted)),
+            Text('$_busy…', style: TextStyle(color: lyc.muted)),
           ] else if (_error != null) ...[
             const SizedBox(height: 10),
             Text(_error!, style: TextStyle(color: lyc.error)),
@@ -354,38 +385,59 @@ class _DuplicatePanel extends ConsumerWidget {
             style: TextStyle(color: lyc.muted, height: 1.4),
           ),
           const SizedBox(height: 12),
-          switch (match) {
-            AsyncData(value: final other?) => Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _DuplicateSide(
-                    tag: 'Already on the shelf',
-                    book: other,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _DuplicateSide(
-                    tag: 'This one, held',
-                    book: book,
-                    highlight: true,
-                  ),
-                ),
-              ],
-            ),
-            AsyncData() => Text(
-              'The book this matched has since been deleted, so there is '
-              'probably nothing left to decide — approve it onto the shelf.',
-              style: TextStyle(color: lyc.muted, height: 1.4),
-            ),
-            _ => Text(
-              'Loading the other copy…',
-              style: TextStyle(color: lyc.muted),
-            ),
-          },
+          _body(match, lyc),
         ],
       ),
+    );
+  }
+
+  /// The panel's body, in one of four states.
+  ///
+  /// Written against hasError/hasValue rather than the AsyncValue subtype:
+  /// riverpod 3 retries a failed provider by default, so a failed lookup spends
+  /// its time in loading-or-retrying states that carry the error alongside.
+  /// Matching on `AsyncError()` alone left a 500 reading "Loading the other
+  /// copy…" indefinitely.
+  Widget _body(AsyncValue<Book?> match, LyceumPalette lyc) {
+    // Checked before the value: "it was deleted, go ahead and approve" is
+    // confident advice about a book the server is still holding as a duplicate,
+    // and giving it because a request failed would be advice from ignorance.
+    if (match.hasError) {
+      return Text(
+        "Couldn't load the other copy just now, so this pair can't be "
+        'compared. Pull to refresh.',
+        style: TextStyle(color: lyc.error, height: 1.4),
+      );
+    }
+    if (!match.hasValue) {
+      return Text(
+        'Loading the other copy…',
+        style: TextStyle(color: lyc.muted),
+      );
+    }
+    final other = match.value;
+    if (other == null) {
+      return Text(
+        'The book this matched has since been deleted, so there is probably '
+        'nothing left to decide — approve it onto the shelf.',
+        style: TextStyle(color: lyc.muted, height: 1.4),
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _DuplicateSide(tag: 'Already on the shelf', book: other),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _DuplicateSide(
+            tag: 'This one, held',
+            book: book,
+            highlight: true,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -426,9 +478,14 @@ class _DuplicateSide extends StatelessWidget {
 }
 
 class _Cover extends ConsumerWidget {
-  const _Cover({required this.book, required this.width});
+  const _Cover({required this.book, required this.width, this.bust = 0});
   final Book book;
   final double width;
+
+  /// Cache-buster for a cover this session has just rewritten. Left at 0 — and
+  /// so off the URL entirely — for a book nothing has touched, which keeps the
+  /// cache key identical to the one the library grid already fetched under.
+  final int bust;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -449,12 +506,10 @@ class _Cover extends ConsumerWidget {
         height: width * 600 / 366, // the shelf's cover aspect
         child: book.hasCover
             ? CoverImage(
-                // The bytes change under a stable id when a cover is replaced or
-                // re-fetched, so the URL carries the book's flags as a cache
-                // buster — otherwise the card keeps showing the old image.
-                url:
-                    '${ref.watch(lyceumClientProvider).coverUrl(book.id)}'
-                    '?v=${book.reviewFlags.join()}',
+                url: [
+                  ref.watch(lyceumClientProvider).coverUrl(book.id),
+                  if (bust > 0) '?v=$bust',
+                ].join(),
                 fallback: placeholder,
               )
             : placeholder,

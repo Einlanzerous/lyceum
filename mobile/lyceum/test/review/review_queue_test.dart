@@ -30,6 +30,7 @@ void main() {
       'author': 'Weis & Hickman # 3',
       'review_state': 'pending',
       'review_flags': ['no_isbn', 'suspicious_title'],
+      'cover_url': '/books/12/cover',
     },
     {
       'id': 13,
@@ -51,6 +52,7 @@ void main() {
   late List<String> calls;
   var approveStatus = 200;
   var refetchStatus = 200;
+  var matchStatus = 200;
 
   Future<http.Response> serving(http.Request req) async {
     calls.add('${req.method} ${req.url.path}');
@@ -58,7 +60,10 @@ void main() {
     return switch ('${req.method} ${req.url.path}') {
       'GET /ingest/review' => http.Response(queue, 200, headers: json()),
       'GET /library' => http.Response('[]', 200, headers: json()),
-      'GET /books/4' => http.Response(onShelf, 200, headers: json()),
+      'GET /books/4' =>
+        matchStatus == 200
+            ? http.Response(onShelf, 200, headers: json())
+            : http.Response('boom', matchStatus),
       'POST /books/12/approve' =>
         approveStatus == 200
             ? http.Response(
@@ -86,7 +91,16 @@ void main() {
       'POST /books/12/cover/refetch' =>
         refetchStatus == 200
             ? http.Response(
-                jsonEncode({'id': 12, 'title': 'x', 'author': 'y'}),
+                // A real re-fetch answers with the whole book, cover_url
+                // included — the bytes changed underneath a URL that did not.
+                jsonEncode({
+                  'id': 12,
+                  'title': 'D&D - Dragonlance - Chronicles 03',
+                  'author': 'Weis & Hickman # 3',
+                  'cover_url': '/books/12/cover',
+                  'review_state': 'pending',
+                  'review_flags': ['no_isbn', 'suspicious_title'],
+                }),
                 200,
                 headers: json(),
               )
@@ -132,6 +146,7 @@ void main() {
     calls = [];
     approveStatus = 200;
     refetchStatus = 200;
+    matchStatus = 200;
   });
 
   testWidgets('lists held books with their flags as readable labels', (
@@ -256,6 +271,58 @@ void main() {
     expect(find.text('Delete this copy'), findsOneWidget);
   });
 
+  testWidgets('the surviving card keeps its own book after one is approved', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+
+    // Unkeyed rows reconcile by position, so the card that moves up inherits the
+    // approved card's State — and its edit fields, which initialize once and
+    // never re-sync. Saving that card would then write the approved book's title
+    // onto a different book, with nothing on screen to suggest it.
+    await tester.tap(find.text('Approve'));
+    await tester.pumpAndSettle();
+
+    final fields = tester
+        .widgetList<TextField>(find.byType(TextField))
+        .map((f) => f.controller!.text)
+        .toList();
+    expect(fields, ['Piranesi', 'Clarke, Susanna']);
+
+    // And saving sends the surviving book's own values.
+    await tester.tap(find.text('Save details'));
+    await tester.pumpAndSettle();
+    expect(calls, isNot(contains('PATCH /books/12')));
+  });
+
+  testWidgets('a re-fetched cover is actually re-requested', (tester) async {
+    await pumpScreen(tester);
+
+    String coverUrl() => tester
+        .widgetList<Image>(find.byType(Image))
+        .map((i) => (i.image as NetworkImage).url)
+        .firstWhere((u) => u.contains('/books/12/cover'));
+
+    final before = coverUrl();
+    await tester.tap(find.text('Re-fetch cover').first);
+    await tester.pumpAndSettle();
+
+    // Flutter's image cache is keyed on the URL, so an unchanged URL means the
+    // old bytes stay on screen and the button looks like it did nothing — which
+    // is the entire point of it for a book held on low_quality_cover.
+    expect(coverUrl(), isNot(before));
+  });
+
+  testWidgets('a failed lookup of the other copy does not advise approving', (
+    tester,
+  ) async {
+    matchStatus = 500;
+    await pumpScreen(tester);
+
+    expect(find.textContaining('has since been deleted'), findsNothing);
+    expect(find.textContaining("Couldn't load the other copy"), findsOneWidget);
+  });
+
   test('the pending count backs the library badge', () async {
     final c = await container();
     // Zero before the queue has loaded: the badge invites you to go and look,
@@ -288,10 +355,6 @@ void main() {
       await c.read(reviewControllerProvider.future);
       // Loading the queue must not drag the shelf in behind it.
       expect(calls, isNot(contains('GET /library')));
-      expect(
-        c.read(libraryControllerProvider),
-        isA<AsyncValue<List<dynamic>>>(),
-      );
     },
   );
 }
