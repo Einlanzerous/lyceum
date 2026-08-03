@@ -14,6 +14,9 @@ class Book {
     this.series,
     this.seriesIndex,
     this.finished = false,
+    this.reviewState,
+    this.reviewFlags = const [],
+    this.duplicateOf,
   });
 
   final int id;
@@ -42,6 +45,25 @@ class Book {
   /// True when the book has been explicitly marked read (independent of progress).
   final bool finished;
 
+  /// Ingest-QC state (LYCM-58): `"pending"` for a book held off the shelf,
+  /// null for one already on it. The shelf query filters pending books out
+  /// server-side, so only the review queue ever sees a non-null value.
+  final String? reviewState;
+
+  /// Stable issue codes for a pending book — `no_isbn`, `no_cover`,
+  /// `low_quality_cover`, `suspicious_title`, `possible_duplicate`. Empty for a
+  /// published book. Unknown codes are shown verbatim rather than dropped: a
+  /// server newer than the app is the normal case for a self-hosted install,
+  /// and a flag nobody can see is worse than an ugly one.
+  final List<String> reviewFlags;
+
+  /// The book this one is a suspected copy of (LYCM-113), or null. Nulled
+  /// server-side once that book is deleted, so a `possible_duplicate` flag can
+  /// outlive its pointer — the review UI has to handle the flag alone.
+  final int? duplicateOf;
+
+  bool get isPending => reviewState == 'pending';
+
   bool get hasCover => coverUrl.isNotEmpty;
 
   Book copyWith({bool? finished}) => Book(
@@ -55,6 +77,9 @@ class Book {
     series: series,
     seriesIndex: seriesIndex,
     finished: finished ?? this.finished,
+    reviewState: reviewState,
+    reviewFlags: reviewFlags,
+    duplicateOf: duplicateOf,
   );
 
   factory Book.fromJson(Map<String, dynamic> json) => Book(
@@ -68,6 +93,12 @@ class Book {
     series: json['series'] as String?,
     seriesIndex: (json['series_index'] as num?)?.toDouble(),
     finished: (json['finished'] as bool?) ?? false,
+    reviewState: json['review_state'] as String?,
+    reviewFlags: [
+      for (final f in (json['review_flags'] as List<dynamic>? ?? const []))
+        if (f is String) f,
+    ],
+    duplicateOf: (json['duplicate_of'] as num?)?.toInt(),
   );
 }
 
