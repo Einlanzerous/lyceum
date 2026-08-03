@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/Einlanzerous/lyceum/compare/v1.8.0...v1.9.0) (2026-08-03)
+
+
+### Features
+
+* **mobile:** ingest QC review queue on Android (LYCM-72) ([#74](https://github.com/Einlanzerous/lyceum/issues/74)) ([78e8d57](https://github.com/Einlanzerous/lyceum/commit/78e8d579a5363514dfa857045e9824e0d8f56a70))
+
 ## [1.8.0](https://github.com/Einlanzerous/lyceum/compare/v1.7.4...v1.8.0) (2026-08-03)
 
 
