@@ -119,8 +119,9 @@ function coverSrcFor(b: Book): string {
 /** Remove a row from the list once it leaves the queue (approve/delete). */
 function drop(id: number): void {
   books.value = books.value.filter((b) => b.id !== id)
-  const { [id]: _gone, ...rest } = matches.value
-  matches.value = rest
+  const remaining = { ...matches.value }
+  delete remaining[id]
+  matches.value = remaining
 }
 
 async function run(id: number, action: string, fn: () => Promise<void>): Promise<void> {
