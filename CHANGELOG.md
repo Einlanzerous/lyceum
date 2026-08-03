@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0](https://github.com/Einlanzerous/lyceum/compare/v1.7.4...v1.8.0) (2026-08-03)
+
+
+### Features
+
+* **ingest:** hold a second copy of a book for review (LYCM-113) ([#73](https://github.com/Einlanzerous/lyceum/issues/73)) ([c0dd211](https://github.com/Einlanzerous/lyceum/commit/c0dd211dc700219ac333f8de1eaf010129700d9c))
+
+
+### Performance Improvements
+
+* **library:** batch each reader's positions and read marks (LYCM-115) ([#72](https://github.com/Einlanzerous/lyceum/issues/72)) ([cca820a](https://github.com/Einlanzerous/lyceum/commit/cca820ab88de5333061a4d0547e31e9e33755432))
+
+
+### Maintenance
+
+* **db:** drop the vestigial books.finished_at column (LYCM-114) ([#70](https://github.com/Einlanzerous/lyceum/issues/70)) ([3a95a7e](https://github.com/Einlanzerous/lyceum/commit/3a95a7ef51b9f4968b8a590ff1fa5f215a88c444))
+
 ## [1.7.4](https://github.com/Einlanzerous/lyceum/compare/v1.7.3...v1.7.4) (2026-08-02)
 
 
