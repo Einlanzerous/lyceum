@@ -297,6 +297,10 @@ func main() {
 		runBackfillCovers(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "find-duplicates" {
+		runFindDuplicates(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "set-series" {
 		runSetSeries(os.Args[2:])
 		return

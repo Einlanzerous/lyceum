@@ -43,6 +43,11 @@ type Book struct {
 	// ReviewFlags carries the detected issue codes for a pending book.
 	ReviewState string
 	ReviewFlags []string
+	// DuplicateOf is the id of the book this one looks like another copy of,
+	// set when ingest held it for review with FlagPossibleDuplicate (LYCM-113).
+	// 0 when the book is not a suspected duplicate, and again once the book it
+	// pointed at is deleted — the FK nulls it rather than cascading.
+	DuplicateOf int64
 }
 
 // Ingest-QC review states (LYCM-58). A flagged new ingest lands ReviewPending and
@@ -97,7 +102,7 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 const bookColumns = `id, title, COALESCE(author, ''), COALESCE(cover_path, ''),
 	file_path, file_hash, COALESCE(size_bytes, 0), COALESCE(source_path, ''),
 	COALESCE(series, ''), COALESCE(series_index, 0), added_at,
-	COALESCE(review_state, 'published'), review_flags`
+	COALESCE(review_state, 'published'), review_flags, COALESCE(duplicate_of, 0)`
 
 func scanBook(row pgx.Row) (Book, error) {
 	var b Book
@@ -105,7 +110,7 @@ func scanBook(row pgx.Row) (Book, error) {
 	err := row.Scan(&b.ID, &b.Title, &b.Author, &b.CoverPath,
 		&b.FilePath, &b.FileHash, &b.SizeBytes, &b.SourcePath,
 		&b.Series, &b.SeriesIndex, &b.AddedAt,
-		&b.ReviewState, &reviewFlags)
+		&b.ReviewState, &reviewFlags, &b.DuplicateOf)
 	if err != nil {
 		return Book{}, err
 	}
@@ -129,14 +134,14 @@ func (s *Store) InsertBook(ctx context.Context, b Book) (Book, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	inserted, err := scanBook(tx.QueryRow(ctx,
-		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path, series, series_index, review_state, review_flags)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'published'), $11::jsonb)
+		`INSERT INTO books (title, author, cover_path, file_path, file_hash, size_bytes, source_path, series, series_index, review_state, review_flags, duplicate_of)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE(NULLIF($10, ''), 'published'), $11::jsonb, $12)
 		 ON CONFLICT (file_hash) DO NOTHING
 		 RETURNING `+bookColumns,
 		b.Title, nullString(b.Author), nullString(b.CoverPath),
 		b.FilePath, b.FileHash, b.SizeBytes, nullString(NormalizeSourcePath(b.SourcePath)),
 		nullString(b.Series), nullFloat(b.SeriesIndex),
-		b.ReviewState, marshalFlags(b.ReviewFlags)))
+		b.ReviewState, marshalFlags(b.ReviewFlags), nullInt64(b.DuplicateOf)))
 	switch {
 	case err == nil:
 		if err := tx.Commit(ctx); err != nil {
@@ -339,6 +344,77 @@ func (s *Store) GetFurthestPosition(ctx context.Context, bookID, userID int64) (
 		return ReadingPosition{}, fmt.Errorf("store: get furthest position: %w", err)
 	}
 	return p, nil
+}
+
+// BookIdentity is the slice of a book that duplicate matching compares
+// (LYCM-113). It mirrors dedup.Candidate but is declared here so the store stays
+// a data layer: every other method in this file returns store types, and having
+// the lowest layer import a matching package to name its own rows inverts that.
+type BookIdentity struct {
+	ID          int64
+	Title       string
+	Author      string
+	Series      string
+	SeriesIndex float64
+	// WorkID is the resolver work key from the book's inventory row, or "" when
+	// it has no ISBN the resolver recognised.
+	WorkID string
+}
+
+// SetDuplicateOf points a held book at the one it looks like a copy of, or
+// clears the pointer with 0 (LYCM-113).
+//
+// Separate from InsertBook because duplicate_of is a self-FK: writing it as part
+// of the insert makes a match deleted in the meantime fail the entire ingest,
+// and on the folder path that parks the file in the watcher's bad-signature set
+// until it changes. Here the failure costs only the pointer.
+func (s *Store) SetDuplicateOf(ctx context.Context, id, duplicateOf int64) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE books SET duplicate_of = $2 WHERE id = $1`, id, nullInt64(duplicateOf)); err != nil {
+		return fmt.Errorf("store: set duplicate of: %w", err)
+	}
+	return nil
+}
+
+// ListDedupCandidates returns every book's identity for duplicate matching
+// (LYCM-113): the fields dedup.Find compares, plus the resolver work key the
+// book's inventory row carries.
+//
+// It returns pending books too. Two copies of one work can arrive back to back,
+// and the second must match the first even while the first is still sitting in
+// the review queue — otherwise a batch of re-downloads queues up as a row of
+// unrelated-looking holds.
+//
+// DISTINCT ON because inventory.book_id is indexed but not unique: one book can
+// carry several ISBN rows (LYCM-35 groups editions), and a plain join would
+// return it once per row. Ordering work_id descending with nulls last means a
+// book with any resolved work key contributes it rather than an empty string.
+func (s *Store) ListDedupCandidates(ctx context.Context) ([]BookIdentity, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT ON (b.id)
+		        b.id, b.title, COALESCE(b.author, ''),
+		        COALESCE(b.series, ''), COALESCE(b.series_index, 0),
+		        COALESCE(i.work_id, '')
+		   FROM books b
+		   LEFT JOIN inventory i ON i.book_id = b.id
+		  ORDER BY b.id, i.work_id DESC NULLS LAST`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list dedup candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BookIdentity
+	for rows.Next() {
+		var c BookIdentity
+		if err := rows.Scan(&c.ID, &c.Title, &c.Author, &c.Series, &c.SeriesIndex, &c.WorkID); err != nil {
+			return nil, fmt.Errorf("store: scan dedup candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list dedup candidates: %w", err)
+	}
+	return out, nil
 }
 
 // ListFurthestPositions returns one user's furthest position in every book they
@@ -569,7 +645,8 @@ func (s *Store) UpdateBookSeries(ctx context.Context, id int64, series string, i
 // row, or ErrNotFound if the id is gone.
 func (s *Store) ApproveBook(ctx context.Context, id int64) (Book, error) {
 	b, err := scanBook(s.pool.QueryRow(ctx,
-		`UPDATE books SET review_state = 'published', review_flags = '[]'::jsonb
+		`UPDATE books SET review_state = 'published', review_flags = '[]'::jsonb,
+		        duplicate_of = NULL
 		 WHERE id = $1 RETURNING `+bookColumns, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Book{}, ErrNotFound
@@ -726,6 +803,15 @@ func nullString(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullInt64 maps 0 to a SQL NULL, so an absent row reference stays NULL rather
+// than pointing at a book id that cannot exist.
+func nullInt64(i int64) any {
+	if i == 0 {
+		return nil
+	}
+	return i
 }
 
 // nullFloat maps 0 to a SQL NULL so an unknown series index stays NULL rather

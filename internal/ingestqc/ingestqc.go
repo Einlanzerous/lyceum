@@ -24,6 +24,12 @@ const (
 	FlagNoCover         = "no_cover"
 	FlagLowQualityCover = "low_quality_cover"
 	FlagSuspiciousTitle = "suspicious_title"
+	// FlagPossibleDuplicate marks a book that looks like another copy of one
+	// already in the library (LYCM-113). Unlike the flags above it is not
+	// decided by Detect: it needs the rest of the shelf to compare against, so
+	// ingest adds it after asking internal/dedup, and the flagged book carries
+	// books.duplicate_of pointing at what it matched.
+	FlagPossibleDuplicate = "possible_duplicate"
 )
 
 // Cover-quality thresholds for FlagLowQualityCover, measured on the source cover
