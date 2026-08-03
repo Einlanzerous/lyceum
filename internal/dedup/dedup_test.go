@@ -227,3 +227,49 @@ func TestFindWorkIDRespectsSeriesVolumes(t *testing.T) {
 		t.Errorf("reissue of volume 1 = %+v (ok=%v), want a work-key match", m, ok)
 	}
 }
+
+// TestNormalizeJapaneseTitles pins the boundary this package draws around
+// Japanese, which the Latin-only accent folding in fold() makes subtle.
+//
+// The dakuten case is covered by TestFoldKeepsNonLatinCombiningMarks from the
+// other side — that a mark is never dropped. This is the half that matters for
+// finding real duplicates: the *same* word spelled two ways still has to match.
+func TestNormalizeJapaneseTitles(t *testing.T) {
+	cases := []struct {
+		name    string
+		a, b    string
+		wantSam bool
+	}{
+		// The LYCM-109 axis reaching Japanese: が is one code point in NFC and
+		// か + U+3099 in NFD, and two EPUB packagers will disagree about which
+		// to emit for the same book. Decomposing before comparing is what makes
+		// these one title rather than two shelf entries.
+		{"precomposed vs decomposed dakuten", "が", "が", true},
+		{"handakuten too", "ぱ", "ぱ", true},
+		// Punctuation folds the same way it does in Latin, so a title that
+		// carries the ideographic full stop matches one that drops it.
+		{"ideographic full stop", "君の名は。", "君の名は", true},
+		{"kanji title round-trips", "星を継ぐもの", "星を継ぐもの", true},
+
+		// Known boundaries, recorded rather than defended. Both are *missed*
+		// duplicates, never invented ones, which is the side of the line this
+		// package deliberately errs on — a miss leaves the shelf as it is and the
+		// next scan asks again.
+		//
+		// Folding either would take NFKD instead of NFD, which also rewrites ①
+		// as 1 and splits ligatures. That is a real trade, not a free win, so it
+		// is a decision to make on purpose. If it is ever made, these two
+		// expectations flip and this comment is the reason to look.
+		{"katakana is not folded to hiragana", "バカ", "ばか", false},
+		{"half-width katakana is not folded", "ハンター", "ﾊﾝﾀｰ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := NormalizeTitle(tc.a), NormalizeTitle(tc.b)
+			if (a == b) != tc.wantSam {
+				t.Errorf("NormalizeTitle(%q)=%q, NormalizeTitle(%q)=%q; equal=%v want %v",
+					tc.a, a, tc.b, b, a == b, tc.wantSam)
+			}
+		})
+	}
+}
