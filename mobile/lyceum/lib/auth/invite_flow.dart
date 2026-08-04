@@ -37,11 +37,18 @@ Future<void> runInviteReveal(
   onMinted?.call();
 
   // Offer the key as a scannable QR too, pointing at this library's sign-in route
-  // (LYCM-88). An empty server URL (shouldn't happen once signed in) omits the QR.
+  // (LYCM-88).
+  //
+  // The server's own answer wins when it has one (LYCM-102): the address *this*
+  // phone happens to use may be a LAN one, and handing that out as a QR produces
+  // an invite that works only for someone already on the network — which is
+  // precisely not the person being invited. Falling back to the configured
+  // address keeps LAN and dev working, where it is the only address there is. An
+  // empty server URL (shouldn't happen once signed in) omits the QR.
   final serverUrl = ref.read(serverUrlProvider);
-  final signInUrl = serverUrl.isEmpty
-      ? null
-      : inviteSignInUrl(serverUrl, invite.token);
+  final signInUrl =
+      invite.signInUrl ??
+      (serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token));
 
   final result = await showInviteReveal(
     context,

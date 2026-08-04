@@ -243,6 +243,7 @@ class Invite {
     required this.user,
     required this.token,
     required this.pairingCode,
+    this.signInUrl,
   });
 
   final Account user;
@@ -251,10 +252,19 @@ class Invite {
   /// The short, human-typeable code that stands for the same invite (LYCM-88).
   final String pairingCode;
 
+  /// The same invite as a scannable link, built by the server from the origin a
+  /// phone can actually reach (LYCM-102). Null unless the server was told one —
+  /// this device's own server URL is then the sensible fallback, but it is only a
+  /// fallback: on a LAN address it is useless to anyone off the network.
+  final String? signInUrl;
+
   factory Invite.fromJson(Map<String, dynamic> json) => Invite(
     user: Account.fromJson(json['user'] as Map<String, dynamic>),
     token: (json['invite_token'] as String?) ?? '',
     pairingCode: (json['pairing_code'] as String?) ?? '',
+    signInUrl: (json['sign_in_url'] as String?)?.trim().isNotEmpty ?? false
+        ? (json['sign_in_url'] as String).trim()
+        : null,
   );
 }
 

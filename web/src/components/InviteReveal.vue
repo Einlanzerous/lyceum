@@ -170,7 +170,7 @@ async function copyAndClose(): Promise<void> {
           </div>
         </div>
 
-        <InviteQr :token="invite.invite_token" />
+        <InviteQr :token="invite.invite_token" :sign-in-url="invite.sign_in_url" />
 
         <div v-if="copyFailed" class="warn warn--soft">
           Couldn't reach the clipboard — this browser blocks it on an insecure origin. Select the

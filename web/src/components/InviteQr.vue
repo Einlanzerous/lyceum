@@ -7,14 +7,26 @@
 // is also why this works on Lyceum's plain-HTTP LAN — no getUserMedia, no secure
 // context, just navigation.
 //
+// `signInUrl` is the server's answer for which origin to encode, and it wins when
+// present (LYCM-102). This browser's own origin is the wrong one to assume: where
+// the web app sits behind Cloudflare Access, a QR built from `window.location`
+// sends the phone to an SSO wall its bearer token cannot open, and the failure
+// lands on the person holding the phone rather than on anyone who could debug it.
+// The local build stays as the fallback for LAN and dev, where the origin the
+// owner is looking at *is* the one the phone can reach.
+//
 // The QR is rendered to a data-URL on a white quiet-zone tile (QR contrast has to
 // survive the app's dark surfaces), so nothing here touches the network.
 
-import { ref, watchEffect } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import QRCode from 'qrcode'
 import { inviteSignInUrl } from '@/api/invite'
 
-const props = defineProps<{ token: string }>()
+const props = defineProps<{ token: string; signInUrl?: string }>()
+
+const target = computed(
+  () => props.signInUrl?.trim() || inviteSignInUrl(window.location.origin, props.token),
+)
 
 const src = ref('')
 const failed = ref(false)
@@ -22,7 +34,7 @@ const failed = ref(false)
 watchEffect(async () => {
   failed.value = false
   try {
-    src.value = await QRCode.toDataURL(inviteSignInUrl(window.location.origin, props.token), {
+    src.value = await QRCode.toDataURL(target.value, {
       errorCorrectionLevel: 'M',
       margin: 2,
       width: 240,

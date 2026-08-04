@@ -84,6 +84,16 @@ type config struct {
 	// when unset, mint-token just prints the raw token as before.
 	publicURL string // LYCEUM_PUBLIC_URL — e.g. http://192.168.1.9:8080
 
+	// The origin the *mobile app* can reach (LYCM-102), which is not necessarily
+	// the one the owner is looking at. Where the browser sits behind Cloudflare
+	// Access, an invite QR built from the browser's own origin sends the phone
+	// straight into an SSO wall it has no way past; this is the direct,
+	// bearer-authenticated hostname instead. When set, minted invites carry a
+	// ready-made sign_in_url built from it. Optional and deliberately separate
+	// from publicURL: that one addresses the browser, and defaulting to it would
+	// reintroduce the exact gated-origin bug this fixes.
+	mobileBaseURL string // LYCEUM_MOBILE_BASE_URL — e.g. https://lyceum-direct.example.com
+
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
 	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
@@ -113,10 +123,11 @@ func loadConfig() config {
 		binderyBaseURL: os.Getenv("LYCEUM_BINDERY_BASE_URL"),
 		binderyAPIKey:  os.Getenv("LYCEUM_BINDERY_API_KEY"),
 
-		userAuth:   envBool("LYCEUM_AUTH", false),
-		ownerEmail: os.Getenv("LYCEUM_OWNER_EMAIL"),
-		ownerName:  os.Getenv("LYCEUM_OWNER_NAME"),
-		publicURL:  os.Getenv("LYCEUM_PUBLIC_URL"),
+		userAuth:      envBool("LYCEUM_AUTH", false),
+		ownerEmail:    os.Getenv("LYCEUM_OWNER_EMAIL"),
+		ownerName:     os.Getenv("LYCEUM_OWNER_NAME"),
+		publicURL:     os.Getenv("LYCEUM_PUBLIC_URL"),
+		mobileBaseURL: os.Getenv("LYCEUM_MOBILE_BASE_URL"),
 
 		cfAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
 		cfAccessAUD:        os.Getenv("CF_ACCESS_AUD"),
@@ -202,6 +213,18 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 		log.Printf("auth: Cloudflare Access SSO enabled (team=%s)", cfg.cfAccessTeamDomain)
 	} else if cfg.cfAccessTeamDomain != "" || cfg.cfAccessAUD != "" {
 		log.Printf("config: Cloudflare Access SSO needs both CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD; SSO disabled")
+	}
+
+	// The origin invites advertise to phones (LYCM-102). Worth logging loudly
+	// either way: set, it is what every QR the household hands out will point at;
+	// unset behind Cloudflare Access, the browser's own gated origin is what goes
+	// into the QR and the scan dead-ends at a login page — a failure that shows up
+	// on someone else's phone, not on the server.
+	opts = append(opts, api.WithMobileBaseURL(cfg.mobileBaseURL))
+	if cfg.mobileBaseURL != "" {
+		log.Printf("auth: invites advertise %s for sign-in", cfg.mobileBaseURL)
+	} else {
+		log.Printf("config: LYCEUM_MOBILE_BASE_URL unset; invites carry no sign-in URL and clients build one from the origin they know")
 	}
 
 	if cfg.coverFetch {

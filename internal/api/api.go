@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,6 +154,10 @@ type API struct {
 
 	// pairingLimiter caps pairing-code sign-in attempts per client IP (LYCM-88).
 	pairingLimiter *ipRateLimiter
+
+	// mobileBaseURL is the origin minted invites advertise (LYCM-102). Empty
+	// leaves sign_in_url out of the payload; see WithMobileBaseURL.
+	mobileBaseURL string
 }
 
 // blobCacheControl is the caching policy for the cover and EPUB blob routes.
@@ -228,6 +233,18 @@ func WithUserAuth(enabled bool) Option {
 // main.go installs it only when CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set.
 func WithCFAccess(v *CFAccessVerifier) Option {
 	return func(a *API) { a.cfAccess = v }
+}
+
+// WithMobileBaseURL sets the origin that minted invites advertise to clients
+// (LYCM-102) — the public, bearer-authenticated hostname a phone can actually
+// reach, which is not the Cloudflare-gated one the owner's browser is on.
+//
+// When set, every invite reveal carries a ready-made `sign_in_url`; when unset
+// the field is omitted and each client falls back to building the link from the
+// origin it knows, which is right for LAN and dev. main.go supplies it from
+// LYCEUM_MOBILE_BASE_URL.
+func WithMobileBaseURL(base string) Option {
+	return func(a *API) { a.mobileBaseURL = strings.TrimSpace(base) }
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with

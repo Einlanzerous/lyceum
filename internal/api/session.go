@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/magos/lyceum/internal/invite"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -462,7 +463,7 @@ func (a *API) handleSelfInvite(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "mint device invite", err)
 		return
 	}
-	writeInvite(w, http.StatusCreated, u, token, code)
+	a.writeInvite(w, http.StatusCreated, u, token, code)
 }
 
 // handleAdminUserCreate adds a household member and returns their one-time
@@ -503,18 +504,27 @@ func (a *API) handleAdminUserCreate(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "mint invite", err)
 		return
 	}
-	writeInvite(w, http.StatusCreated, u, token, code)
+	a.writeInvite(w, http.StatusCreated, u, token, code)
 }
 
 // writeInvite is the one-time reveal payload both invite mint paths return: the
 // account, the full invite token, and the short pairing code that stands for it
 // (LYCM-88). Every field is shown exactly once.
-func writeInvite(w http.ResponseWriter, status int, u store.User, token, code string) {
+//
+// SignInURL is the same invite as a scannable link (LYCM-102). The server builds
+// it because only the server knows which of its origins a phone can reach: the
+// browser minting the invite is typically on the Cloudflare-gated hostname, and a
+// QR built from *that* origin walks the phone into an SSO wall bearer tokens
+// cannot open. Omitted entirely when LYCEUM_MOBILE_BASE_URL is unset, which
+// leaves clients on their existing local fallback — the right answer on a LAN,
+// where the origin the owner is looking at is also the one the phone can use.
+func (a *API) writeInvite(w http.ResponseWriter, status int, u store.User, token, code string) {
 	writeJSON(w, status, struct {
 		User        userJSON `json:"user"`
 		InviteToken string   `json:"invite_token"`
 		PairingCode string   `json:"pairing_code"`
-	}{toUserJSON(u), token, code})
+		SignInURL   string   `json:"sign_in_url,omitempty"`
+	}{toUserJSON(u), token, code, invite.SignInURL(a.mobileBaseURL, token)})
 }
 
 // memberJSON is a household-list row: the account plus enough to tell an active
@@ -637,7 +647,7 @@ func (a *API) handleAdminUserInvite(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "mint invite", err)
 		return
 	}
-	writeInvite(w, http.StatusCreated, u, token, code)
+	a.writeInvite(w, http.StatusCreated, u, token, code)
 }
 
 // handleAdminUserDelete removes a member along with their tokens and reading
