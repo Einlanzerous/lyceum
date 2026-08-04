@@ -36,8 +36,12 @@ describe('ReviewView duplicate decision (LYCM-113)', () => {
   beforeEach(() => {
     vi.mocked(client.listPendingReview).mockReset()
     vi.mocked(client.getBook).mockReset()
-    vi.mocked(client.approveBook).mockReset().mockResolvedValue(undefined as never)
-    vi.mocked(client.deleteBook).mockReset().mockResolvedValue(undefined as never)
+    vi.mocked(client.approveBook)
+      .mockReset()
+      .mockResolvedValue(undefined as never)
+    vi.mocked(client.deleteBook)
+      .mockReset()
+      .mockResolvedValue(undefined as never)
   })
 
   it('shows the book it matched, so the two can be compared', async () => {
@@ -71,7 +75,14 @@ describe('ReviewView duplicate decision (LYCM-113)', () => {
 
   it('keeps the ordinary labels for a book held on a quality flag', async () => {
     vi.mocked(client.listPendingReview).mockResolvedValue([
-      { id: 3, title: 'Odd', author: '', cover_url: '', review_state: 'pending', review_flags: ['no_isbn'] },
+      {
+        id: 3,
+        title: 'Odd',
+        author: '',
+        cover_url: '',
+        review_state: 'pending',
+        review_flags: ['no_isbn'],
+      },
     ])
 
     const wrapper = mount(ReviewView, { global })

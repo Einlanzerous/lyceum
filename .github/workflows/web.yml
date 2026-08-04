@@ -29,6 +29,9 @@ jobs:
           bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
       - run: bun run lint
+      # Nothing enforced prettier before LYCM-117, which is how five files
+      # drifted out of format unnoticed. Mirrors mobile.yml's dart-format gate.
+      - run: bun run format:check
       # `build` also runs vue-tsc, but typecheck runs first so a type error
       # reports as a type error rather than as a build failure.
       - run: bun run typecheck

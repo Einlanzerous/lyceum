@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "eslint . --ext .ts,.vue",
-    "format": "prettier --write \"src/**/*.{ts,vue,css}\""
+    "format": "prettier --write \"src/**/*.{ts,vue,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,vue,css}\""
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.2.8",
@@ -37,6 +38,7 @@
     "@vue/test-utils": "^2.4.5",
     "@vue/tsconfig": "^0.5.1",
     "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^9.24.0",
     "jsdom": "^24.0.0",
     "jszip": "^3.10.1",
