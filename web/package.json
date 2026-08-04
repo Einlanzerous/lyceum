@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "eslint . --ext .ts,.vue",
-    "format": "prettier --write \"src/**/*.{ts,vue,css}\""
+    "format": "prettier --write \"src/**/*.{ts,vue,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,vue,css}\""
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.2.8",
