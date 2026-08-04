@@ -10,8 +10,8 @@ import {
 
 // A fetch stub returning a GitHub "latest release" payload.
 function releaseFetch(tag: string, url = 'https://example/rel') {
-  return vi.fn(async () =>
-    new Response(JSON.stringify({ tag_name: tag, html_url: url }), { status: 200 }),
+  return vi.fn(
+    async () => new Response(JSON.stringify({ tag_name: tag, html_url: url }), { status: 200 }),
   ) as unknown as typeof fetch
 }
 

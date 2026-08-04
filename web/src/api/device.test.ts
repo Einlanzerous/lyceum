@@ -35,9 +35,7 @@ describe('getDeviceId', () => {
       // @ts-expect-error simulate the insecure-context absence
       crypto.randomUUID = undefined
       const id = getDeviceId()
-      expect(id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-      )
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
       expect(localStorage.getItem('lyceum.device_id')).toBe(id)
     } finally {
       crypto.randomUUID = original

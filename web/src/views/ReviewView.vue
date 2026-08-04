@@ -67,9 +67,7 @@ async function load(): Promise<void> {
   try {
     const list = await listPendingReview()
     books.value = list
-    drafts.value = Object.fromEntries(
-      list.map((b) => [b.id, { title: b.title, author: b.author }]),
-    )
+    drafts.value = Object.fromEntries(list.map((b) => [b.id, { title: b.title, author: b.author }]))
     void loadMatches(list)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load the review queue.'
@@ -103,7 +101,9 @@ async function loadMatches(list: Book[]): Promise<void> {
   )
   matches.value = {
     ...matches.value,
-    ...Object.fromEntries(flagged.map((b) => [b.id, fetched.get(b.duplicate_of as number) ?? null])),
+    ...Object.fromEntries(
+      flagged.map((b) => [b.id, fetched.get(b.duplicate_of as number) ?? null]),
+    ),
   }
 }
 
@@ -193,12 +193,12 @@ function onDelete(b: Book): Promise<void> {
     <header class="rev__bar">
       <RouterLink to="/" class="rev__back" aria-label="Back to library">← Library</RouterLink>
       <h1 class="rev__title">Review queue</h1>
-      <span class="rev__count" v-if="!loading && books.length">{{ books.length }}</span>
+      <span v-if="!loading && books.length" class="rev__count">{{ books.length }}</span>
     </header>
 
     <p class="rev__intro">
-      New ingests that tripped a quality check are held here. Fix the details, then approve them onto
-      the shelf.
+      New ingests that tripped a quality check are held here. Fix the details, then approve them
+      onto the shelf.
     </p>
 
     <div v-if="loading" class="rev__note">Loading…</div>
@@ -247,7 +247,10 @@ function onDelete(b: Book): Promise<void> {
                 <p class="dup__author">{{ b.author }}</p>
               </div>
             </div>
-            <p v-else-if="!b.duplicate_of || matches[b.id] === null" class="dup__lead dup__lead--gone">
+            <p
+              v-else-if="!b.duplicate_of || matches[b.id] === null"
+              class="dup__lead dup__lead--gone"
+            >
               The book this matched has since been deleted, so there is probably nothing left to
               decide — approve it onto the shelf.
             </p>
@@ -264,12 +267,7 @@ function onDelete(b: Book): Promise<void> {
           </label>
 
           <div class="card__actions">
-            <button
-              type="button"
-              class="btn"
-              :disabled="!!busy[b.id]"
-              @click="saveMeta(b)"
-            >
+            <button type="button" class="btn" :disabled="!!busy[b.id]" @click="saveMeta(b)">
               Save details
             </button>
             <button
@@ -282,7 +280,7 @@ function onDelete(b: Book): Promise<void> {
             </button>
             <label class="btn btn--ghost card__upload">
               Upload cover
-              <input type="file" accept="image/*" @change="onUpload(b, $event)" hidden />
+              <input type="file" accept="image/*" hidden @change="onUpload(b, $event)" />
             </label>
             <span class="card__spacer" />
             <button

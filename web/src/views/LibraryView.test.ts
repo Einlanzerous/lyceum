@@ -14,8 +14,24 @@ const books: Book[] = [
 ]
 
 const seriesBooks: Book[] = [
-  { id: 1, title: 'Annihilation', author: 'VanderMeer', cover_url: '', series: 'Southern Reach', series_index: 1, progress: 1 },
-  { id: 2, title: 'Authority', author: 'VanderMeer', cover_url: '', series: 'Southern Reach', series_index: 2, progress: 0.73 },
+  {
+    id: 1,
+    title: 'Annihilation',
+    author: 'VanderMeer',
+    cover_url: '',
+    series: 'Southern Reach',
+    series_index: 1,
+    progress: 1,
+  },
+  {
+    id: 2,
+    title: 'Authority',
+    author: 'VanderMeer',
+    cover_url: '',
+    series: 'Southern Reach',
+    series_index: 2,
+    progress: 0.73,
+  },
   { id: 3, title: 'Piranesi', author: 'Clarke', cover_url: '' },
 ]
 
