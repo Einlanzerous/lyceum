@@ -5,13 +5,12 @@ import (
 	"errors"
 	"flag"
 	"log"
-	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
 
+	"github.com/magos/lyceum/internal/invite"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -59,7 +58,7 @@ func runMintToken(args []string) {
 	}
 
 	expires := time.Now().Add(store.InviteTTL)
-	invite, code, err := st.MintInvite(ctx, user.ID, *label, &expires)
+	inviteToken, code, err := st.MintInvite(ctx, user.ID, *label, &expires)
 	if err != nil {
 		log.Fatalf("mint invite: %v", err)
 	}
@@ -67,14 +66,14 @@ func runMintToken(args []string) {
 	// Straight to stdout, not the log: this is the command's output, and it is the
 	// only time the token is recoverable.
 	log.Printf("one-time sign-in invite for %s (%s):", user.DisplayName, user.Email)
-	if _, err := os.Stdout.WriteString(invite + "\n"); err != nil {
+	if _, err := os.Stdout.WriteString(inviteToken + "\n"); err != nil {
 		log.Fatalf("write token: %v", err)
 	}
 	// The short code is the type-it-in path for when scanning or pasting isn't an
 	// option (reading it off this very log into a browser). It expires far sooner
 	// than the token.
 	log.Printf("or type this code within %s: %s", store.PairingTTL, formatPairingCode(code))
-	printInviteQR(cfg.publicURL, invite)
+	printInviteQR(cfg.publicURL, inviteToken)
 }
 
 // formatPairingCode groups the code as XXXX-XXXX so it is easier to read aloud
@@ -86,23 +85,13 @@ func formatPairingCode(code string) string {
 	return code
 }
 
-// signInURL builds the scannable `<publicURL>/sign-in?token=…` redemption link
-// for an invite, or "" when no public URL is configured (LYCM-88).
-func signInURL(base, token string) string {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
-		return ""
-	}
-	return base + "/sign-in?token=" + url.QueryEscape(token)
-}
-
 // printInviteQR renders an ASCII QR of the sign-in link to stderr so an invite
 // can be carried to a phone by camera instead of by hand. The raw token stays on
 // stdout for machines; this is purely the human convenience. No-op when
 // LYCEUM_PUBLIC_URL is unset. Half-block rendering keeps it scannable on both
 // light and dark terminals.
 func printInviteQR(publicURL, token string) {
-	link := signInURL(publicURL, token)
+	link := invite.SignInURL(publicURL, token)
 	if link == "" {
 		return
 	}
@@ -155,13 +144,13 @@ func bootstrapOwner(ctx context.Context, st *store.Store, cfg config) {
 	}
 
 	expires := time.Now().Add(store.InviteTTL)
-	invite, code, err := st.MintInvite(ctx, owner.ID, "bootstrap", &expires)
+	inviteToken, code, err := st.MintInvite(ctx, owner.ID, "bootstrap", &expires)
 	if err != nil {
 		log.Fatalf("mint owner invite: %v", err)
 	}
-	log.Printf("auth: first-boot sign-in invite for %s — %s", owner.Email, invite)
+	log.Printf("auth: first-boot sign-in invite for %s — %s", owner.Email, inviteToken)
 	log.Printf("auth: or type this code within %s — %s", store.PairingTTL, formatPairingCode(code))
 	log.Printf("auth: redeem it once in the app (Settings -> Sign in). It expires in %s and is "+
 		"not shown again; `lyceum mint-token` issues another.", store.InviteTTL)
-	printInviteQR(cfg.publicURL, invite)
+	printInviteQR(cfg.publicURL, inviteToken)
 }

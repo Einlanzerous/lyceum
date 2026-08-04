@@ -1,4 +1,4 @@
-package main
+package invite
 
 import "testing"
 
@@ -29,11 +29,17 @@ func TestSignInURL(t *testing.T) {
 			"lyc_a+b/c",
 			"http://host/sign-in?token=lyc_a%2Bb%2Fc",
 		},
+		{
+			"carries the public direct origin mobile is pointed at",
+			"https://lyceum-direct.example.industries",
+			"lyc_abc",
+			"https://lyceum-direct.example.industries/sign-in?token=lyc_abc",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := signInURL(tc.base, tc.token); got != tc.want {
-				t.Errorf("signInURL(%q, %q) = %q, want %q", tc.base, tc.token, got, tc.want)
+			if got := SignInURL(tc.base, tc.token); got != tc.want {
+				t.Errorf("SignInURL(%q, %q) = %q, want %q", tc.base, tc.token, got, tc.want)
 			}
 		})
 	}
