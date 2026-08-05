@@ -17,10 +17,12 @@ import (
 
 // authServer starts an API with session enforcement ON — the state the clients
 // will run against once they ship a sign-in screen. The default server used by
-// every other test leaves it off (see WithUserAuth).
-func authServer(t *testing.T, s *store.Store) *httptest.Server {
+// every other test leaves it off (see WithUserAuth). Extra options are appended
+// after WithUserAuth, so a caller can add to the configuration (or override it)
+// without standing up its own httptest server.
+func authServer(t *testing.T, s *store.Store, opts ...Option) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(New(s, "", WithUserAuth(true)).Handler())
+	srv := httptest.NewServer(New(s, "", append([]Option{WithUserAuth(true)}, opts...)...).Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }

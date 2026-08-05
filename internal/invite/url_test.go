@@ -2,6 +2,51 @@ package invite
 
 import "testing"
 
+func TestNormalizeBase(t *testing.T) {
+	valid := []struct{ name, in, want string }{
+		{"unset stays unset", "", ""},
+		{"whitespace is unset", "   ", ""},
+		{"keeps a plain origin", "https://direct.example.test", "https://direct.example.test"},
+		{"trims trailing slashes", "https://direct.example.test//", "https://direct.example.test"},
+		{"trims surrounding space", "  https://direct.example.test  ", "https://direct.example.test"},
+		{"keeps an explicit port", "http://192.168.1.9:8080", "http://192.168.1.9:8080"},
+		{"keeps a path prefix", "https://example.test/lyceum", "https://example.test/lyceum"},
+	}
+	for _, tc := range valid {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeBase(tc.in)
+			if err != nil {
+				t.Fatalf("NormalizeBase(%q) errored: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("NormalizeBase(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// Rejected rather than passed through: clients prefer this URL over the one
+	// they would have built, so storing a broken value costs the fallback too.
+	invalid := []struct{ name, in string }{
+		{"no scheme", "direct.example.test"},
+		{"scheme-relative", "//direct.example.test"},
+		{"a bare path", "/sign-in"},
+		{"an unusable scheme", "ftp://direct.example.test"},
+		{"a scheme with no host", "https://"},
+		{"not a URL at all", "http://[::1"},
+	}
+	for _, tc := range invalid {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			got, err := NormalizeBase(tc.in)
+			if err == nil {
+				t.Fatalf("NormalizeBase(%q) = %q, want an error", tc.in, got)
+			}
+			if got != "" {
+				t.Errorf("NormalizeBase(%q) returned %q alongside its error; callers must get nothing usable", tc.in, got)
+			}
+		})
+	}
+}
+
 func TestSignInURL(t *testing.T) {
 	cases := []struct {
 		name  string

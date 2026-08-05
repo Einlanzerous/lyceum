@@ -73,7 +73,7 @@ func runMintToken(args []string) {
 	// option (reading it off this very log into a browser). It expires far sooner
 	// than the token.
 	log.Printf("or type this code within %s: %s", store.PairingTTL, formatPairingCode(code))
-	printInviteQR(cfg.publicURL, inviteToken)
+	printInviteQR(inviteQRBase(cfg), inviteToken)
 }
 
 // formatPairingCode groups the code as XXXX-XXXX so it is easier to read aloud
@@ -83,6 +83,22 @@ func formatPairingCode(code string) string {
 		return code[:4] + "-" + code[4:]
 	}
 	return code
+}
+
+// inviteQRBase picks the origin the terminal QR should carry (LYCM-102).
+//
+// This QR is scanned by a phone by definition — that is the entire reason it is
+// drawn — so it wants the same origin the API advertises to phones, not the
+// browser-facing one. Where the two differ (Cloudflare Access in front of the
+// web app) LYCEUM_PUBLIC_URL sends the owner's own recovery scan into an SSO wall
+// their bearer token cannot open, which is the LYCM-102 bug on the one path that
+// has no client-side fallback to save it: the terminal cannot pick another
+// origin. LYCEUM_PUBLIC_URL stays the fallback for hosts that only set that one.
+func inviteQRBase(cfg config) string {
+	if cfg.mobileBaseURL != "" {
+		return cfg.mobileBaseURL
+	}
+	return cfg.publicURL
 }
 
 // printInviteQR renders an ASCII QR of the sign-in link to stderr so an invite
@@ -152,5 +168,5 @@ func bootstrapOwner(ctx context.Context, st *store.Store, cfg config) {
 	log.Printf("auth: or type this code within %s — %s", store.PairingTTL, formatPairingCode(code))
 	log.Printf("auth: redeem it once in the app (Settings -> Sign in). It expires in %s and is "+
 		"not shown again; `lyceum mint-token` issues another.", store.InviteTTL)
-	printInviteQR(cfg.publicURL, inviteToken)
+	printInviteQR(inviteQRBase(cfg), inviteToken)
 }

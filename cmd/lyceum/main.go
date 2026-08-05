@@ -22,6 +22,7 @@ import (
 	"github.com/magos/lyceum/internal/coverart"
 	"github.com/magos/lyceum/internal/delivery"
 	"github.com/magos/lyceum/internal/edition"
+	"github.com/magos/lyceum/internal/invite"
 	"github.com/magos/lyceum/internal/store"
 	"github.com/magos/lyceum/web"
 )
@@ -215,16 +216,24 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 		log.Printf("config: Cloudflare Access SSO needs both CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD; SSO disabled")
 	}
 
-	// The origin invites advertise to phones (LYCM-102). Worth logging loudly
-	// either way: set, it is what every QR the household hands out will point at;
-	// unset behind Cloudflare Access, the browser's own gated origin is what goes
-	// into the QR and the scan dead-ends at a login page — a failure that shows up
-	// on someone else's phone, not on the server.
-	opts = append(opts, api.WithMobileBaseURL(cfg.mobileBaseURL))
-	if cfg.mobileBaseURL != "" {
-		log.Printf("auth: invites advertise %s for sign-in", cfg.mobileBaseURL)
+	// The origin invites advertise to phones (LYCM-102). A bad value is worse than
+	// none — clients prefer it over the URL they would have built, so it would
+	// suppress a working fallback — hence refuse it here and say why, rather than
+	// pass it through to produce QRs that scan nowhere.
+	if mobileBase, err := invite.NormalizeBase(cfg.mobileBaseURL); err != nil {
+		log.Printf("config: ignoring LYCEUM_MOBILE_BASE_URL — %v; invites will carry no sign-in URL "+
+			"and clients will build one from the origin they know", err)
 	} else {
-		log.Printf("config: LYCEUM_MOBILE_BASE_URL unset; invites carry no sign-in URL and clients build one from the origin they know")
+		opts = append(opts, api.WithMobileBaseURL(mobileBase))
+		switch {
+		case mobileBase != "":
+			log.Printf("auth: invites advertise %s for sign-in", mobileBase)
+		case cfg.userAuth:
+			// Only worth mentioning where invites can actually be minted: with auth
+			// off every route that mints one returns 403, so on a default install
+			// this would be a line of noise about a feature that cannot run.
+			log.Printf("config: LYCEUM_MOBILE_BASE_URL unset; invites carry no sign-in URL and clients build one from the origin they know")
+		}
 	}
 
 	if cfg.coverFetch {

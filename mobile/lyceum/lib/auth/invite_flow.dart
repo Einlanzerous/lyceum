@@ -27,6 +27,24 @@ import 'invite_token.dart';
 /// [onMinted] fires for every key this shows, including re-issues, so a caller can
 /// re-read whatever the mint changed (the household list, for one — an outstanding
 /// invite is what turns a row "pending").
+/// The link the reveal offers as a scannable QR, or null when there is none
+/// worth offering (LYCM-88, LYCM-102).
+///
+/// The server's own answer wins when it has one: the address *this* phone
+/// happens to use may be a LAN one, and handing that out as a QR produces an
+/// invite that works only for someone already on the network — which is
+/// precisely not the person being invited. [serverUrl] stays the fallback, since
+/// on a LAN or in dev it is the only address there is. Empty (which shouldn't
+/// happen once signed in) means no QR at all rather than one pointing nowhere.
+///
+/// Split out from [runInviteReveal] so the precedence can be read and tested
+/// without standing up a modal.
+String? revealSignInUrl(Invite invite, String serverUrl) {
+  final advertised = invite.signInUrl;
+  if (advertised != null) return advertised;
+  return serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token);
+}
+
 Future<void> runInviteReveal(
   BuildContext context,
   WidgetRef ref,
@@ -36,19 +54,7 @@ Future<void> runInviteReveal(
 }) async {
   onMinted?.call();
 
-  // Offer the key as a scannable QR too, pointing at this library's sign-in route
-  // (LYCM-88).
-  //
-  // The server's own answer wins when it has one (LYCM-102): the address *this*
-  // phone happens to use may be a LAN one, and handing that out as a QR produces
-  // an invite that works only for someone already on the network — which is
-  // precisely not the person being invited. Falling back to the configured
-  // address keeps LAN and dev working, where it is the only address there is. An
-  // empty server URL (shouldn't happen once signed in) omits the QR.
-  final serverUrl = ref.read(serverUrlProvider);
-  final signInUrl =
-      invite.signInUrl ??
-      (serverUrl.isEmpty ? null : inviteSignInUrl(serverUrl, invite.token));
+  final signInUrl = revealSignInUrl(invite, ref.read(serverUrlProvider));
 
   final result = await showInviteReveal(
     context,

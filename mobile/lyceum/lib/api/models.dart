@@ -258,14 +258,19 @@ class Invite {
   /// fallback: on a LAN address it is useless to anyone off the network.
   final String? signInUrl;
 
-  factory Invite.fromJson(Map<String, dynamic> json) => Invite(
-    user: Account.fromJson(json['user'] as Map<String, dynamic>),
-    token: (json['invite_token'] as String?) ?? '',
-    pairingCode: (json['pairing_code'] as String?) ?? '',
-    signInUrl: (json['sign_in_url'] as String?)?.trim().isNotEmpty ?? false
-        ? (json['sign_in_url'] as String).trim()
-        : null,
-  );
+  factory Invite.fromJson(Map<String, dynamic> json) {
+    // Blank is not a link: an empty or whitespace value would read as "the server
+    // told us an origin" and win over the fallback, producing a QR pointing
+    // nowhere. Fold it back to null so the caller's fallback survives.
+    final url = (json['sign_in_url'] as String?)?.trim();
+
+    return Invite(
+      user: Account.fromJson(json['user'] as Map<String, dynamic>),
+      token: (json['invite_token'] as String?) ?? '',
+      pairingCode: (json['pairing_code'] as String?) ?? '',
+      signInUrl: (url == null || url.isEmpty) ? null : url,
+    );
+  }
 }
 
 /// Physical-library inventory row (ISBN-keyed). Included for completeness;

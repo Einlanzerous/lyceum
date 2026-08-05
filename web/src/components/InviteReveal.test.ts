@@ -3,8 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import InviteReveal from './InviteReveal.vue'
 import type { Invite, User } from '@/api/auth'
 
-// The QR renders through the `qrcode` package; nothing here is about that.
-vi.mock('./InviteQr.vue', () => ({ default: { template: '<div />' } }))
+// The QR renders through the `qrcode` package; nothing here is about that. The
+// stub still declares the props, so what this component hands the QR stays
+// visible to the tests below — a prop-ignoring `<div />` would silently accept a
+// reveal that passed the QR nothing at all.
+vi.mock('./InviteQr.vue', () => ({
+  default: { props: ['token', 'signInUrl'], template: '<div class="qr-stub" />' },
+}))
 
 const ME: User = { id: 1, email: 'ada@home.lan', display_name: 'Ada', is_owner: true }
 const MARA: User = { id: 7, email: 'mara@home.lan', display_name: 'Mara', is_owner: false }
@@ -74,6 +79,57 @@ describe('a second reveal in the same session', () => {
     await wrapper.setProps({ invite: inviteFor(ME, 'lyc_second') })
 
     expect(wrapper.text()).not.toContain("Couldn't reach the clipboard")
+  })
+})
+
+// LYCM-102. The reveal is the only thing that hands the server's advertised
+// origin to the QR; if it drops it the QR silently falls back to this browser's
+// origin, which behind Cloudflare Access is the gated one a phone cannot use.
+// The failure is invisible here and total on the scanning device.
+describe('the sign-in URL the QR is given', () => {
+  const qrProps = (wrapper: ReturnType<typeof mountReveal>) =>
+    wrapper.findComponent({ name: 'InviteQr' }).props() as {
+      token: string
+      signInUrl?: string
+    }
+
+  it('passes the server-built URL through to the QR', () => {
+    const invite = {
+      ...inviteFor(MARA, 'lyc_abc'),
+      sign_in_url: 'https://lyceum-direct.example.test/sign-in?token=lyc_abc',
+    }
+    const wrapper = mountReveal({ invite })
+
+    expect(qrProps(wrapper).signInUrl).toBe(
+      'https://lyceum-direct.example.test/sign-in?token=lyc_abc',
+    )
+    expect(qrProps(wrapper).token).toBe('lyc_abc')
+  })
+
+  it('leaves it undefined when the server sent none, so the QR falls back', () => {
+    const wrapper = mountReveal({ invite: inviteFor(MARA, 'lyc_abc') })
+
+    expect(qrProps(wrapper).signInUrl).toBeUndefined()
+    expect(qrProps(wrapper).token).toBe('lyc_abc')
+  })
+
+  it('follows a re-issue to the new invite rather than keeping the spent URL', async () => {
+    const wrapper = mountReveal({
+      invite: {
+        ...inviteFor(MARA, 'lyc_first'),
+        sign_in_url: 'https://direct.example.test/sign-in?token=lyc_first',
+      },
+    })
+
+    await wrapper.setProps({
+      invite: {
+        ...inviteFor(ME, 'lyc_second'),
+        sign_in_url: 'https://direct.example.test/sign-in?token=lyc_second',
+      },
+    })
+
+    expect(qrProps(wrapper).signInUrl).toBe('https://direct.example.test/sign-in?token=lyc_second')
+    expect(qrProps(wrapper).token).toBe('lyc_second')
   })
 })
 

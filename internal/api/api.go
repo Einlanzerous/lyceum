@@ -13,11 +13,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
+	"github.com/magos/lyceum/internal/invite"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -243,8 +243,21 @@ func WithCFAccess(v *CFAccessVerifier) Option {
 // the field is omitted and each client falls back to building the link from the
 // origin it knows, which is right for LAN and dev. main.go supplies it from
 // LYCEUM_MOBILE_BASE_URL.
+//
+// The base is normalized and validated once here rather than per mint, and an
+// unusable one is dropped rather than stored: clients prefer this URL over the
+// one they would have built themselves, so keeping a malformed value would put
+// out a QR that scans nowhere *and* suppress the fallback that still worked.
+// main.go validates first so it can say so in the log; this keeps direct callers
+// (and tests) honest too.
 func WithMobileBaseURL(base string) Option {
-	return func(a *API) { a.mobileBaseURL = strings.TrimSpace(base) }
+	return func(a *API) {
+		normalized, err := invite.NormalizeBase(base)
+		if err != nil {
+			return
+		}
+		a.mobileBaseURL = normalized
+	}
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with
