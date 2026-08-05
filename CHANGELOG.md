@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/Einlanzerous/lyceum/compare/v1.9.0...v1.10.0) (2026-08-05)
+
+
+### Features
+
+* **auth:** invites carry the origin a phone can reach (LYCM-102) ([#79](https://github.com/Einlanzerous/lyceum/issues/79)) ([4776f17](https://github.com/Einlanzerous/lyceum/commit/4776f176d1a96b51c04e494891ceb99e573d2917))
+
+
+### Bug Fixes
+
+* **web:** make lint warnings fixable again (LYCM-117) ([#77](https://github.com/Einlanzerous/lyceum/issues/77)) ([7e556b3](https://github.com/Einlanzerous/lyceum/commit/7e556b394944e36316837e5f57c38c01ce0fc9d5))
+
 ## [1.9.0](https://github.com/Einlanzerous/lyceum/compare/v1.8.0...v1.9.0) (2026-08-03)
 
 
