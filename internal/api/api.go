@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/magos/lyceum/internal/coverart"
+	"github.com/magos/lyceum/internal/invite"
 	"github.com/magos/lyceum/internal/store"
 )
 
@@ -153,6 +154,10 @@ type API struct {
 
 	// pairingLimiter caps pairing-code sign-in attempts per client IP (LYCM-88).
 	pairingLimiter *ipRateLimiter
+
+	// mobileBaseURL is the origin minted invites advertise (LYCM-102). Empty
+	// leaves sign_in_url out of the payload; see WithMobileBaseURL.
+	mobileBaseURL string
 }
 
 // blobCacheControl is the caching policy for the cover and EPUB blob routes.
@@ -228,6 +233,31 @@ func WithUserAuth(enabled bool) Option {
 // main.go installs it only when CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD are set.
 func WithCFAccess(v *CFAccessVerifier) Option {
 	return func(a *API) { a.cfAccess = v }
+}
+
+// WithMobileBaseURL sets the origin that minted invites advertise to clients
+// (LYCM-102) — the public, bearer-authenticated hostname a phone can actually
+// reach, which is not the Cloudflare-gated one the owner's browser is on.
+//
+// When set, every invite reveal carries a ready-made `sign_in_url`; when unset
+// the field is omitted and each client falls back to building the link from the
+// origin it knows, which is right for LAN and dev. main.go supplies it from
+// LYCEUM_MOBILE_BASE_URL.
+//
+// The base is normalized and validated once here rather than per mint, and an
+// unusable one is dropped rather than stored: clients prefer this URL over the
+// one they would have built themselves, so keeping a malformed value would put
+// out a QR that scans nowhere *and* suppress the fallback that still worked.
+// main.go validates first so it can say so in the log; this keeps direct callers
+// (and tests) honest too.
+func WithMobileBaseURL(base string) Option {
+	return func(a *API) {
+		normalized, err := invite.NormalizeBase(base)
+		if err != nil {
+			return
+		}
+		a.mobileBaseURL = normalized
+	}
 }
 
 // New builds an API over the given store. dataDir is retained for symmetry with

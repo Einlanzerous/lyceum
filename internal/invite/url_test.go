@@ -1,0 +1,91 @@
+package invite
+
+import "testing"
+
+func TestNormalizeBase(t *testing.T) {
+	valid := []struct{ name, in, want string }{
+		{"unset stays unset", "", ""},
+		{"whitespace is unset", "   ", ""},
+		{"keeps a plain origin", "https://direct.example.test", "https://direct.example.test"},
+		{"trims trailing slashes", "https://direct.example.test//", "https://direct.example.test"},
+		{"trims surrounding space", "  https://direct.example.test  ", "https://direct.example.test"},
+		{"keeps an explicit port", "http://192.168.1.9:8080", "http://192.168.1.9:8080"},
+		{"keeps a path prefix", "https://example.test/lyceum", "https://example.test/lyceum"},
+	}
+	for _, tc := range valid {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeBase(tc.in)
+			if err != nil {
+				t.Fatalf("NormalizeBase(%q) errored: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("NormalizeBase(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// Rejected rather than passed through: clients prefer this URL over the one
+	// they would have built, so storing a broken value costs the fallback too.
+	invalid := []struct{ name, in string }{
+		{"no scheme", "direct.example.test"},
+		{"scheme-relative", "//direct.example.test"},
+		{"a bare path", "/sign-in"},
+		{"an unusable scheme", "ftp://direct.example.test"},
+		{"a scheme with no host", "https://"},
+		{"not a URL at all", "http://[::1"},
+	}
+	for _, tc := range invalid {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			got, err := NormalizeBase(tc.in)
+			if err == nil {
+				t.Fatalf("NormalizeBase(%q) = %q, want an error", tc.in, got)
+			}
+			if got != "" {
+				t.Errorf("NormalizeBase(%q) returned %q alongside its error; callers must get nothing usable", tc.in, got)
+			}
+		})
+	}
+}
+
+func TestSignInURL(t *testing.T) {
+	cases := []struct {
+		name  string
+		base  string
+		token string
+		want  string
+	}{
+		{"empty base disables the link", "", "lyc_abc", ""},
+		{"whitespace base disables the link", "   ", "lyc_abc", ""},
+		{
+			"builds the redemption link",
+			"http://192.168.1.9:8080",
+			"lyc_abc",
+			"http://192.168.1.9:8080/sign-in?token=lyc_abc",
+		},
+		{
+			"trims a trailing slash on the base",
+			"http://host/",
+			"lyc_abc",
+			"http://host/sign-in?token=lyc_abc",
+		},
+		{
+			"query-escapes the token",
+			"http://host",
+			"lyc_a+b/c",
+			"http://host/sign-in?token=lyc_a%2Bb%2Fc",
+		},
+		{
+			"carries the public direct origin mobile is pointed at",
+			"https://lyceum-direct.example.industries",
+			"lyc_abc",
+			"https://lyceum-direct.example.industries/sign-in?token=lyc_abc",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SignInURL(tc.base, tc.token); got != tc.want {
+				t.Errorf("SignInURL(%q, %q) = %q, want %q", tc.base, tc.token, got, tc.want)
+			}
+		})
+	}
+}

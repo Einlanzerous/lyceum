@@ -35,6 +35,13 @@ export interface Invite {
   invite_token: string
   /** The short, human-typeable code that stands for the same invite (LYCM-88). */
   pairing_code: string
+  /**
+   * The same invite as a scannable link, built by the server from the origin a
+   * phone can actually reach (LYCM-102). Absent unless LYCEUM_MOBILE_BASE_URL is
+   * set — on a LAN this browser's own origin is already the right one, so the QR
+   * falls back to building the link locally.
+   */
+  sign_in_url?: string
 }
 
 /**

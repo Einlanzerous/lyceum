@@ -243,6 +243,7 @@ class Invite {
     required this.user,
     required this.token,
     required this.pairingCode,
+    this.signInUrl,
   });
 
   final Account user;
@@ -251,11 +252,25 @@ class Invite {
   /// The short, human-typeable code that stands for the same invite (LYCM-88).
   final String pairingCode;
 
-  factory Invite.fromJson(Map<String, dynamic> json) => Invite(
-    user: Account.fromJson(json['user'] as Map<String, dynamic>),
-    token: (json['invite_token'] as String?) ?? '',
-    pairingCode: (json['pairing_code'] as String?) ?? '',
-  );
+  /// The same invite as a scannable link, built by the server from the origin a
+  /// phone can actually reach (LYCM-102). Null unless the server was told one —
+  /// this device's own server URL is then the sensible fallback, but it is only a
+  /// fallback: on a LAN address it is useless to anyone off the network.
+  final String? signInUrl;
+
+  factory Invite.fromJson(Map<String, dynamic> json) {
+    // Blank is not a link: an empty or whitespace value would read as "the server
+    // told us an origin" and win over the fallback, producing a QR pointing
+    // nowhere. Fold it back to null so the caller's fallback survives.
+    final url = (json['sign_in_url'] as String?)?.trim();
+
+    return Invite(
+      user: Account.fromJson(json['user'] as Map<String, dynamic>),
+      token: (json['invite_token'] as String?) ?? '',
+      pairingCode: (json['pairing_code'] as String?) ?? '',
+      signInUrl: (url == null || url.isEmpty) ? null : url,
+    );
+  }
 }
 
 /// Physical-library inventory row (ISBN-keyed). Included for completeness;
