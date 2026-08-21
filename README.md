@@ -101,6 +101,13 @@ reader core is open and every request is served as the owner, exactly as before
 accounts existed — the clients don't send credentials yet. Turn it on once they
 ship a sign-in screen.
 
+**A server with a household on it refuses to start with enforcement off**
+(LYCM-116). Since every request would be served as the owner, a second account is
+proof the setting is missing rather than meant: the server exits naming
+`LYCEUM_AUTH` instead of merging several people's reading into one identity where
+nothing errors. A single-user install holds only the seeded owner, so it never
+trips the guard and still starts with no configuration at all.
+
 - **The owner** is the account that adopts all pre-accounts reading history, and
   the only one who can invite or remove people. Set `LYCEUM_OWNER_EMAIL` /
   `LYCEUM_OWNER_NAME`; the row itself is seeded by migration 0011.

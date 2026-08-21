@@ -26,6 +26,29 @@ func TestOwnerSeededByMigration(t *testing.T) {
 	}
 }
 
+// The LYCM-116 boot guard hangs entirely off this count, so the boundary it
+// fires on is worth pinning: a fresh install is the seeded owner alone, and the
+// first housemate is what makes the server one that must not run open.
+func TestCountUsers(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	n, err := s.CountUsers(ctx)
+	if err != nil {
+		t.Fatalf("CountUsers: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountUsers on a fresh install = %d, want 1 (the owner migration 0011 seeds)", n)
+	}
+
+	if _, err := s.CreateUser(ctx, "mara@example.com", "Mara"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if n, err = s.CountUsers(ctx); err != nil || n != 2 {
+		t.Fatalf("CountUsers after adding a member = (%d, %v), want (2, nil)", n, err)
+	}
+}
+
 func TestCreateUser(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
