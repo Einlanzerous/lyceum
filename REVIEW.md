@@ -16,8 +16,8 @@ Do not spend the review re-proving these. Do not assume more than they say:
 | job | proves | reaches |
 |---|---|---|
 | `backend.yml` / `test` | `go build`, `go vet`, and `go test -race ./...` against a **real Postgres 16** service container | **only when the diff touches `**.go`, `go.mod`, `go.sum`, `migrations/**` or `backend.yml`** |
-| `web.yml` / `check` | bun `lint`, `format:check`, `typecheck`, `test`, `build` (vue-tsc) | **only on `web/**` changes** — path-filtered trigger, so on other PRs it does not report at all |
-| `mobile.yml` / `flutter` | `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`, debug APK build | `mobile/lyceum/**` |
+| `web.yml` / `check` | bun `lint`, `format:check`, `typecheck`, `test`, `build` (vue-tsc) | `web/**` **or `.github/workflows/web.yml`** — path-filtered trigger, so on a PR touching neither it does not report at all |
+| `mobile.yml` / `flutter` | `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`, debug APK build | `mobile/lyceum/**` **or `.github/workflows/mobile.yml`** — same shape |
 | `wrappers.yml`, `windows-release.yml`, `mobile-release.yml` | packaging and signing only | releases |
 
 The trap is `backend.yml`. It is a **required check**, so it has to report on

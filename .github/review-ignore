@@ -23,7 +23,9 @@
 # Resolved dependency trees for the two clients. What matters is which
 # dependency moved, and that is in `web/package.json` and
 # `mobile/lyceum/pubspec.yaml`, neither of which is excluded. `web/bun.lock` is
-# 5k+ lines and turned over wholesale by LYCM-71's npm→bun migration.
+# 929 lines; LYCM-71 (#64) created it (+926/-0) rather than churning it, and
+# the 5,950-line lockfile that migration did turn over was
+# `web/package-lock.json`, which the same PR deleted.
 ^web/bun\.lock$
 ^mobile/lyceum/pubspec\.lock$
 
