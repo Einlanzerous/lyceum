@@ -1,0 +1,126 @@
+name: PR Review
+
+# Fresh-context review of every pull request (LYCM-120), via the shared
+# definition in construct-server (SERV-92). Lyceum was the last active repo in
+# the estate merging on a human read alone.
+#
+# Nothing is copied here. `review-prompt.md` is fetched from construct-server at
+# run time (`prompt_repo`/`prompt_ref`, defaulting to `@main`), so a local copy
+# could only ever drift out of use. It is NOT fetched at the workflow's own
+# commit — `job_workflow_sha` would have given that and is empty on this Actions
+# version, which 404'd the fetch on argosy#211 and signet#37 — so pinning
+# `uses: ...@<tag>` means pinning `prompt_ref` to match.
+#
+# Judgement lives in this repo's `REVIEW.md`; generated artifacts in
+# `.github/review-ignore`. Note that lyceum has no `CLAUDE.md`, so `REVIEW.md`
+# is the reviewer's *only* repo-specific context and carries the how-this-repo-
+# works material the other adopters split across two files.
+#
+# See construct-server's `docs/pr-reviewer.md`.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+# A called workflow cannot be granted more than its caller holds, so the ceiling
+# is set here even though the shared workflow declares the same three.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+# No `concurrency:` — the shared workflow owns it, and that key is the
+# accumulated result of three separate silent-pass incidents.
+
+jobs:
+  pr-review:
+    uses: Einlanzerous/construct-server/.github/workflows/pr-review-reusable.yml@main
+    with:
+      # Paths where a mistake widens access, loses data, leaks a secret, or
+      # compromises the runner.
+      #
+      # MEASURED, not guessed — SGNT-36 is the cautionary tale of a regex that
+      # matched a whole source tree and so carried no information. Replayed
+      # against the last 30 merged PRs (#50-#79): 9 are release PRs, skipped
+      # before the tier is decided; of the remaining 21, **17 classify high and
+      # 4 low**. The four lows are #57, #58, #65 and #74 — every one of them
+      # web-only or Flutter-only UI work.
+      #
+      # Describe the line this draws precisely, because the obvious summary is
+      # wrong: it is NOT "the Go server is high, the clients are low". Plenty of
+      # the Go server sits on the cheap side — `internal/coverart/`,
+      # `internal/epub/`, `internal/isbn/`, `internal/edition/`,
+      # `internal/coverimg/`, `internal/ingestqc/`, and most of `internal/api/`
+      # (ingest, review, inventory, sync, eidolon) are all absent below. What
+      # the regex actually selects is **the auth, session, store, migration,
+      # path-identity and credential-bearing surface, plus deploy and CI** —
+      # which is the four-part test in the input's own description, and not a
+      # proxy for "backend".
+      #
+      # The first version of this comment claimed the four-part summary and put
+      # #60 in the client-only list. #60 is three Go files
+      # (`internal/acquire/bindery{,_test}.go`, `internal/api/inventory.go`) and
+      # nothing else. The reviewer caught it on this PR; the count was right and
+      # the sentence drawn from it was not, which is the more dangerous of the
+      # two errors because this comment is what the next maintainer re-derives
+      # the boundary from.
+      #
+      # Three things the replay settled that guessing would have got wrong:
+      #
+      #  1. `internal/api/api.go` is FREE. It is the route table where
+      #     requireUser / requireOwner / requireScope is applied — one dropped
+      #     wrapper silently unauthenticates an endpoint, which is the single
+      #     highest-value line in the repo — and at 695 lines it is nothing like
+      #     signet's 3,540-line main.go. It also drives the tier on zero PRs by
+      #     itself: every PR touching it already matched elsewhere. Including it
+      #     costs no discrimination at all.
+      #  2. `internal/store/repo.go`, `internal/delivery/` and
+      #     `internal/api/deliveries.go` are free on the same test — adding all
+      #     three moved no PR. They are in on the merits (a query that forgets
+      #     its user scope; a path that mails a book off the box), not because
+      #     the measurement asked for them, and a future PR touching only one of
+      #     them *will* escalate. That is the intent. `internal/api/watch` and
+      #     `internal/store/sources` are here on the same footing and are free
+      #     for the same reason — #66 is the LYCM-109 PR and it already matched
+      #     on `api.go` and `migrations/`. They are the case/NFC-NFD path
+      #     identity pair, and a regression there does not fail a test: a deploy
+      #     restart re-scans the whole tree and the library duplicates itself.
+      #  2b. `internal/acquire/` is the one addition that is NOT free — it is
+      #     what moves #60, and it went in only after re-reading the code rather
+      #     than to make the sentence above come out even. It holds the Bindery
+      #     API key and sets it as an `X-Api-Key` header (`bindery.go:269`) on a
+      #     retry path that logs method and path on failure (`:253`). "Leaks a
+      #     secret" is one of the four tests this input exists to apply, so it
+      #     qualifies on its own. Noting the order explicitly because fitting
+      #     the boundary to the prose is precisely the failure that produced the
+      #     paragraph above, and the two are indistinguishable from the diff.
+      #  3. `.github/workflows/` is the sole escalation driver on exactly two of
+      #     the seventeen — #54 (a one-file Play-track fix) and #77, a
+      #     nine-file lint-config fix whose only *sensitive* path is `web.yml`
+      #     (the other eight are ordinary `web/` files). #77 is the weakest high
+      #     in the set and it is kept anyway: this is the directory that decides
+      #     what runs on a self-hosted runner, and it is where this very file
+      #     lives. Two others look like workflow escalations and are not — #64
+      #     also touches `deploy/Dockerfile`, and #68 also touches three files
+      #     under `mobile/lyceum/lib/auth/`, which is the better reason of the
+      #     two it has.
+      #
+      # File stems are deliberately unanchored (`internal/api/session`, not
+      # `session\.go$`) so `_test.go` comes along, on switchyard's authz-guard
+      # lesson: deleting a guard's invocation was caught, gutting its logic was
+      # not. `internal/api/session_test.go` is 871 lines and is the guard for
+      # the session surface above it.
+      #
+      # `CLAUDE.md` is listed although the repo has none. It is the file a
+      # future one would land at, and a PR introducing repo-wide agent
+      # instructions should escalate, not slip in under a docs-only skip.
+      sensitive_paths: '^(internal/api/(api|auth|session|cfaccess|cors|ratelimit|upload|deliveries|watch)|internal/(invite|dedup|delivery|acquire)/|internal/store/(user|pairing|migrate|repo|sources)|migrations/|cmd/lyceum/(main|token)|deploy/|\.env\.example|web/src/(auth/|api/auth\.ts|stores/auth)|mobile/lyceum/lib/auth/|\.github/workflows/|REVIEW\.md|CLAUDE\.md|\.github/review-ignore)'
+
+      # No `docs_skip_extra`: this repo commits no knowledge-graph cache, and
+      # what generated material it does carry is excluded outright in
+      # `.github/review-ignore` rather than misfiled as documentation.
+    secrets:
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      switchyard_token: ${{ secrets.SWITCHYARD_REVIEWER_TOKEN }}
