@@ -102,8 +102,10 @@ type config struct {
 	kindleAutoSend bool            // LYCEUM_KINDLE_AUTO_SEND — deliver every upload (LYCM-402)
 }
 
-func loadConfig() config {
-	c := config{
+// envConfig resolves the server config from the environment. Flags layer on
+// top of it (see bindFlags and loadConfig).
+func envConfig() config {
+	return config{
 		addr:        envOr("LYCEUM_ADDR", ":8080"),
 		databaseURL: firstEnv([]string{"LYCEUM_DATABASE_URL", "DATABASE_URL"}, defaultDatabaseURL),
 		dataDir:     envOr("LYCEUM_DATA_DIR", "data/blobs"),
@@ -145,11 +147,40 @@ func loadConfig() config {
 		kindleAddr:     os.Getenv("LYCEUM_KINDLE_ADDR"),
 		kindleAutoSend: envBool("LYCEUM_KINDLE_AUTO_SEND", false),
 	}
-	flag.StringVar(&c.addr, "addr", c.addr, "HTTP listen address")
-	flag.StringVar(&c.databaseURL, "database-url", c.databaseURL, "Postgres connection string")
-	flag.StringVar(&c.dataDir, "data-dir", c.dataDir, "blob storage directory")
+}
+
+// loadConfig resolves the config from the environment and lets command-line
+// flags override it.
+func loadConfig() config {
+	c := envConfig()
+	apply := bindFlags(flag.CommandLine, &c)
 	flag.Parse()
+	apply()
 	return c
+}
+
+// bindFlags registers the server's flags on fs, seeded from the already
+// env-resolved c, and returns the func that applies whatever flag could not
+// write straight into c. Call it after fs.Parse.
+//
+// -database-url is deliberately registered with an *empty* default instead of
+// the resolved DSN (LYCM-119). flag prints every flag's default in its usage
+// output, so seeding that one from config turns `lyceum --help` into a
+// credential disclosure needing no privilege beyond running the binary — and
+// from there the password lands in support requests, CI logs, screen shares and
+// agent transcripts. The usage text says where the value comes from; the value
+// itself never reaches DefValue. addr and data-dir hold no secret, so they go
+// on showing their effective value.
+func bindFlags(fs *flag.FlagSet, c *config) func() {
+	fs.StringVar(&c.addr, "addr", c.addr, "HTTP listen address")
+	databaseURL := fs.String("database-url", "",
+		"Postgres connection string (default: $LYCEUM_DATABASE_URL, else $DATABASE_URL)")
+	fs.StringVar(&c.dataDir, "data-dir", c.dataDir, "blob storage directory")
+	return func() {
+		if *databaseURL != "" {
+			c.databaseURL = *databaseURL
+		}
+	}
 }
 
 func firstEnv(keys []string, def string) string {
