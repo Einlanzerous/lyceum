@@ -12,6 +12,12 @@ const _kServerKey = 'lyceum.server_url';
 
 /// Optional compile-time default for dev, e.g.
 /// `flutter run --dart-define=LYCEUM_BASE_URL=http://10.0.0.20:8080`.
+///
+/// **Never set in a release build** (LYCM-103, LYCM-104). A store install has to
+/// start with no address, because the invite QR is what supplies one — baking a
+/// default in would ship every installer pointed at whoever built the APK, and
+/// would hide the connect prompt that scanning starts from. `mobile-release.yml`
+/// passes no `--dart-define`; keep it that way.
 const _kCompileDefault = String.fromEnvironment('LYCEUM_BASE_URL');
 
 /// The configured backend base URL (normalized, no trailing slash). Empty

@@ -39,6 +39,7 @@ lib/
   router/                     app_router
   features/
     library/                  library_screen, book_card, library_controller
+    auth/                     sign_in_screen, scan_invite_screen, scan_onboarding
     settings/                 settings_screen, server_settings
     reader/                   reader_screen (WebView)
   widgets/                    brand_mark, segmented_control
@@ -57,8 +58,16 @@ flutter test                     # unit tests (models + normalizeServerUrl)
 flutter run --dart-define=LYCEUM_BASE_URL=http://10.0.0.20:8080
 ```
 
-On first launch (no `--dart-define`) the app shows a connect prompt — enter the
-server URL, **Test** (`GET /healthz`), **Save**.
+On first launch (no `--dart-define`) the app shows a connect prompt whose primary
+action is **Scan invite**: the invite QR carries `<origin>/sign-in?token=…`, so
+one scan both points the app at the library and signs the device in (LYCM-103).
+Typing an address by hand stays behind *Enter a server address instead* — **Test**
+(`GET /healthz`), **Save** — which is what a LAN or dev box, a bare v1 token, or
+an 8-char pairing code still needs.
+
+Release builds deliberately pass no `--dart-define=LYCEUM_BASE_URL`: a store
+install must start with no address at all, or it would ship pointed at whoever
+built it (LYCM-104).
 
 ## Build
 

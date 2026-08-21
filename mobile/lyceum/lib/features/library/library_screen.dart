@@ -6,8 +6,10 @@ import '../../api/api_providers.dart';
 import '../../api/models.dart';
 import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
+import '../../auth/onboarding.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../widgets/brand_mark.dart';
+import '../auth/scan_onboarding.dart';
 import '../review/review_controller.dart';
 import '../settings/server_settings.dart';
 import 'book_card.dart';
@@ -375,10 +377,62 @@ class _Shelf extends ConsumerWidget {
   }
 }
 
-class _ConnectPrompt extends ConsumerWidget {
+/// The first thing a fresh install sees (LYCM-103).
+///
+/// The router only sends people to the front door once a server has told it they
+/// are signed out — an app with no address has asked nobody, so this screen, not
+/// `/sign-in`, is where onboarding actually starts. It therefore has to offer
+/// the same one action: scan the invite, which names the library and unlocks it
+/// in a single gesture. Typing an address stays behind a tap for the cases a QR
+/// can't cover — a LAN box, a dev server, a bare key or pairing code.
+class _ConnectPrompt extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ConnectPrompt> createState() => _ConnectPromptState();
+}
+
+class _ConnectPromptState extends ConsumerState<_ConnectPrompt> {
+  bool _scanning = false;
+  bool _manual = false;
+  String? _note;
+
+  Future<void> _scan() async {
+    if (_scanning) return;
+    setState(() {
+      _scanning = true;
+      _note = null;
+    });
+    try {
+      final result = await scanAndOnboard(context, ref);
+      if (!mounted || result == null) return;
+      setState(() {
+        _note = switch (result) {
+          // Signed in: the shelf is already reloading behind this card, which is
+          // about to stop existing.
+          Onboarded() => null,
+          NeedsServerAddress() =>
+            "That code doesn't say which library it belongs to. Enter the "
+                'address below, then sign in with the key.',
+          ServerUnreachable(address: final a) =>
+            "Couldn't reach $a. Check this phone's connection, and that the "
+                'address in the invite is one it can see.',
+          InviteRejected() =>
+            "That key didn't work — it may be spent, expired, or already used. "
+                'Ask for a fresh one.',
+          InviteThrottled() =>
+            'Too many tries. Wait a minute, then scan again.',
+        };
+        if (result is NeedsServerAddress) _manual = true;
+      });
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final lyc = context.lyc;
+    final note = _note;
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -391,7 +445,7 @@ class _ConnectPrompt extends ConsumerWidget {
             border: Border.all(color: lyc.border),
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
@@ -400,14 +454,45 @@ class _ConnectPrompt extends ConsumerWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Point Lyceum at your self-hosted server to see your shelf.',
+                'Scan the invite you were sent — it points Lyceum at your '
+                'server and signs this device in.',
                 style: TextStyle(fontSize: 13.5, color: lyc.muted, height: 1.4),
               ),
               const SizedBox(height: 18),
-              ServerSettings(
-                onSaved: () =>
-                    ref.read(libraryControllerProvider.notifier).refresh(),
+              ScanInviteButton(
+                onPressed: _scanning ? null : _scan,
+                busy: _scanning,
               ),
+              if (note != null) ...[
+                const SizedBox(height: 14),
+                Text(
+                  note,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.5,
+                    color: lyc.error,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 6),
+              Center(
+                child: TextButton(
+                  onPressed: () => setState(() => _manual = !_manual),
+                  child: Text(
+                    _manual
+                        ? 'Hide server address'
+                        : 'Enter a server address instead',
+                    style: TextStyle(fontSize: 12, color: lyc.dim),
+                  ),
+                ),
+              ),
+              if (_manual) ...[
+                const SizedBox(height: 6),
+                ServerSettings(
+                  onSaved: () =>
+                      ref.read(libraryControllerProvider.notifier).refresh(),
+                ),
+              ],
             ],
           ),
         ),
