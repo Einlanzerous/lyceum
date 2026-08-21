@@ -1,0 +1,38 @@
+# Paths the PR reviewer does not read (SERV-87).
+#
+# One extended regex per line, matched against the repository-relative path of
+# every changed file. `#` comments and blank lines are ignored.
+#
+# Per-repo on purpose even though the workflow is shared (SERV-92): which
+# artifacts are generated is a fact about this repository. The shared workflow
+# reads this from the BASE ref of the PR under review, so widening it in a PR
+# does not exempt that PR — and `.github/review-ignore` is itself in this
+# repo's `sensitive_paths`, so a PR that widens it escalates.
+#
+# What belongs here is regenerated artifacts, not merely large files. The test
+# is: if this file is wrong, is the fix to edit it? For a generated file the
+# answer is no — you re-run the generator — so a review comment on its diff has
+# nowhere to land. A large hand-written file is exactly what the reviewer should
+# be spending its budget on.
+
+# release-please owns this and rewrites it wholesale on every release. It is
+# also `.md`, so the docs-only rule already covers it on a release PR; this
+# covers the case where it rides along with code.
+^CHANGELOG\.md$
+
+# Resolved dependency trees for the two clients. What matters is which
+# dependency moved, and that is in `web/package.json` and
+# `mobile/lyceum/pubspec.yaml`, neither of which is excluded. `web/bun.lock` is
+# 5k+ lines and turned over wholesale by LYCM-71's npm→bun migration.
+^web/bun\.lock$
+^mobile/lyceum/pubspec\.lock$
+
+# NOT excluded, deliberately, and each for a reason:
+#
+#   go.sum          — a dependency tree, but also the checksum database. A line
+#                     changing here without a matching go.mod change is the
+#                     shape of a supply-chain problem, and that is worth a read.
+#   web/dist/       — only `.gitkeep` is tracked (see .gitignore); the bundle
+#                     itself never reaches a diff, so there is nothing to skip.
+#   migrations/     — hand-written SQL, and in `sensitive_paths`.
+#   deploy/Dockerfile, Makefile — hand-written build definitions.
