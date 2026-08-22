@@ -356,6 +356,14 @@ func main() {
 
 	st := store.New(pool, cfg.dataDir)
 
+	// Accounts (LYCM-116): a server with a household on it must not boot into
+	// single-user mode, where every request is served as the owner. Checked ahead
+	// of bootstrapOwner so a server that must not run doesn't mint an invite on
+	// its way out.
+	if err := verifyAuthMode(ctx, st, cfg.userAuth); err != nil {
+		log.Fatal(err)
+	}
+
 	// Accounts (LYCM-801): migration 0011 seeds the owner row; this lands the
 	// operator's configured identity on it and prints a first sign-in invite when
 	// nobody can get in yet.

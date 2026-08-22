@@ -89,3 +89,20 @@ jobs:
       - name: Not applicable
         if: steps.changes.outputs.go != 'true'
         run: echo "No Go/migration changes in this PR — backend tests not applicable. Reporting pass so the required check doesn't block non-Go PRs."
+
+  # The template a fresh checkout copies to .env must keep saying what
+  # LYCEUM_AUTH is (LYCM-116, PRSR-10). The fail-closed boot guard is what
+  # actually protects the deploy; this keeps the line that stops an operator
+  # meeting the guard in the first place from quietly going missing. An empty
+  # value counts as missing: envBool falls back to the default for it, which is
+  # exactly the drift being guarded against.
+  env-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: .env.example sets LYCEUM_AUTH explicitly
+        run: |
+          if ! grep -Eq '^LYCEUM_AUTH=(true|false)$' .env.example; then
+            echo "::error file=.env.example::.env.example must set LYCEUM_AUTH to true or false (LYCM-116) — a copied .env without it boots a household as a single shared account"
+            exit 1
+          fi

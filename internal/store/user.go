@@ -193,6 +193,19 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return out, rows.Err()
 }
 
+// CountUsers reports how many accounts exist, the owner included.
+//
+// cmd/lyceum reads it at boot to refuse single-user mode on a server that has a
+// household on it (LYCM-116): with LYCEUM_AUTH off every request is served as
+// the owner, so a second account is proof the configuration is wrong.
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: count users: %w", err)
+	}
+	return n, nil
+}
+
 // UpdateDisplayName renames a user, returning the updated row or ErrNotFound.
 func (s *Store) UpdateDisplayName(ctx context.Context, id int64, displayName string) (User, error) {
 	if displayName == "" {
