@@ -43,9 +43,14 @@ func verifyAuthMode(ctx context.Context, users userCounter, userAuth bool) error
 	if accounts <= 1 {
 		return nil
 	}
+	// Only one way out is reachable from where the operator is standing: the
+	// server is down, and deleting an account needs an /admin route that 403s
+	// while auth is off anyway. So name the flag and the one command that works
+	// with nothing running.
 	return fmt.Errorf("refusing to start: LYCEUM_AUTH is off but this database holds %d accounts. "+
 		"With user auth off every request is served as the owner, so all %d people would share "+
 		"the owner's bookmarks and read marks and write their reading positions onto the owner's "+
-		"rows. Set LYCEUM_AUTH=true, or delete the extra accounts to run this server single-user.",
+		"rows. Set LYCEUM_AUTH=true; if no device holds a session yet, `lyceum mint-token` issues "+
+		"a sign-in invite.",
 		accounts, accounts)
 }

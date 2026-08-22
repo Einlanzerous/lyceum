@@ -98,8 +98,8 @@ finished. There are no passwords — sign-in is by one-time invite.
 
 **Enforcement is off by default** (`LYCEUM_AUTH=false`). While it is off the
 reader core is open and every request is served as the owner, exactly as before
-accounts existed — the clients don't send credentials yet. Turn it on once they
-ship a sign-in screen.
+accounts existed. That default is for the single-user self-host; a household
+turns it on, and both clients ship a sign-in screen to meet it.
 
 **A server with a household on it refuses to start with enforcement off**
 (LYCM-116). Since every request would be served as the owner, a second account is
