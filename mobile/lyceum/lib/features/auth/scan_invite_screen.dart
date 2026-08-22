@@ -3,14 +3,17 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../auth/invite_token.dart';
 
-/// Scan an invite QR shown on another device (LYCM-88).
+/// Scan an invite QR shown on another device (LYCM-88, LYCM-103).
 ///
 /// The natural cross-device path on a phone: point the camera at the QR a
 /// signed-in device is showing instead of hand-typing a 43-char key. The QR
-/// carries a `<origin>/sign-in?token=…` URL; we pull the token back out (see
-/// [extractInviteToken]) and hand it to the sign-in screen, which redeems it.
+/// carries a `<origin>/sign-in?token=…` URL, and both halves of it matter — the
+/// token to redeem, and the address to redeem it against, which on a fresh
+/// install is the only way this app learns where the library is.
 ///
-/// Pops with the parsed `lyc_…` token, or null if the user backs out.
+/// Pops with the parsed [ScannedInvite], or null if the user backs out. What to
+/// do with it is the caller's business (see `scanAndOnboard`); this screen owns
+/// the camera and nothing else.
 class ScanInviteScreen extends StatefulWidget {
   const ScanInviteScreen({super.key});
 
@@ -37,10 +40,10 @@ class _ScanInviteScreenState extends State<ScanInviteScreen> {
   void _onDetect(BarcodeCapture capture) {
     if (_handled) return;
     for (final barcode in capture.barcodes) {
-      final token = extractInviteToken(barcode.rawValue ?? '');
-      if (token != null) {
+      final invite = extractInvite(barcode.rawValue ?? '');
+      if (invite != null) {
         _handled = true;
-        Navigator.of(context).pop(token);
+        Navigator.of(context).pop(invite);
         return;
       }
     }

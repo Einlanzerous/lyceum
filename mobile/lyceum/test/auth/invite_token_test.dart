@@ -42,6 +42,64 @@ void main() {
     });
   });
 
+  // The origin is the half that used to be thrown away (LYCM-103): a fresh
+  // install has no server address, so the invite naming one is the only way it
+  // ever learns where the library is.
+  group('extractInvite', () {
+    test('returns the origin and the token from a scanned sign-in URL', () {
+      expect(
+        extractInvite('https://lyceum-direct.example.test/sign-in?token=lyc_a'),
+        (token: 'lyc_a', origin: 'https://lyceum-direct.example.test'),
+      );
+    });
+
+    test('keeps a non-default port', () {
+      expect(extractInvite('http://192.168.1.9:8080/sign-in?token=lyc_a'), (
+        token: 'lyc_a',
+        origin: 'http://192.168.1.9:8080',
+      ));
+    });
+
+    // The exact inverse of inviteSignInUrl, which appends `/sign-in` to a base
+    // that may itself carry a path — a proxy mounting Lyceum under /lyceum.
+    // Discarding the path would hand back the proxy's front page.
+    test('keeps a path prefix, minus the /sign-in the link added', () {
+      expect(
+        extractInvite(
+          'https://home.example/lyceum/sign-in?token=lyc_a',
+        )?.origin,
+        'https://home.example/lyceum',
+      );
+    });
+
+    test('round-trips whatever inviteSignInUrl builds', () {
+      const origin = 'https://lyceum-direct.example.test';
+      final back = extractInvite(inviteSignInUrl(origin, 'lyc_a+b/c'));
+      expect(back, (token: 'lyc_a+b/c', origin: origin));
+    });
+
+    test('a bare pasted key names no library', () {
+      expect(extractInvite('  lyc_abc123\n'), (
+        token: 'lyc_abc123',
+        origin: null,
+      ));
+    });
+
+    // A QR encoding something this app could never talk to must not be allowed
+    // to overwrite a server address that works.
+    test('ignores an origin it could not reach anyway', () {
+      expect(extractInvite('lyceum://open?token=lyc_a')?.origin, isNull);
+      expect(extractInvite('file:///tmp/x?token=lyc_a')?.origin, isNull);
+    });
+
+    test('rejects the same things extractInviteToken does', () {
+      expect(extractInvite('http://192.168.1.9:8080/sign-in'), isNull);
+      expect(extractInvite('hello there'), isNull);
+      expect(extractInvite('lyc_'), isNull);
+      expect(extractInvite('   '), isNull);
+    });
+  });
+
   group('pairing codes', () {
     test('normalizes case, hyphen, and spaces', () {
       expect(normalizePairingCode('bk4t-9q2m'), 'BK4T9Q2M');

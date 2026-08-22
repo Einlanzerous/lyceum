@@ -2,24 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/client.dart';
 import '../../api/server_store.dart';
 import '../../auth/auth_controller.dart';
 import '../../auth/device_label.dart';
 import '../../auth/invite_token.dart';
+import '../../auth/onboarding.dart';
 import '../../features/library/library_controller.dart';
 import '../../features/settings/server_settings.dart';
-import 'scan_invite_screen.dart';
+import 'scan_onboarding.dart';
 import '../../theme/lyceum_colors.dart';
 import '../../theme/lyceum_theme.dart';
 import '../../widgets/brand_mark.dart';
 import '../../widgets/lyc_sheet.dart';
 
-/// The front door (LYCM-804).
+/// The front door (LYCM-804, LYCM-103).
 ///
-/// One field: the invite. There are no passwords here — you redeem a key once and
-/// this device keeps a durable session. Everything else on the screen exists to
-/// make the three ways that can fail legible.
+/// One thing to do: scan the invite. There are no passwords here — you redeem a
+/// key once and this device keeps a durable session. The QR is the primary path
+/// because it is the only one that needs nothing typed: it carries the library's
+/// address as well as the key, which is the whole of onboarding a fresh install.
+/// The field below it, and the server address below that, are the fallbacks for
+/// what a QR cannot carry — a bare v1 token, a short pairing code, a LAN box.
+/// Everything else on the screen exists to make the ways it can fail legible.
 class SignInScreen extends ConsumerStatefulWidget {
   const SignInScreen({super.key});
 
@@ -31,7 +35,11 @@ class SignInScreen extends ConsumerStatefulWidget {
 /// a rejected key is *your* problem to fix, an unreachable server is not, and
 /// showing the red "bad key" banner for a flat network is a small lie that
 /// sends people hunting for a new invite they don't need.
-enum _Failure { rejected, throttled, unreachable }
+///
+/// [needsServer] is the one that isn't a failure at all: a key that names no
+/// library, on a device that has none. It asks for the fallback rather than
+/// apologising.
+enum _Failure { rejected, throttled, unreachable, needsServer }
 
 class _SignInScreenState extends ConsumerState<SignInScreen> {
   final _invite = TextEditingController();
@@ -41,8 +49,22 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   String _deviceLabel = '';
   bool _editingLabel = false;
   bool _submitting = false;
+  // Scanning is a kind of submitting — it ends in a redemption — but the two
+  // want the spinner in different places, so the screen tracks which it is in.
+  bool _scanning = false;
   bool _showServerSettings = false;
   _Failure? _failure;
+
+  /// The invite the camera last handed us, kept only so a failure can be
+  /// retried against the library it named. Without it, Retry after an
+  /// unreachable scan would quietly re-send the scanned key to the *old*
+  /// server — which answers 401, and turns "your network is down" into "your
+  /// key is bad". Cleared the moment the field is edited by hand: a typed key
+  /// is a new intent.
+  ScannedInvite? _scanned;
+
+  /// The address that didn't answer, when we know which one it was.
+  String? _unreachable;
 
   @override
   void initState() {
@@ -75,6 +97,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   void _onInviteChanged() {
+    _scanned = null;
     // Clear a rejection or throttle the moment they start fixing it — a banner
     // that outlives the key it was about is just nagging.
     if (_failure == _Failure.rejected || _failure == _Failure.throttled) {
@@ -94,17 +117,65 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     _invite.selection = TextSelection.collapsed(offset: _invite.text.length);
   }
 
-  /// Scan the invite QR a signed-in device is showing (LYCM-88). The scanner
-  /// hands back the parsed `lyc_…` token; fill the field and redeem it straight
-  /// away, since scanning is an unambiguous "yes, this one".
+  /// Scan the invite QR a signed-in device is showing (LYCM-88, LYCM-103).
+  ///
+  /// The scanner hands back the address as well as the key, and [scanAndOnboard]
+  /// applies them in the order that survives: point the app at the library, then
+  /// redeem against it. Scanning is an unambiguous "yes, this one", so nothing
+  /// waits for a second tap.
   Future<void> _scan() async {
-    final token = await Navigator.of(
-      context,
-    ).push<String>(MaterialPageRoute(builder: (_) => const ScanInviteScreen()));
-    if (token == null || token.isEmpty || !mounted) return;
-    _invite.text = token;
-    _invite.selection = TextSelection.collapsed(offset: _invite.text.length);
-    _submit();
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _scanning = true;
+      _failure = null;
+    });
+    try {
+      final result = await scanAndOnboard(
+        context,
+        ref,
+        deviceLabel: _deviceLabel,
+        // The key lands in the field before anything can refuse it, so a
+        // rejection leaves something to look at — and Try again something to
+        // send.
+        onScanned: (invite) {
+          _invite.text = invite.token;
+          _invite.selection = TextSelection.collapsed(
+            offset: _invite.text.length,
+          );
+          // After the field, whose listener clears it.
+          _scanned = invite;
+        },
+      );
+      if (!mounted || result == null) return;
+      _apply(result);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _scanning = false;
+        });
+      }
+    }
+  }
+
+  /// Try the last attempt again, whichever it was. A scanned invite goes back
+  /// through [Onboarder.connect] — address and all — rather than being re-sent
+  /// to whatever server this device happens to still be pointed at.
+  Future<void> _retry() async {
+    final scanned = _scanned;
+    if (scanned == null) return _submit();
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _failure = null;
+    });
+    final result = await ref
+        .read(onboarderProvider)
+        .connect(scanned, deviceLabel: _deviceLabel);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    _apply(result);
   }
 
   Future<void> _submit() async {
@@ -114,38 +185,34 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       _submitting = true;
       _failure = null;
     });
-    try {
-      // The one field takes either a full invite or the short pairing code
-      // (LYCM-88); route by shape so the person never has to say which they have.
-      final ctrl = ref.read(authControllerProvider.notifier);
-      final raw = _invite.text;
-      if (looksLikePairingCode(raw)) {
-        await ctrl.signInWithCode(
-          normalizePairingCode(raw),
-          deviceLabel: _deviceLabel,
-        );
-      } else {
-        await ctrl.signIn(raw, deviceLabel: _deviceLabel);
-      }
-      // The router's redirect carries us to the library; the shelf was fetched
-      // (and 401'd) before we had a credential, so it needs asking again.
-      ref.invalidate(libraryControllerProvider);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _failure = e.isUnauthorized
-            ? _Failure.rejected
-            : e.isTooManyRequests
-            ? _Failure.throttled
-            : _Failure.unreachable;
-      });
-    } catch (_) {
-      // Timeout, DNS, connection refused — the server, not the key.
-      if (!mounted) return;
-      setState(() => _failure = _Failure.unreachable);
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
+    // The one field takes either a full invite or the short pairing code
+    // (LYCM-88); the onboarder routes by shape, so the person never has to say
+    // which they have.
+    final result = await ref
+        .read(onboarderProvider)
+        .redeem(_invite.text, deviceLabel: _deviceLabel);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    _apply(result);
+  }
+
+  /// Render an outcome. A success needs nothing: the router's redirect carries
+  /// us to the library the moment the auth state flips.
+  void _apply(OnboardResult result) {
+    setState(() {
+      _unreachable = result is ServerUnreachable ? result.address : null;
+      _failure = switch (result) {
+        Onboarded() => null,
+        InviteRejected() => _Failure.rejected,
+        InviteThrottled() => _Failure.throttled,
+        ServerUnreachable() => _Failure.unreachable,
+        NeedsServerAddress() => _Failure.needsServer,
+      };
+      // A key that names no library can only be redeemed against an address the
+      // person gives us, so put that field in front of them rather than leaving
+      // them to go looking for it.
+      if (_failure == _Failure.needsServer) _showServerSettings = true;
+    });
   }
 
   @override
@@ -171,7 +238,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
 
                   if (!hasBackend)
                     _NoServerCard(
-                      onSaved: () => ref.invalidate(libraryControllerProvider),
+                      onScan: _scan,
+                      scanning: _scanning,
+                      failure: _failure,
+                      showManual: _showServerSettings,
+                      onToggleManual: () => setState(
+                        () => _showServerSettings = !_showServerSettings,
+                      ),
+                      onSaved: () {
+                        ref.invalidate(libraryControllerProvider);
+                        setState(() {
+                          _failure = null;
+                          _showServerSettings = false;
+                        });
+                      },
                     )
                   else ...[
                     _Card(
@@ -188,6 +268,16 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                               returningName: returningName,
                             ),
                           const SizedBox(height: 22),
+                          // The one tap that needs nothing typed goes first and
+                          // wears the filled button; the key field below it is
+                          // for what a QR can't carry.
+                          ScanInviteButton(
+                            onPressed: _submitting ? null : _scan,
+                            busy: _scanning,
+                          ),
+                          const SizedBox(height: 16),
+                          const _Or(),
+                          const SizedBox(height: 16),
                           _inviteField(upgrade: upgrade),
                           if (_hasToken && _failure == null) ...[
                             const SizedBox(height: 10),
@@ -229,7 +319,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     if (_failure == _Failure.unreachable) ...[
                       const SizedBox(height: 16),
                       _UnreachableCard(
-                        onRetry: _submit,
+                        address: _unreachable,
+                        onRetry: _retry,
                         onServerAddress: () => setState(
                           () => _showServerSettings = !_showServerSettings,
                         ),
@@ -264,7 +355,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     final rejected = _failure == _Failure.rejected;
     final label = upgrade && !rejected
         ? 'Paste your invite to continue'
-        : 'Invite key';
+        : 'Or paste a key';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -306,35 +397,21 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             // No green tick next to a red banner: the key that was just refused
             // is not "good to go", and saying so twice in one field is the kind
             // of small incoherence that makes people distrust the rest.
+            // Scan used to sit here beside paste. It is a primary button now, so
+            // this is the clipboard alone — the fallback for a key that arrived
+            // as text rather than as a code to point a camera at.
             suffixIcon: rejected
                 ? null
                 : _hasToken
                 ? Icon(Icons.check_rounded, size: 18, color: lyc.success)
-                // Scan sits beside paste: a QR shown on another device is the
-                // frictionless path, the clipboard the fallback for a key that
-                // arrived as text.
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: _submitting ? null : _scan,
-                        icon: Icon(
-                          Icons.qr_code_scanner_rounded,
-                          size: 18,
-                          color: lyc.brass,
-                        ),
-                        tooltip: 'Scan invite QR',
-                      ),
-                      IconButton(
-                        onPressed: _submitting ? null : _paste,
-                        icon: Icon(
-                          Icons.content_paste_rounded,
-                          size: 18,
-                          color: lyc.brass,
-                        ),
-                        tooltip: 'Paste',
-                      ),
-                    ],
+                : IconButton(
+                    onPressed: _submitting ? null : _paste,
+                    icon: Icon(
+                      Icons.content_paste_rounded,
+                      size: 18,
+                      color: lyc.brass,
+                    ),
+                    tooltip: 'Paste',
                   ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(LycRadii.card),
@@ -424,16 +501,19 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   Widget _submitButton({required bool upgrade}) {
-    final label = switch ((_submitting, _failure, upgrade)) {
+    final label = switch ((_submitting && !_scanning, _failure, upgrade)) {
       (true, _, _) => 'Unlocking…',
       (_, _Failure.rejected, _) => 'Try again',
       (_, _, true) => 'Keep my library',
       _ => 'Unlock the library',
     };
 
-    return FilledButton(
+    // Outlined, not filled: Scan invite above it is the primary action now, and
+    // two filled buttons in one card would say the choice doesn't matter.
+    final busy = _submitting && !_scanning;
+    return OutlinedButton(
       onPressed: _hasToken && !_submitting ? _submit : null,
-      child: _submitting
+      child: busy
           ? Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -442,7 +522,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: context.lyc.onBrass,
+                    color: context.lyc.brass,
                   ),
                 ),
                 const SizedBox(width: 9),
@@ -591,8 +671,8 @@ class _Headline extends StatelessWidget {
           ),
         ] else
           Text(
-            'Paste the invite a housemate gave you, or type the short code — or '
-            'tap scan and point at its QR.',
+            'Point the camera at the QR on your invite — that is the whole of '
+            'it. A pasted key or a short code works too.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13.5, height: 1.55, color: lyc.muted),
           ),
@@ -630,9 +710,15 @@ class _UnreachableCard extends StatelessWidget {
   const _UnreachableCard({
     required this.onRetry,
     required this.onServerAddress,
+    this.address,
   });
   final VoidCallback onRetry;
   final VoidCallback onServerAddress;
+
+  /// Which library didn't answer. Worth printing when a scan supplied it: the
+  /// address came off a QR, so it is the one thing on screen the person has
+  /// never seen and cannot check.
+  final String? address;
 
   @override
   Widget build(BuildContext context) {
@@ -668,6 +754,17 @@ class _UnreachableCard extends StatelessWidget {
                         color: lyc.muted,
                       ),
                     ),
+                    if (address != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        address!,
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          color: lyc.dim,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -697,22 +794,127 @@ class _UnreachableCard extends StatelessWidget {
   }
 }
 
-class _NoServerCard extends StatelessWidget {
-  const _NoServerCard({required this.onSaved});
-  final VoidCallback onSaved;
+/// A rule with "or" set into it, marking where the easy path ends and the
+/// fallbacks begin.
+class _Or extends StatelessWidget {
+  const _Or();
 
   @override
   Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    final rule = Expanded(child: Divider(height: 1, color: lyc.border));
+    return Row(
+      children: [
+        rule,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            'or',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+              color: lyc.dim,
+            ),
+          ),
+        ),
+        rule,
+      ],
+    );
+  }
+}
+
+/// What a fresh install sees: no address, no session, nothing to type (LYCM-103).
+///
+/// This card used to be a URL field and an instruction to go and find the
+/// address. It asked the wrong person: on the direct path the address is a
+/// Cloudflare hostname nobody has memorised, and the one device that knows it is
+/// the one showing the QR. So the QR answers both questions at once, and the
+/// field it replaced stays one tap away — a bare v1 token, an 8-char pairing
+/// code, and a LAN or dev box all still arrive without an address attached.
+class _NoServerCard extends StatelessWidget {
+  const _NoServerCard({
+    required this.onSaved,
+    required this.onScan,
+    required this.scanning,
+    required this.failure,
+    required this.showManual,
+    required this.onToggleManual,
+  });
+
+  final VoidCallback onSaved;
+  final VoidCallback onScan;
+  final bool scanning;
+  final _Failure? failure;
+  final bool showManual;
+  final VoidCallback onToggleManual;
+
+  /// What went wrong last time, in this card's terms. `needsServer` is the
+  /// interesting one: the scan worked, the key is fine, and the only thing
+  /// missing is the address — which the field just below now wants.
+  String? get _note => switch (failure) {
+    _Failure.needsServer =>
+      "That code doesn't say which library it belongs to. Enter the address "
+          'below, then paste the key.',
+    _Failure.unreachable =>
+      "Couldn't reach the library in that invite. Check this phone's "
+          'connection, and that the address it names is one it can see.',
+    _Failure.rejected =>
+      "That key didn't work — it may be spent, expired, or already used. Ask "
+          'for a fresh one.',
+    _Failure.throttled => 'Too many tries. Wait a minute, then scan again.',
+    null => null,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final lyc = context.lyc;
+    final note = _note;
+
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Point this app at your library first.',
+            'Scan the invite you were sent.',
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          const SizedBox(height: 16),
-          ServerSettings(onSaved: onSaved),
+          const SizedBox(height: 8),
+          Text(
+            'The QR carries both halves: which library to talk to, and the key '
+            'that opens it. Nothing to type.',
+            style: TextStyle(fontSize: 13, height: 1.5, color: lyc.muted),
+          ),
+          const SizedBox(height: 18),
+          ScanInviteButton(onPressed: scanning ? null : onScan, busy: scanning),
+          if (note != null) ...[
+            const SizedBox(height: 14),
+            LycNotice(
+              tone: failure == _Failure.needsServer
+                  ? LycTone.warning
+                  : LycTone.error,
+              child: Text(
+                note,
+                style: TextStyle(fontSize: 12.5, height: 1.5, color: lyc.muted),
+              ),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Center(
+            child: TextButton(
+              onPressed: onToggleManual,
+              child: Text(
+                showManual
+                    ? 'Hide server address'
+                    : 'Enter a server address instead',
+                style: TextStyle(fontSize: 12, color: lyc.dim),
+              ),
+            ),
+          ),
+          if (showManual) ...[
+            const SizedBox(height: 6),
+            ServerSettings(onSaved: onSaved),
+          ],
         ],
       ),
     );

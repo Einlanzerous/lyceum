@@ -5,30 +5,76 @@
 /// app scans that QR it gets the whole URL, so it has to pull the token back out;
 /// a pasted key arrives bare. Both normalise here, or to null when there's
 /// nothing token-shaped to redeem. Mirrors the web `extractInviteToken`.
+///
+/// The URL carries a second thing the app needs, and for a while threw away: the
+/// **origin**. A fresh install has no server address, so the only way to reach
+/// the library is for the invite to say where it is (LYCM-103). Hence
+/// [extractInvite], which returns both halves; [extractInviteToken] stays for
+/// the paste path, where there is no origin to find.
 library;
 
 /// The prefix every invite/session token carries (see store.newToken).
 const _tokenPrefix = 'lyc_';
 
-/// Pull the invite token out of a bare key or a `…/sign-in?token=…` URL.
-/// Whitespace (from wrapped chat/log pastes) is stripped. Returns null when the
-/// input isn't a plausible token.
-String? extractInviteToken(String raw) {
+/// An invite as it arrived: the key to redeem, and the library it names.
+///
+/// [origin] is null whenever the input carried no address — a bare pasted key,
+/// a pairing code, or a v1 QR minted before the link form. Those still redeem;
+/// they just need a server address from somewhere else.
+typedef ScannedInvite = ({String token, String? origin});
+
+/// Pull the invite out of a bare key or a `<origin>/sign-in?token=…` URL, both
+/// halves of it. Whitespace (from wrapped chat/log pastes) is stripped. Returns
+/// null when the input isn't a plausible token.
+ScannedInvite? extractInvite(String raw) {
   var candidate = raw.trim();
   if (candidate.isEmpty) return null;
 
   // A scanned QR (or forwarded link) is a URL carrying ?token=. Anything that
   // doesn't parse as an absolute URL is treated as the token itself.
+  String? origin;
   final uri = Uri.tryParse(candidate);
   if (uri != null && uri.hasScheme) {
     final fromQuery = uri.queryParameters['token'];
-    if (fromQuery != null) candidate = fromQuery;
+    if (fromQuery != null) {
+      candidate = fromQuery;
+      origin = _serverBase(uri);
+    }
   }
 
   final token = candidate.replaceAll(RegExp(r'\s+'), '');
-  return token.startsWith(_tokenPrefix) && token.length > _tokenPrefix.length
-      ? token
-      : null;
+  if (!token.startsWith(_tokenPrefix) || token.length == _tokenPrefix.length) {
+    return null;
+  }
+  return (token: token, origin: origin);
+}
+
+/// Pull just the token out. The paste path's shape: a key typed or pasted into
+/// the sign-in field names no server, and nothing there wants one.
+String? extractInviteToken(String raw) => extractInvite(raw)?.token;
+
+/// The server address a sign-in link was built from — the exact inverse of
+/// [inviteSignInUrl], and of Go's `invite.SignInURL`.
+///
+/// Undoing the `/sign-in` suffix rather than discarding the path is deliberate:
+/// a base may carry a path prefix (a reverse proxy mounting Lyceum under
+/// `/lyceum`), and throwing the path away would hand back an address that
+/// resolves to the proxy's front page instead of the API.
+///
+/// Null for anything this app could not talk to anyway — a non-http(s) scheme,
+/// or a URL with no host — so a QR encoding something else can never overwrite
+/// a working server address with one that cannot be reached.
+String? _serverBase(Uri uri) {
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  if (uri.host.isEmpty) return null;
+
+  var path = uri.path.replaceAll(RegExp(r'/+$'), '');
+  if (path.endsWith('/sign-in')) {
+    path = path.substring(0, path.length - '/sign-in'.length);
+  }
+  // `Uri.origin` omits a default port, so http://host:80 and http://host both
+  // normalise to the one address — the same shape `normalizeServerUrl` keeps.
+  return '${uri.origin}$path';
 }
 
 /// Build the QR/redemption URL that carries an invite to another device.
