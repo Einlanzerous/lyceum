@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -181,9 +182,33 @@ func TestConnectErrorsOmitPassword(t *testing.T) {
 // Nor may the DSN reach the startup logs. buildAPIOptions is where boot narrates
 // its configuration, and it sits one `%v` away from summarising the config
 // struct wholesale.
+//
+// The config is a literal, not envConfig(): the Makefile does `include .env` +
+// `export`, so every variable in a developer's .env is in this process, and
+// buildAPIOptions log.Fatalf's on a malformed LYCEUM_API_TOKENS — which exits
+// the test binary and fails the whole package without so much as naming the
+// test that did it. A literal also makes "which branches logged" a property of
+// this file rather than of whoever ran it.
 func TestStartupLogsOmitDatabaseCredentials(t *testing.T) {
-	t.Setenv("LYCEUM_DATABASE_URL", testDSN)
-	cfg := envConfig()
+	// Every branch that narrates itself, turned on, in both its enabled and
+	// disabled voice where it has one. SMTP is deliberately left out: setting a
+	// host builds a real delivery dispatcher around the store, and this test has
+	// no store to give it.
+	cfg := config{
+		databaseURL:        testDSN,
+		addr:               ":4005",
+		dataDir:            "/data/blobs",
+		userAuth:           true,
+		mobileBaseURL:      "https://direct.example.test",
+		cfAccessTeamDomain: "example.cloudflareaccess.com",
+		cfAccessAUD:        "not-a-real-aud-tag",
+		coverFetch:         true,
+		coverNormalize:     false,
+		ingestQC:           true,
+		editionResolve:     true,
+		binderyBaseURL:     "http://bindery.example.test:8787",
+		binderyAPIKey:      "not-a-real-api-key",
+	}
 
 	var logs bytes.Buffer
 	prevOut, prevFlags := log.Writer(), log.Flags()
@@ -194,12 +219,35 @@ func TestStartupLogsOmitDatabaseCredentials(t *testing.T) {
 		log.SetFlags(prevFlags)
 	})
 
-	// No SMTP host configured, so this takes the no-dispatcher path and never
-	// touches the store.
 	_, cleanup := buildAPIOptions(cfg, nil)
 	cleanup()
 
-	if strings.Contains(logs.String(), testPassword) {
-		t.Errorf("startup logs contain the database password:\n%s", logs.String())
+	got := logs.String()
+	if got == "" {
+		t.Fatal("buildAPIOptions logged nothing; this test is no longer exercising the startup narration")
+	}
+	if strings.Contains(got, testPassword) {
+		t.Errorf("startup logs contain the database password:\n%s", got)
+	}
+	if strings.Contains(got, testDSN) {
+		t.Errorf("startup logs contain the full DSN:\n%s", got)
+	}
+}
+
+// The built-in default is the one DSN the usage text still prints verbatim, so
+// that it can tell an operator with neither env var set what they are actually
+// getting. That is only safe while the constant carries no password — and a
+// password is exactly the sort of thing that gets pasted into a constant when
+// somebody is debugging a connection. Hold the line here, because nothing else
+// would notice: the usage test above drives the *env* DSN, and would pass with a
+// credential baked into the source default.
+func TestDefaultDatabaseURLCarriesNoPassword(t *testing.T) {
+	u, err := url.Parse(defaultDatabaseURL)
+	if err != nil {
+		t.Fatalf("defaultDatabaseURL does not parse as a URL: %v", err)
+	}
+	if pw, ok := u.User.Password(); ok {
+		t.Errorf("defaultDatabaseURL carries a %d-character password; it is interpolated into "+
+			"the -database-url usage text, so this puts it straight back into `lyceum --help`", len(pw))
 	}
 }

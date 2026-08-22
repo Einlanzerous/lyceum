@@ -168,13 +168,16 @@ func loadConfig() config {
 // output, so seeding that one from config turns `lyceum --help` into a
 // credential disclosure needing no privilege beyond running the binary — and
 // from there the password lands in support requests, CI logs, screen shares and
-// agent transcripts. The usage text says where the value comes from; the value
-// itself never reaches DefValue. addr and data-dir hold no secret, so they go
-// on showing their effective value.
+// agent transcripts. The usage text names the whole fallback chain instead, so
+// an operator can still see where the value comes from — including, for one
+// with neither env var set, the value they are actually getting. Naming
+// defaultDatabaseURL there is only safe because that constant carries no
+// password, which is why a test holds it to that. addr and data-dir hold no
+// secret at all, so they go on showing their effective value.
 func bindFlags(fs *flag.FlagSet, c *config) func() {
 	fs.StringVar(&c.addr, "addr", c.addr, "HTTP listen address")
 	databaseURL := fs.String("database-url", "",
-		"Postgres connection string (default: $LYCEUM_DATABASE_URL, else $DATABASE_URL)")
+		"Postgres connection string (default: $LYCEUM_DATABASE_URL, else $DATABASE_URL, else "+defaultDatabaseURL+")")
 	fs.StringVar(&c.dataDir, "data-dir", c.dataDir, "blob storage directory")
 	return func() {
 		if *databaseURL != "" {
