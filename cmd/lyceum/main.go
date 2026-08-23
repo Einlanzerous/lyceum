@@ -413,10 +413,7 @@ func main() {
 	// links) fall through to index.html for client-side routing.
 	apiSrv := api.New(st, cfg.dataDir, opts...)
 	mux := apiSrv.Handler()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","service":"lyceum"}`))
-	})
+	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.Handle("/", web.Handler())
 
 	// Cross-platform wrappers (LYCM-300): the Wails desktop shell calls this
