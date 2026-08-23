@@ -29,8 +29,30 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /app/web/dist ./web/dist
-ARG VERSION=docker
-RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o /out/lyceum ./cmd/lyceum
+#    Build identity (LYCM-121). Stamped into the binary and reported by
+#    /healthz, which Switchyard's delivery reconciler polls to record what is
+#    actually running (the SWY-192 contract, rolled out by SERV-128).
+#
+#    Both default to EMPTY, not to a placeholder like "docker". An ARG that is
+#    declared but never passed expands to an empty string either way, so the
+#    only question is what the binary does with it — and `internal/version`
+#    maps empty back to "dev"/null. A "docker" default would instead put the
+#    literal string "docker" in the delivery ledger where a version belongs.
+#
+#    There is deliberately no default of the release version: an image built
+#    outside the publish workflow must not be able to claim it is a release.
+#
+#    VERSION is bare semver, no "v" prefix — it is compared with strict
+#    equality against org.opencontainers.image.version, which metadata-action
+#    stamps bare. GIT_SHA is the full 40-char commit; /healthz reports it
+#    verbatim rather than abbreviating.
+ARG VERSION=
+ARG GIT_SHA=
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/magos/lyceum/internal/version.Version=${VERSION} \
+      -X github.com/magos/lyceum/internal/version.Commit=${GIT_SHA}" \
+    -o /out/lyceum ./cmd/lyceum
 
 # 3) Runtime: slim Alpine with ca-certificates (HTTPS cover fetch + SMTP TLS) and
 #    wget (busybox) for the compose healthcheck. Blobs live on a mounted volume
