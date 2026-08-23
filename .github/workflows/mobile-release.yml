@@ -102,6 +102,20 @@ jobs:
             --build-name="${{ steps.ver.outputs.name }}" \
             --build-number="${{ steps.ver.outputs.code }}"
 
+      # The public build must carry no server address: the invite QR supplies
+      # one (LYCM-101/102/103), and a store install that arrived pointed at the
+      # maintainer's library would be pointing every stranger at a household's
+      # books. Nothing in the Dart source can hold that line — it is a property
+      # of the build command above — so the built artifacts are read back here,
+      # before either of them leaves this job. --self-test first: a scanner that
+      # cannot fail is worse than no scanner, because it reads as proof.
+      - name: store-build hygiene
+        run: |
+          tool/check_store_build.sh --self-test
+          tool/check_store_build.sh \
+            build/app/outputs/flutter-apk/app-release.apk \
+            build/app/outputs/bundle/release/app-release.aab
+
       - name: attach APK to the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

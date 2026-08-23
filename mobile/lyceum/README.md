@@ -65,9 +65,8 @@ Typing an address by hand stays behind *Enter a server address instead* — **Te
 (`GET /healthz`), **Save** — which is what a LAN or dev box, a bare v1 token, or
 an 8-char pairing code still needs.
 
-Release builds deliberately pass no `--dart-define=LYCEUM_BASE_URL`: a store
-install must start with no address at all, or it would ship pointed at whoever
-built it (LYCM-104).
+That flow, from both ends — installing, and handing out the invite — is written
+up in [`docs/mobile-onboarding.md`](../../docs/mobile-onboarding.md).
 
 ## Build
 
@@ -93,9 +92,77 @@ R8/resource-shrinking is intentionally **off** for release (reflection-driven
 plugin startup breaks under full R8 for a self-hosted client — cf. Argosy
 ARGY-114).
 
+## Store-build hygiene
+
+**A public build carries no server address.** Not "shouldn't" — doesn't, and it
+is checked. A store install has to start knowing nothing, because the invite QR
+is what supplies an address (LYCM-102/103); an app that arrived from Play already
+pointed at a house would be pointing every stranger who installed it at that
+household's books, and would skip the connect prompt the scan flow starts from.
+
+The whole risk lives in one flag. `--dart-define=LYCEUM_BASE_URL=…` is a build
+argument, so the mistake leaves no trace in a diff of the app, survives every
+test, and shows up only as a stranger's fresh install loading somebody's shelf.
+`tool/check_store_build.sh` is the guard, and it looks from three sides:
+
+| Check | What it catches |
+| --- | --- |
+| **config** | any `--dart-define` in `mobile-release.yml` |
+| **hostnames** | `zerogravity.industries` / `lyceum-direct` anywhere in the built APK or AAB, or in the sources and build files that ship |
+| **origins** | any absolute URL in the Dart snapshot that isn't on a short expected list |
+
+The third is the general case: it catches a baked address whatever it points at,
+including one nobody thought to put on a denylist. It works because a release
+snapshot turns out to hold very few URLs — five, all but one of them Flutter's
+own diagnostic links, the last being the greyed-out `http://192.168.1.10:8080`
+example in the manual-address field. Adding to that list should be a deliberate,
+reviewed act; a new absolute URL inside a self-hosted client is exactly the kind
+of change worth noticing.
+
+```sh
+tool/check_store_build.sh --self-test    # prove the scanner can fail
+tool/check_store_build.sh                # config checks (no artifact needed)
+tool/check_store_build.sh build/app/outputs/bundle/release/app-release.aab
+```
+
+`--self-test` is not ceremony. A scanner that always passes is worse than no
+scanner, because it reads as proof — so it plants a baked URL in an APK-shaped
+zip and asserts the scan rejects it, then hands it a clean one and asserts it
+doesn't. (It earned its place immediately: the first version of the fixture
+builder wrote `fake.zip` while the scan was handed `fake.apk`, so all three
+"caught" cases were really just detecting a missing file. Only the clean control
+noticed.)
+
+CI runs the config half on every mobile PR, and the full artifact scan in
+`mobile-release.yml` **before** the APK is attached to the release or the AAB
+reaches Play.
+
+## A private family build
+
+Household devices can skip even the one scan: a sideloaded flavour built with the
+address compiled in comes up already pointed at the library, needing only the
+invite.
+
+```sh
+flutter build apk --release \
+  --dart-define=LYCEUM_BASE_URL=https://lyceum-direct.zerogravity.industries
+```
+
+**This artifact must never reach a public track** — not Play, not the GitHub
+Release. It is `adb install` / sideload only. The store-build guard is what keeps
+that honest: run against this APK it fails, by design, on all three checks.
+
+**It is probably not worth building.** The invite scan already collapses address
+and sign-in into one action, so the flavour saves a household exactly one camera
+tap on setup day and costs a second artifact that looks identical to the public
+one, is signed for no track, and fails the release gate on purpose. The gap it
+would have closed is the one LYCM-103 closed. It is written down here because it
+is the obvious thing to reach for, and because the reason not to is less obvious
+than the reason to — but the default is: don't. Build the public APK and scan the
+invite.
+
 ## Not done yet
 
 - App icon / splash still the Flutter default (LYCM-706 polish).
 - On-device run-through + cross-device sync verification (LYCM-707; needs the
   phone over wireless adb).
-- CI workflow for `mobile/lyceum/**` (LYCM-706).

@@ -88,7 +88,11 @@ make wails-windows     # → wrappers/wails/build/bin/Lyceum.exe   (needs the Wa
 ```
 
 Android is a separate native Flutter app under [`mobile/`](mobile/lyceum)
-(LYCM-700), not a web-shell wrapper.
+(LYCM-700), not a web-shell wrapper. It is a **client for a server you run**: a
+store install starts with no address at all and is pointed at a library by
+scanning an invite, one scan settling both the address and the sign-in
+(LYCM-101/104). Onboarding, from both ends, is
+[`docs/mobile-onboarding.md`](docs/mobile-onboarding.md).
 
 ## Accounts (LYCM-801)
 
@@ -133,8 +137,13 @@ trips the guard and still starts with no configuration at all.
   identifiers from the Zero Trust dashboard). The browser SPA then trades its
   edge-verified identity for a session on load, so a household member behind the
   gate signs in with no second step. The verified email must match an existing
-  account — unknown emails are refused, **never auto-provisioned**. Native apps
-  reach the API directly over Tailscale and keep using invite sign-in.
+  account — unknown emails are refused, **never auto-provisioned**.
+- **The phone does not go through that gate.** A bearer token cannot open an SSO
+  login wall, so the Android app reaches the API on a separate public origin that
+  authenticates by invite (LYCM-101). Name it in `LYCEUM_MOBILE_BASE_URL` and
+  every minted invite carries a sign-in URL built from it — the owner then mints
+  invites from the gated hostname they administer from and the QR still points
+  somewhere a phone can reach (LYCM-102).
 
 Two token namespaces exist and are never interchangeable: **session tokens** (in
 the database, guard the reader core, belong to people) and the **service tokens**
