@@ -16,8 +16,13 @@ const _kServerKey = 'lyceum.server_url';
 /// **Never set in a release build** (LYCM-103, LYCM-104). A store install has to
 /// start with no address, because the invite QR is what supplies one — baking a
 /// default in would ship every installer pointed at whoever built the APK, and
-/// would hide the connect prompt that scanning starts from. `mobile-release.yml`
-/// passes no `--dart-define`; keep it that way.
+/// would hide the connect prompt that scanning starts from.
+///
+/// That is enforced, not merely asked for: `tool/check_store_build.sh` fails the
+/// build if `mobile-release.yml` passes any `--dart-define`, or if a private
+/// hostname or an unexpected absolute URL turns up in the built APK or AAB. The
+/// one build that sets this legitimately is the sideloaded family flavour, which
+/// is kept off every public track (see the README).
 const _kCompileDefault = String.fromEnvironment('LYCEUM_BASE_URL');
 
 /// The configured backend base URL (normalized, no trailing slash). Empty

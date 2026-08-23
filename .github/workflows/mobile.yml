@@ -3,11 +3,20 @@ name: mobile
 # Native Flutter Android app (LYCM-700). Scoped to the Flutter sources so other
 # changes don't pay for it. Mirrors Argosy's mobile.yml.
 on:
+  # The store-build guard below reads the release workflow, so a change to it —
+  # adding the very --dart-define this exists to prevent, say — has to bring the
+  # guard with it. (Spelled out twice: Actions' parser has no YAML anchors.)
   pull_request:
-    paths: ["mobile/lyceum/**", ".github/workflows/mobile.yml"]
+    paths:
+      - "mobile/lyceum/**"
+      - ".github/workflows/mobile.yml"
+      - ".github/workflows/mobile-release.yml"
   push:
     branches: [main]
-    paths: ["mobile/lyceum/**", ".github/workflows/mobile.yml"]
+    paths:
+      - "mobile/lyceum/**"
+      - ".github/workflows/mobile.yml"
+      - ".github/workflows/mobile-release.yml"
 
 permissions:
   contents: read
@@ -38,6 +47,15 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
       - name: Analyze
         run: flutter analyze
+      # A public build must carry no server address — the invite QR supplies one
+      # (LYCM-101/104). Only the config half runs here: there is no release
+      # artifact on a PR, and mobile-release.yml scans the real one before it
+      # ships. --self-test first, because a scanner that cannot fail is worse
+      # than none — it reads as proof.
+      - name: Store-build hygiene
+        run: |
+          tool/check_store_build.sh --self-test
+          tool/check_store_build.sh
       - name: Test
         run: flutter test
       - name: Build debug APK

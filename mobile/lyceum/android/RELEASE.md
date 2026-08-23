@@ -1,13 +1,27 @@
 # Android release signing & distribution
 
 `mobile-release.yml` builds a **signed** APK + AAB on every `v*` tag (the tags
-release-please cuts), attaches the APK to that GitHub Release, and — once a Play
-service account is configured — pushes the AAB to the Play **internal** track.
+release-please cuts), checks that neither has a server address baked into it,
+attaches the APK to that GitHub Release, and — once a Play service account is
+configured — pushes the AAB to the Play **closed testing (`alpha`)** track.
 
 Release builds are signed with an **upload keystore** read from
 `android/key.properties` (gitignored). When that file is absent (local dev, CI
 debug builds) the build falls back to the debug key, so `flutter run --release`
 still works — see `app/build.gradle.kts`.
+
+## The store-build gate
+
+Between the build and the upload, `tool/check_store_build.sh` reads the APK and
+the AAB back and fails the job if either carries a server address (LYCM-104). A
+public build has to arrive knowing nothing — the invite QR is what points it at a
+library — and that property lives in the build *command*, so it cannot be held by
+anything in the Dart source. Nothing ships past a failure: the gate sits ahead of
+both the GitHub Release upload and the Play push.
+
+If it ever fires, the fix is to take the `--dart-define` back out, not to widen
+the guard. The one legitimate build that fails it on purpose is the sideloaded
+family flavour — see the app README — and that one is not released from here.
 
 ## One-time: create the upload keystore
 
@@ -76,11 +90,12 @@ once regardless of whether the App-token tag re-fires a `push: tags` event. To
 rebuild/re-attach a signed artifact for an existing tag without cutting a
 release: Actions → *mobile-release* → *Run workflow* → `tag: v1.0.0`.
 
-## Play Store internal track
+## Play Store closed-testing track
 
-The AAB → Play internal-track step is **skipped** unless
-`PLAY_SERVICE_ACCOUNT_JSON` is set, so the signed GitHub-Release APK works on its
-own. The browser steps below are one-time and can only be done by the Play
+The AAB → Play step is **skipped** unless `PLAY_SERVICE_ACCOUNT_JSON` is set, so
+the signed GitHub-Release APK works on its own. Note the track: the workflow
+uploads to **`alpha`** (Play's *Closed testing*), so make the first manual upload
+below on that same track — a track CI pushes to has to exist first. The browser steps below are one-time and can only be done by the Play
 Developer account owner.
 
 ### A. Create the app (Play Console)
@@ -89,19 +104,20 @@ Developer account owner.
    *App*, **Free**, accept the declarations.
 2. **Set up your app** → work through the required tasks: privacy policy URL, app
    access, ads (none), content rating questionnaire, target audience, data
-   safety, government-apps = no. These gate even internal testing.
+   safety, government-apps = no. These gate even closed testing.
 3. The package name `dev.dodson.lyceum` is claimed by the **first uploaded AAB**
    (next step) — there's no separate "register package" action.
 
 ### B. First AAB upload (manual — Google requires it)
 
-1. **Testing → Internal testing → Create new release**.
+1. **Testing → Closed testing → Alpha → Create new release** (the track
+   `mobile-release.yml` uploads to).
 2. On the first release Play offers **Play App Signing** — **accept it** (Google
    manages the app signing key; our `upload-keystore.jks` stays the upload key).
 3. Upload the AAB built with the upload key:
    `flutter build appbundle --release` → `build/app/outputs/bundle/release/app-release.aab`.
-4. Add a release name / notes, **Save → Review → Start rollout to Internal
-   testing**. Add testers under the *Testers* tab and use the opt-in link.
+4. Add a release name / notes, **Save → Review → Start rollout**. Add testers
+   under the *Testers* tab and use the opt-in link.
 
 ### C. Service account → enable CI auto-upload
 
@@ -117,11 +133,19 @@ gh secret set PLAY_SERVICE_ACCOUNT_JSON < /path/to/service-account.json
 ```
 
 Once `PLAY_SERVICE_ACCOUNT_JSON` is set, every release-please release uploads the
-AAB to the internal track automatically (`r0adkll/upload-google-play`). Promote
-internal → closed → production from the Play Console when ready.
+AAB to the closed-testing track automatically (`r0adkll/upload-google-play`).
+Promote closed → production from the Play Console when ready.
+
+Before the production promotion, work through
+[`store-listing.md`](store-listing.md): the listing has to say that Lyceum needs
+a server and an invite, or the empty server field on first launch reads as a
+broken app.
 
 ## Versioning
 
-`versionName` comes from the tag (`v1.0.0` → `1.0.0`); `versionCode` is the CI
-run number (monotonic, as Play requires). pubspec stays at its dev default — the
-tag is the source of truth for released builds.
+`versionName` comes from the tag (`v1.0.0` → `1.0.0`); `versionCode` is a Unix
+timestamp, which Play's strictly-increasing requirement needs and a run number
+cannot give — this workflow is reached both by `workflow_call` (where
+`github.run_number` is the *caller's* counter) and by `workflow_dispatch` (its
+own), so run numbers aren't monotonic across the two. pubspec stays at its dev
+default — the tag is the source of truth for released builds.
