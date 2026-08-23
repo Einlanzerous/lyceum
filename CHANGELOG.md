@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/Einlanzerous/lyceum/compare/v1.11.0...v1.12.0) (2026-08-23)
+
+
+### Features
+
+* **health:** report version and sha on /healthz (LYCM-121) ([#86](https://github.com/Einlanzerous/lyceum/issues/86)) ([13ebe1f](https://github.com/Einlanzerous/lyceum/commit/13ebe1fdb98dc72ffb8c04c7ad91cb40ba1a6c4c))
+
 ## [1.11.0](https://github.com/Einlanzerous/lyceum/compare/v1.10.0...v1.11.0) (2026-08-23)
 
 
