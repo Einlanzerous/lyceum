@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.11.0](https://github.com/Einlanzerous/lyceum/compare/v1.10.0...v1.11.0) (2026-08-23)
+
+
+### Features
+
+* **auth:** refuse to boot a household into single-user mode (LYCM-116) ([#81](https://github.com/Einlanzerous/lyceum/issues/81)) ([8e7a91e](https://github.com/Einlanzerous/lyceum/commit/8e7a91ea3b442c59f4747d41c99ab264089b2f1b))
+* **mobile:** scan an invite to find the library and get in (LYCM-103) ([#82](https://github.com/Einlanzerous/lyceum/issues/82)) ([f942706](https://github.com/Einlanzerous/lyceum/commit/f9427060e2f20b48b4a138c86aeaa95cfe02c879))
+
+
+### Bug Fixes
+
+* **cli:** keep the database password out of `lyceum --help` (LYCM-119) ([#80](https://github.com/Einlanzerous/lyceum/issues/80)) ([43503fe](https://github.com/Einlanzerous/lyceum/commit/43503fe217cb9a1fa89897caa5b8a1ff959f6ce3))
+
+
+### Maintenance
+
+* **mobile:** keep the store build free of anybody's server (LYCM-104) ([#85](https://github.com/Einlanzerous/lyceum/issues/85)) ([51edf90](https://github.com/Einlanzerous/lyceum/commit/51edf90fbbba9b5c0d548cfa659bd9dade3dc93d))
+
 ## [1.10.0](https://github.com/Einlanzerous/lyceum/compare/v1.9.0...v1.10.0) (2026-08-05)
 
 
