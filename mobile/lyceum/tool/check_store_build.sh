@@ -48,7 +48,9 @@ FORBIDDEN_HOSTS=(
 # hint, not a default, and points at nothing outside the reader's own LAN.
 #
 # Adding to this list should be a deliberate, reviewed act: a new absolute URL
-# inside a self-hosted client is exactly the kind of change worth noticing.
+# inside a self-hosted client is exactly the kind of change worth noticing. The
+# likeliest honest cause is a Flutter upgrade bringing a new diagnostic link —
+# confirm that is what it is, add it here, and re-dispatch the tag.
 ALLOWED_ORIGINS=(
   "http://192.168.1.10:8080"      # server_settings.dart hintText
   "https://api.flutter.dev"
@@ -72,6 +74,12 @@ SHIPPED_PATHS=(
 fail=0
 note() { printf '%s\n' "$*" >&2; }
 bad() { fail=1; note "FAIL: $*"; }
+
+# One scratch root for the whole run, removed on exit. Per-function RETURN traps
+# read as tidier but fire *after* the function's locals are gone, so the "$dir"
+# they expand is empty — which quietly left every self-test fixture on disk.
+workroot=$(mktemp -d)
+trap 'rm -rf "$workroot"' EXIT
 
 check_config() {
   if [ ! -f "$RELEASE_WORKFLOW" ]; then
@@ -120,8 +128,7 @@ scan_artifact() {
 
   local dir name
   name=$(basename -- "$artifact")
-  dir=$(mktemp -d)
-  trap 'rm -rf "$dir"' RETURN
+  dir=$(mktemp -d "$workroot/scan.XXXXXX")
 
   if ! unzip -q -o "$artifact" -d "$dir" 2>/dev/null; then
     bad "could not unpack $artifact"
@@ -158,8 +165,13 @@ scan_snapshot_origins() {
   # Match scheme + host + port only. Stopping at the path keeps the comparison
   # to the part that says *which server*, and makes it robust to a neighbouring
   # string running on past the URL in the snapshot's byte soup.
-  local found unexpected
-  found=$(printf '%s\n' "$snapshots" | xargs grep -ohaE 'https?://[A-Za-z0-9._:-]+' | sort -u)
+  #
+  # `|| true` is load-bearing under `set -o pipefail`: a snapshot holding no URL
+  # at all makes grep exit 1, and the bare assignment would then kill the script
+  # mid-scan (exit 123, no verdict printed) rather than report on it.
+  local found unexpected count
+  found=$(find "$dir" -type f -name 'libapp.so' -print0 |
+    xargs -0 grep -ohaE 'https?://[A-Za-z0-9._:-]+' | sort -u) || true
 
   unexpected=$(printf '%s\n' "$found" |
     grep -vxF -f <(printf '%s\n' "${ALLOWED_ORIGINS[@]}") || true)
@@ -168,7 +180,8 @@ scan_snapshot_origins() {
     note "$(printf '%s\n' "$unexpected" | sed 's/^/  /')"
     bad "$name — unexpected absolute URL(s) in the Dart snapshot (LYCM-104)"
   else
-    note "ok: $name — snapshot holds only the $(printf '%s\n' "$found" | wc -l) expected URLs"
+    count=$(printf '%s' "$found" | grep -c . || true)
+    note "ok: $name — snapshot holds only the $count expected URL(s)"
   fi
   return 0
 }
@@ -200,8 +213,7 @@ pack() {
 # from rotting into decoration.
 self_test() {
   local dir rc payload
-  dir=$(mktemp -d)
-  trap 'rm -rf "$dir"' RETURN
+  dir=$(mktemp -d "$workroot/selftest.XXXXXX")
 
   for payload in "${FORBIDDEN_HOSTS[@]}" "books.example.invalid"; do
     rm -rf "${dir:?}/stage" "$dir/fake.apk"

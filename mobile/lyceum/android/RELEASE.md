@@ -23,6 +23,15 @@ If it ever fires, the fix is to take the `--dart-define` back out, not to widen
 the guard. The one legitimate build that fails it on purpose is the sideloaded
 family flavour — see the app README — and that one is not released from here.
 
+One honest failure exists and is worth recognising quickly, because it lands at
+tag time rather than on a PR: the origin check holds a list of the URLs a clean
+Dart snapshot is expected to contain, and a **Flutter upgrade** can add a new
+diagnostic link to it. That reads as `unexpected absolute URL(s) in the Dart
+snapshot` naming an `api.flutter.dev`-shaped address rather than a server. Check
+that is what it is, add it to `ALLOWED_ORIGINS` in the script, and re-run the
+build for the same tag: Actions → *mobile-release* → *Run workflow* → `tag:
+vX.Y.Z`. Nothing was published before the failure, so there is nothing to undo.
+
 ## One-time: create the upload keystore
 
 ```sh
