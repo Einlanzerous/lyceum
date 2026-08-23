@@ -87,31 +87,55 @@ check_config() {
     return 0
   fi
 
-  # Comment lines are stripped first: that file explains the rule it is being
-  # held to, and prose about a flag is not the flag.
-  local defines
-  if defines=$(grep -vE '^[[:space:]]*#' "$RELEASE_WORKFLOW" | grep -n -- '--dart-define'); then
-    note "$defines"
-    bad "mobile-release.yml passes --dart-define; a store build bakes in no server (LYCM-104)"
+  # Numbering comes off the *real* file and comment lines are dropped after, so
+  # the line the failure names is the line to go and look at. Stripping comments
+  # first (as this did) renumbers the stream, and the guard then points at
+  # whatever happens to sit that far down a file dense enough to be believed.
+  local defines rc
+  defines=$(grep -n -- '--dart-define' "$RELEASE_WORKFLOW") && rc=0 || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    bad "could not read $RELEASE_WORKFLOW (grep rc=$rc)"
   else
-    note "ok: release build passes no --dart-define"
+    defines=$(printf '%s\n' "$defines" | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+    if [ -n "$defines" ]; then
+      note "$defines"
+      bad "mobile-release.yml passes --dart-define; a store build bakes in no server (LYCM-104)"
+    else
+      note "ok: release build passes no --dart-define"
+    fi
   fi
 
-  local host hits clean=1
+  scan_paths_for_hosts "shipped sources and build config" "${SHIPPED_PATHS[@]}"
+  return 0
+}
+
+# grep's exit codes are not two-valued: 1 is "no match", but 2 is "something went
+# wrong" — a path that no longer exists, most likely — and grep returns 2 *even
+# when it matched on the paths that do exist. Folding both into "no match" is how
+# a check goes permanently green while printing a line that reads as proof, so
+# the two are told apart and an error is a failure, not a pass.
+scan_paths_for_hosts() {
+  local label=$1
+  shift
+  local host hits rc clean=1
   for host in "${FORBIDDEN_HOSTS[@]}"; do
     # -I skips binaries (icons, fonts) — those are the artifact scan's job.
     # Markdown is skipped because the docs *do* name the private host: the
     # sideloaded family flavour in README.md is built from it, and docs ship
     # to nobody.
-    if hits=$(grep -rInF --exclude='*.md' \
+    hits=$(grep -rInF --exclude='*.md' \
       --exclude-dir=build --exclude-dir=.gradle --exclude-dir=.dart_tool \
-      -- "$host" "${SHIPPED_PATHS[@]}" 2>/dev/null); then
+      -- "$host" "$@" 2>/dev/null) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
       note "$hits"
-      bad "'$host' appears in files that ship (LYCM-104)"
+      bad "'$host' appears in $label (LYCM-104)"
+      clean=0
+    elif [ "$rc" -gt 1 ]; then
+      bad "the '$host' scan over $label errored (grep rc=$rc) — a renamed or missing path? Not calling that clean."
       clean=0
     fi
   done
-  [ "$clean" -eq 1 ] && note "ok: no private hostname in shipped sources or build config"
+  [ "$clean" -eq 1 ] && note "ok: no private hostname in $label"
   return 0
 }
 
@@ -232,8 +256,43 @@ self_test() {
     fi
   done
 
-  # And the other way round: a fixture holding only expected URLs must pass, or
-  # the checks above prove nothing but that everything fails.
+  # The source scan needs the same treatment, and for a sharper reason: review
+  # found it calling a *failed* grep clean, which is the one outcome a guard must
+  # never produce. Three cases — a real hit, a path that isn't there, and a clean
+  # tree — because the middle one is what a rename would cause and it used to
+  # print "ok".
+  rm -rf "${dir:?}/src"
+  mkdir -p "$dir/src"
+  printf 'const base = "https://%s/";\n' "${FORBIDDEN_HOSTS[0]}" > "$dir/src/leak.dart"
+  rc=0
+  ( fail=0; scan_paths_for_hosts "fixture" "$dir/src"; exit "$fail" ) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    bad "self-test: the source scan passed a file naming '${FORBIDDEN_HOSTS[0]}'"
+  else
+    note "ok: self-test — the source scan catches a private host in a shipped file"
+  fi
+
+  rc=0
+  ( fail=0; scan_paths_for_hosts "fixture" "$dir/nonexistent"; exit "$fail" ) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    bad "self-test: the source scan called a missing path clean"
+  else
+    note "ok: self-test — a missing scan path is an error, not a pass"
+  fi
+
+  rm -f "$dir/src/leak.dart"
+  printf 'const base = "";\n' > "$dir/src/clean.dart"
+  rc=0
+  ( fail=0; scan_paths_for_hosts "fixture" "$dir/src"; exit "$fail" ) >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    bad "self-test: the source scan rejected a clean tree"
+  else
+    note "ok: self-test — a clean tree passes the source scan"
+  fi
+
+  # And the other way round for the artifact scan: a fixture holding only
+  # expected URLs must pass, or the checks above prove nothing but that
+  # everything fails.
   rm -rf "${dir:?}/stage" "$dir/fake.apk"
   mkdir -p "$dir/stage/lib/arm64-v8a"
   printf '\x7fELF\x02\x01\x01\x00 %s \x00\x00' "${ALLOWED_ORIGINS[0]}" \

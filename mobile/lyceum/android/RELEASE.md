@@ -104,8 +104,10 @@ release: Actions → *mobile-release* → *Run workflow* → `tag: v1.0.0`.
 The AAB → Play step is **skipped** unless `PLAY_SERVICE_ACCOUNT_JSON` is set, so
 the signed GitHub-Release APK works on its own. Note the track: the workflow
 uploads to **`alpha`** (Play's *Closed testing*), so make the first manual upload
-below on that same track — a track CI pushes to has to exist first. The browser steps below are one-time and can only be done by the Play
-Developer account owner.
+below on that same track — a track CI pushes to has to exist first.
+
+The browser steps below are one-time and can only be done by the Play Developer
+account owner.
 
 ### A. Create the app (Play Console)
 
