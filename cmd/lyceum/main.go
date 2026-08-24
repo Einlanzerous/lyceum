@@ -376,6 +376,22 @@ func main() {
 		return
 	}
 
+	// Say which build this is before anything can fail (LYCM-121).
+	//
+	// /healthz is the machine-readable answer, but it only exists once the
+	// server is listening — and it has to be reached over the network by
+	// somebody who already suspects the version. This line is the one an
+	// operator trips over in `docker logs` without looking for it, and it is
+	// placed ahead of loadConfig and the store dial so a boot that dies on a
+	// bad DSN still names the build that died.
+	//
+	// The failure it is here to catch is silent by construction: an image built
+	// outside publish.yml, or a Dockerfile refactor that drops the ARG lines,
+	// serves every request perfectly normally while reporting `dev`. That is
+	// the same shape as LYCEUM_BINDERY_API_KEY, which sat unset in prod for
+	// weeks looking exactly like a working feature.
+	logBuildIdentity()
+
 	cfg := loadConfig()
 
 	ctx := context.Background()

@@ -52,15 +52,21 @@ var Commit = ""
 // They stay exported because `Get()`'s rule has to be exercised from sibling
 // packages' tests. Treat that as a seam for tests, not a public read path.
 
-// Identity is the (version, sha) pair as /healthz reports it.
+// Identity is the resolved (version, sha) pair that /healthz reports.
 //
-// `sha` is a *string pointer so an absent commit marshals to JSON `null` rather
-// than `""`. Absence is a value here — "this build did not record a commit" is
-// a different claim from "this build was made at the empty commit", and the
-// consumer treats a blank string as no-version-reported.
+// NOT the wire shape, and deliberately untagged so it cannot be mistaken for
+// one. The JSON contract lives in `healthzResponse` (cmd/lyceum/healthz.go),
+// which carries `status` and `service` alongside these two and is the only
+// thing marshalled. Tags here would read as load-bearing while changing no
+// output — rename one and every test still passes.
+//
+// `SHA` stays a *string because absence has to survive the trip to that struct:
+// "this build recorded no commit" is a different claim from "this build was
+// made at the empty commit", and only the pointer reaches the wire as `null`
+// rather than `""`.
 type Identity struct {
-	Version string  `json:"version"`
-	SHA     *string `json:"sha"`
+	Version string
+	SHA     *string
 }
 
 // Get resolves what this build honestly reports.

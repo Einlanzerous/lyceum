@@ -2,8 +2,28 @@ name: publish
 
 # Builds the production image (deploy/Dockerfile: Vue reader SPA embedded into
 # the Go binary) and pushes it to GHCR (LYCM-61). construct-server pulls
-# ghcr.io/einlanzerous/lyceum:latest. main publishes :latest; release-please
-# tags (v*) publish the semver tags.
+# ghcr.io/einlanzerous/lyceum:latest.
+#
+# WHICH BUILD PUBLISHES WHICH TAG:
+#
+#   push to main       :sha-<short> only. main is not a release, so it has no
+#                      version to claim and does not touch the tag that gets
+#                      deployed.
+#   push of a release  :latest and the semver pair (:1.12.0 and :1.12), all
+#   tag (v1.12.0)      from the one run that has a version to stamp. NOT
+#                      :sha-<short> — that is main's, and both runs share a
+#                      commit. release-please cuts these tags, and it does so
+#                      with a GitHub App token, so the push DOES create a
+#                      workflow run (the SERV-125 trap is that a GITHUB_TOKEN
+#                      tag creates none — verified here: a tag-ref run exists
+#                      for every release).
+#   any other v* tag   :sha-<short>, and no release identity. A prerelease
+#   (v1.13.0-rc.1,     also keeps its own semver image tag. See the `ver` step
+#    vnext)            for why "a tag" and "a release" are not the same test.
+#
+# :latest is deliberately the RELEASE image and not main's tip, because it is
+# the one construct-server deploys and /healthz has to answer for it (LYCM-121).
+# See the `flavor: latest=false` note on the meta step.
 on:
   push:
     branches: [main]
@@ -24,13 +44,104 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: ver
+        # Resolve the release version ONCE, from the ref, and validate it.
+        #
+        # Everything downstream keys off `steps.ver.outputs.semver`: it is
+        # either a bare `1.12.0` or the empty string, and never anything else.
+        # That is the property the whole ticket rests on, and deriving it here
+        # rather than reading `steps.meta.outputs.version` is what makes it
+        # true — that output is just the highest-PRIORITY tag, so it silently
+        # becomes `latest` or `sha-<short>` depending on which tag entries
+        # happened to match. Both are moving tags, and stamping either into the
+        # binary puts a non-version in the delivery ledger as an identity.
+        #
+        # `on.push.tags: ["v*"]` accepts more than releases, so `ref_type ==
+        # 'tag'` is NOT the same test as "this is a release":
+        #
+        #   v1.12.0        -> 1.12.0   a release. :latest and a stamped binary.
+        #   v1.13.0-rc.1   -> ""       prerelease. Gets its own semver image
+        #                              tag, but must not move :latest and has
+        #                              no release identity to claim.
+        #   vnext          -> ""       not semver at all. type=semver would not
+        #                              match it, so the raw `latest` entry
+        #                              (priority 200) would win and
+        #                              outputs.version would be the literal
+        #                              string `latest`.
+        #
+        # release.yml forbids hand-cut tags and release-please has no
+        # prerelease channel, so none of these should occur — but the failure
+        # they produce is silent and permanent, and the guard is four lines.
+        #
+        # Inputs arrive by env, not by ${{ }} interpolation into the script: a
+        # run block that pastes a ref name inline executes whatever it contains.
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver=""
+          if [ "$REF_TYPE" = tag ]; then
+            candidate="${REF_NAME#v}"
+            if printf '%s' "$candidate" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              semver="$candidate"
+            else
+              echo "::warning::tag $REF_NAME is not a bare semver; publishing no :latest and stamping no version"
+            fi
+          fi
+          echo "semver=$semver" >> "$GITHUB_OUTPUT"
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/einlanzerous/lyceum
+          # `latest=false` is load-bearing, not tidying (LYCM-121).
+          #
+          # The default is `latest=auto`, which emits :latest BY ITSELF on any
+          # type=semver match — independently of the type=raw entry below. So
+          # both builds of a release commit published :latest: the main build
+          # (VERSION blank, label `version=latest`) and the tag build (VERSION
+          # the bare semver, label `version=1.12.0`). Two runs, two different
+          # digests, same moving tag, no ordering between them.
+          #
+          # That is a race, and it was decided by which runner finished last.
+          # At v1.12.0 the tag build won by nine seconds and :latest is correct
+          # today — which is the bad kind of correct, because a slow tag build
+          # or a cache miss silently hands :latest to the image that reports
+          # `dev`. construct-server pulls :latest, so the coin flip lands in
+          # the delivery ledger.
+          #
+          # A main build can never satisfy the contract anyway: main is not a
+          # release, so it has no semver to report, and its label says the
+          # literal `latest`. `dev` != `latest` under the reconciler's strict
+          # equality no matter which side you look from. If :latest is what
+          # gets deployed, :latest has to BE a release — so it is published by
+          # the tag build alone, and a main push publishes sha-<short> only.
+          flavor: latest=false
+          #
+          # :latest is gated on the VALIDATED semver rather than on
+          # `ref_type == 'tag'`, so it means "a release" and not "any v* tag" —
+          # a prerelease or a hand-cut `vnext` moves nothing.
+          #
+          # `type=sha` is gated OFF for a release, and that is the same
+          # two-writer bug as :latest wearing a different hat. `type=sha`
+          # derives from `github.sha`, which is the SAME commit in both runs of
+          # a release, so main and tag both wrote :sha-ce25438 with different
+          # digests and different build identities. Since this file now points
+          # at :sha-<short> as the way to deploy main's tip, it has to actually
+          # mean that: one writer, always the unstamped image. A release commit
+          # is already addressable three stamped ways (:1.12.0, :1.12, :latest).
+          #
+          # Both gates read the SAME predicate — "did `ver` resolve a release
+          # version" — rather than `ref_type`, and that is deliberate on top of
+          # being tidier. Gating this one on `ref_type != 'tag'` instead leaves
+          # a hand-cut `vnext` with NO tags at all (no :latest, no :sha, and
+          # type=semver does not match), and build-push-action cannot push an
+          # image with an empty tag list. Keyed off `semver` it falls out
+          # correctly: anything that is not a release keeps :sha-<short> and
+          # gets no release identity, which is exactly what it is.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short
+            type=raw,value=latest,enable=${{ steps.ver.outputs.semver != '' }}
+            type=sha,format=short,enable=${{ steps.ver.outputs.semver == '' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v6
@@ -42,24 +153,27 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Build identity for /healthz (LYCM-121) — see deploy/Dockerfile.
           #
-          # VERSION is passed ONLY on a tag build. On a push to main
-          # `steps.meta.outputs.version` is `latest`, and `latest` names a
-          # moving target rather than a build: reporting it would put the
-          # string "latest" in the delivery ledger as an identity, to be
-          # compared against whatever the image label says and disagree for
-          # ever. Blank instead, which `internal/version` maps to "dev" — the
-          # honest answer for a build no release cut.
+          # VERSION comes from the `ver` step, NOT from
+          # `steps.meta.outputs.version`. That output is the highest-priority
+          # matching tag, which is a version only by coincidence: on a main
+          # build it is `sha-<short>` (and was `latest` before this file set
+          # `flavor: latest=false`), and on a non-semver `v*` tag it is the
+          # literal string `latest`. Each would be linked into the binary and
+          # reported to the reconciler as this build's identity, then compared
+          # against the image label and disagree for ever.
           #
-          # On a tag build metadata-action's `version` output is already the
-          # BARE semver (`1.10.0`), matching the image label character for
-          # character. That agreement is the whole point: the reconciler
-          # observes this string and the deploy reporter reports the label, and
-          # the matrix compares the two as identities.
+          # `ver` yields a bare semver or nothing, so the two cases here are
+          # the only two: a release stamps `1.12.0`, matching the image label
+          # character for character — that agreement is the whole point, since
+          # the reconciler observes this string and the deploy reporter reports
+          # the label — and everything else stamps blank, which
+          # `internal/version` maps to "dev", the honest answer for a build no
+          # release cut.
           #
           # GIT_SHA is passed on both paths. A main build has a real commit and
           # should say so; it just has no release to name.
           build-args: |
-            VERSION=${{ github.ref_type == 'tag' && steps.meta.outputs.version || '' }}
+            VERSION=${{ steps.ver.outputs.semver }}
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
