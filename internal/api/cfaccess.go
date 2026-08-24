@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"strings"
@@ -49,6 +50,12 @@ const (
 	cfJWKSCacheMaxAge     = 10 * time.Minute
 	cfJWKSRefreshCooldown = 30 * time.Second
 	cfJWKSFetchTimeout    = 10 * time.Second
+
+	// maxJWKSBytes bounds the remote key document, and minRSAModulusBits
+	// refuses a downgraded signing key. Both come from construct-server's
+	// cf-access-guard, which this file is now level with (LYCM-122).
+	maxJWKSBytes      = 1 << 20
+	minRSAModulusBits = 2048
 )
 
 // CFAccessVerifier verifies Cloudflare Access JWTs for one Access application,
@@ -214,27 +221,44 @@ func (v *CFAccessVerifier) key(ctx context.Context, kid string) (*rsa.PublicKey,
 	return k, nil
 }
 
-// refresh refetches the JWKS, subject to a cooldown once a key set is already
-// held (so repeated unknown-kid tokens can't spin the certs endpoint).
+// refresh refetches the JWKS, subject to a cooldown so repeated unknown-kid
+// tokens can't spin the certs endpoint.
+//
+// The cooldown is deliberately NOT conditioned on already holding keys. Gating
+// it on `v.keys != nil` made it inert in precisely the two situations it exists
+// for — a cold start, and a certs endpoint that is failing. In both, keys stays
+// nil, so every request refetched immediately and POST /auth/sso/cloudflare
+// became a request amplifier pointed at Cloudflare: one unauthenticated request
+// in, one JWKS fetch out, no malformed key or hostile input required. The fix
+// is construct-server's: stamp the attempt unconditionally, before the fetch.
 func (v *CFAccessVerifier) refresh(ctx context.Context) error {
-	v.mu.RLock()
-	cooling := v.keys != nil && time.Since(v.lastFetch) < cfJWKSRefreshCooldown
-	v.mu.RUnlock()
-	if cooling {
-		return nil
+	v.mu.Lock()
+	if !v.lastFetch.IsZero() && time.Since(v.lastFetch) < cfJWKSRefreshCooldown {
+		v.mu.Unlock()
+		return errCFAccessCooling
 	}
+	v.lastFetch = time.Now() // stamped for the ATTEMPT, not for its success
+	v.mu.Unlock()
 
 	keys, err := fetchJWKS(ctx, v.httpClient, v.certsURL)
 
 	v.mu.Lock()
-	v.lastFetch = time.Now()
-	if err == nil {
-		v.keys = keys
-		v.fetchedAt = time.Now()
+	defer v.mu.Unlock()
+	if err != nil {
+		// A failed fetch leaves the previous key set in place: replacing a
+		// working set with nothing would turn a Cloudflare blip into a total
+		// sign-in outage.
+		return err
 	}
-	v.mu.Unlock()
-	return err
+	v.keys = keys
+	v.fetchedAt = time.Now()
+	return nil
 }
+
+// errCFAccessCooling means the refresh was skipped by the cooldown, not that it
+// failed. The caller treats the two the same way — it has no key either way —
+// but keeping them distinct stops a skipped refresh reading as an outage.
+var errCFAccessCooling = errors.New("cf access: jwks refresh is cooling down")
 
 // jwksResponse is the JSON shape of Cloudflare's certs endpoint: a set of RSA
 // public keys in JWK form.
@@ -242,6 +266,7 @@ type jwksResponse struct {
 	Keys []struct {
 		Kty string `json:"kty"`
 		Kid string `json:"kid"`
+		Use string `json:"use"`
 		N   string `json:"n"` // base64url big-endian modulus
 		E   string `json:"e"` // base64url big-endian exponent
 	} `json:"keys"`
@@ -262,14 +287,18 @@ func fetchJWKS(ctx context.Context, client *http.Client, certsURL string) (map[s
 		return nil, fmt.Errorf("cf access: fetch jwks: status %d", resp.StatusCode)
 	}
 
+	// Bounded read: a remote document parsed on a request path that must not be
+	// able to exhaust memory, however unlikely the source is to misbehave.
 	var jwks jwksResponse
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJWKSBytes)).Decode(&jwks); err != nil {
 		return nil, fmt.Errorf("cf access: decode jwks: %w", err)
 	}
 
 	keys := make(map[string]*rsa.PublicKey, len(jwks.Keys))
 	for _, k := range jwks.Keys {
-		if k.Kty != "RSA" || k.Kid == "" {
+		// Non-RSA and non-signing keys are skipped rather than rejected: the
+		// endpoint is allowed to publish key types this verifier doesn't use.
+		if k.Kty != "RSA" || k.Kid == "" || (k.Use != "" && k.Use != "sig") {
 			continue
 		}
 		pub, err := rsaPublicKey(k.N, k.E)
@@ -295,16 +324,28 @@ func rsaPublicKey(nB64, eB64 string) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(nBytes) == 0 || len(eBytes) == 0 {
-		return nil, errors.New("cf access: empty RSA modulus or exponent")
+	// The upper bound is not paranoia about RSA: without it, a >8-byte exponent
+	// from a hostile or malformed key set slices eBuf with a negative index and
+	// panics the process before copy is ever called. A real exponent is three
+	// bytes.
+	if len(nBytes) == 0 || len(eBytes) == 0 || len(eBytes) > 8 {
+		return nil, errors.New("cf access: unusable RSA modulus or exponent")
+	}
+	// A short modulus is a broken key, not a small one. Cloudflare publishes
+	// 2048-bit keys; refusing anything under that means a downgraded key set
+	// can't quietly weaken verification.
+	if len(nBytes)*8 < minRSAModulusBits {
+		return nil, errors.New("cf access: RSA modulus is below the 2048-bit minimum")
 	}
 	// The exponent is a big-endian integer of up to a few bytes; left-pad to 8
 	// so it fits a uint64.
 	var eBuf [8]byte
 	copy(eBuf[8-len(eBytes):], eBytes)
 	e := binary.BigEndian.Uint64(eBuf[:])
-	if e == 0 {
-		return nil, errors.New("cf access: zero RSA exponent")
+	// E is an int: an exponent above MaxInt32 is implementation-defined
+	// truncation on a 32-bit build and a nonsense key everywhere.
+	if e == 0 || e > 1<<31-1 {
+		return nil, errors.New("cf access: RSA exponent out of range")
 	}
 	return &rsa.PublicKey{
 		N: new(big.Int).SetBytes(nBytes),
