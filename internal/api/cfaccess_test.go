@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -352,6 +353,10 @@ func TestRSAPublicKeyBounds(t *testing.T) {
 		{name: "exponent at MaxUint32", n: goodN, e: b64(0xff, 0xff, 0xff, 0xff)},
 		{name: "empty modulus", n: "", e: "AQAB"},
 		{name: "1024-bit modulus", n: shortN, e: "AQAB"},
+		// A byte-length floor would pass this: 128 zero bytes of padding make a
+		// 1024-bit modulus encode as 256 bytes.
+		{name: "1024-bit modulus padded to 2048 bits", n: base64.RawURLEncoding.EncodeToString(
+			append(make([]byte, 128), short.PublicKey.N.Bytes()...)), e: "AQAB"},
 		{name: "modulus not base64url", n: "!!!not base64!!!", e: "AQAB"},
 		{name: "exponent not base64url", n: goodN, e: "!!!not base64!!!"},
 	}
@@ -557,4 +562,156 @@ func TestCFAccessKeepsKeysWhenRefreshFails(t *testing.T) {
 	if _, err := v.Verify(ctx, signToken(t, key, "RS256", testKID, validClaims())); err != nil {
 		t.Fatalf("Verify with a stale-but-held key during an outage: %v", err)
 	}
+}
+
+// A caller that gives up mid-fetch must not consume the cooldown on everybody
+// else's behalf. handleAuthCFAccess passes r.Context(), so before the fetch was
+// detached, one abandoned request at a cold start refused every sign-in for the
+// next 30 seconds against a perfectly healthy certs endpoint — and with no key
+// set held, there was nothing to fall back on.
+func TestCFAccessColdStartSurvivesAbandonedRequest(t *testing.T) {
+	key := testRSAKey(t)
+	var hits int32
+	body := jwksBody(testKID, &key.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(300 * time.Millisecond) // the fetch is in flight
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	v := verifierFor(srv.URL, testAUD)
+	token := signToken(t, key, "RS256", testKID, validClaims())
+
+	// The first sign-in after a restart, abandoned while the fetch is running.
+	// Its own outcome is moot — the response goes to a closed connection — so
+	// what is asserted is that it finished the fetch on everyone's behalf
+	// rather than cancelling it and keeping the window it had claimed.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	_, _ = v.Verify(ctx, token)
+
+	v.mu.RLock()
+	populated := len(v.keys) > 0
+	v.mu.RUnlock()
+	if !populated {
+		t.Fatal("the abandoned request cancelled the shared fetch, leaving no keys")
+	}
+
+	// The next honest sign-in is answered, not refused for the cooldown window.
+	if _, err := v.Verify(context.Background(), token); err != nil {
+		t.Fatalf("sign-in after an abandoned cold-start request: %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("certs endpoint fetched %d times, want 1 (the detached fetch completed)", got)
+	}
+}
+
+// Sign-ins arriving together at a cold start — the ordinary case right after a
+// deploy — share the one fetch rather than all but the first being refused by
+// the cooldown it stamped.
+func TestCFAccessColdStartCoalescesConcurrentSignIns(t *testing.T) {
+	key := testRSAKey(t)
+	var hits int32
+	body := jwksBody(testKID, &key.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(200 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	v := verifierFor(srv.URL, testAUD)
+	token := signToken(t, key, "RS256", testKID, validClaims())
+
+	const callers = 8
+	errs := make(chan error, callers)
+	var start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < callers; i++ {
+		go func() {
+			start.Wait()
+			_, err := v.Verify(context.Background(), token)
+			errs <- err
+		}()
+	}
+	start.Done()
+
+	for i := 0; i < callers; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent sign-in %d refused: %v", i, err)
+		}
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("certs endpoint fetched %d times, want 1 (one fetch, shared)", got)
+	}
+}
+
+// Waiting is for callers with nothing to answer with. A request holding a key
+// whose cache has merely gone stale is answered from memory immediately, even
+// while somebody else's refresh is in flight — it must never be parked on the
+// network for an answer it already has.
+func TestCFAccessStaleKeyDoesNotWaitOnAnInflightFetch(t *testing.T) {
+	key := testRSAKey(t)
+	body := jwksBody(testKID, &key.PublicKey)
+	release := make(chan struct{})
+	var slow atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if slow.Load() {
+			<-release // hold the fetch open
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+
+	v := verifierFor(srv.URL, testAUD)
+	token := signToken(t, key, "RS256", testKID, validClaims())
+	if _, err := v.Verify(context.Background(), token); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+
+	// Age the cache past its max, and park a refresh (triggered by an unknown
+	// kid, which has nothing to fall back on) inside the certs endpoint.
+	slow.Store(true)
+	v.mu.Lock()
+	v.fetchedAt = time.Now().Add(-cfJWKSCacheMaxAge - time.Second)
+	v.lastFetch = time.Now().Add(-cfJWKSRefreshCooldown - time.Second)
+	v.mu.Unlock()
+
+	parked := make(chan struct{})
+	go func() {
+		defer close(parked)
+		_, _ = v.Verify(context.Background(), signToken(t, key, "RS256", "unknown-kid", validClaims()))
+	}()
+	// Give the parked request time to become the in-flight fetch.
+	for i := 0; i < 100; i++ {
+		v.mu.RLock()
+		running := v.inflight != nil
+		v.mu.RUnlock()
+		if running {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := v.Verify(context.Background(), token)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("stale-key sign-in during an in-flight fetch: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a sign-in holding a stale key waited on somebody else's fetch")
+	}
+
+	release <- struct{}{}
+	<-parked
 }
