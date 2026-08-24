@@ -209,8 +209,14 @@ func (v *CFAccessVerifier) key(ctx context.Context, kid string) (*rsa.PublicKey,
 
 	// Holding no key for this kid means there is nothing to answer with if the
 	// refresh is skipped, so it is worth waiting on a fetch another request has
-	// already started. Holding a stale one means the opposite: answer now, and
-	// never make a request that has a usable answer wait on the network.
+	// already started. Holding a stale one means the opposite: don't queue
+	// behind somebody else's fetch for an answer already in memory.
+	//
+	// Read that precisely — it bounds the wait on ANOTHER caller's fetch, not
+	// the wait on the network. A stale-key holder arriving with nothing in
+	// flight and the cooldown expired still becomes the fetcher itself and
+	// blocks inline before falling back to the key it was holding, exactly as
+	// it did before any of this.
 	if err := v.refresh(ctx, !ok); err != nil {
 		if ok {
 			return k, nil // serve the stale key rather than fail on a fetch blip
@@ -255,6 +261,11 @@ func (v *CFAccessVerifier) refresh(ctx context.Context, waitForInflight bool) er
 		// Wait for the fetch already running instead of refusing: at a cold
 		// start there is no key to fall back on, and a burst of concurrent
 		// sign-ins right after a deploy is the ordinary case, not an attack.
+		//
+		// With both cases ready the select picks at random, so an already
+		// cancelled waiter can return ctx.Err() with usable keys sitting in the
+		// cache. That costs nothing: its connection is gone either way, and the
+		// keys are there for whoever comes next.
 		select {
 		case <-done:
 			v.mu.RLock()
