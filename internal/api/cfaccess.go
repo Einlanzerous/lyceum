@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"strings"
@@ -49,6 +50,12 @@ const (
 	cfJWKSCacheMaxAge     = 10 * time.Minute
 	cfJWKSRefreshCooldown = 30 * time.Second
 	cfJWKSFetchTimeout    = 10 * time.Second
+
+	// maxJWKSBytes bounds the remote key document, and minRSAModulusBits
+	// refuses a downgraded signing key. Both come from construct-server's
+	// cf-access-guard, which this file is now level with (LYCM-122).
+	maxJWKSBytes      = 1 << 20
+	minRSAModulusBits = 2048
 )
 
 // CFAccessVerifier verifies Cloudflare Access JWTs for one Access application,
@@ -65,6 +72,8 @@ type CFAccessVerifier struct {
 	keys      map[string]*rsa.PublicKey // kid -> key
 	fetchedAt time.Time                 // when keys was last populated
 	lastFetch time.Time                 // when a fetch was last attempted (cooldown)
+	inflight  chan struct{}             // non-nil while a fetch runs; closed when it settles
+	lastErr   error                     // result of the last settled fetch
 }
 
 // NewCFAccessVerifier builds a verifier for the given team domain and audience.
@@ -198,7 +207,17 @@ func (v *CFAccessVerifier) key(ctx context.Context, kid string) (*rsa.PublicKey,
 		return k, nil
 	}
 
-	if err := v.refresh(ctx); err != nil {
+	// Holding no key for this kid means there is nothing to answer with if the
+	// refresh is skipped, so it is worth waiting on a fetch another request has
+	// already started. Holding a stale one means the opposite: don't queue
+	// behind somebody else's fetch for an answer already in memory.
+	//
+	// Read that precisely — it bounds the wait on ANOTHER caller's fetch, not
+	// the wait on the network. A stale-key holder arriving with nothing in
+	// flight and the cooldown expired still becomes the fetcher itself and
+	// blocks inline before falling back to the key it was holding, exactly as
+	// it did before any of this.
+	if err := v.refresh(ctx, !ok); err != nil {
 		if ok {
 			return k, nil // serve the stale key rather than fail on a fetch blip
 		}
@@ -214,27 +233,87 @@ func (v *CFAccessVerifier) key(ctx context.Context, kid string) (*rsa.PublicKey,
 	return k, nil
 }
 
-// refresh refetches the JWKS, subject to a cooldown once a key set is already
-// held (so repeated unknown-kid tokens can't spin the certs endpoint).
-func (v *CFAccessVerifier) refresh(ctx context.Context) error {
-	v.mu.RLock()
-	cooling := v.keys != nil && time.Since(v.lastFetch) < cfJWKSRefreshCooldown
-	v.mu.RUnlock()
-	if cooling {
-		return nil
+// refresh refetches the JWKS, subject to a cooldown so repeated unknown-kid
+// tokens can't spin the certs endpoint. waitForInflight says whether the caller
+// has nothing to fall back on, and so would rather wait for a fetch already in
+// progress than be refused.
+//
+// The cooldown is deliberately NOT conditioned on already holding keys. Gating
+// it on `v.keys != nil` made it inert in precisely the two situations it exists
+// for — a cold start, and a certs endpoint that is failing. In both, keys stays
+// nil, so every request refetched immediately and POST /auth/sso/cloudflare
+// became a request amplifier pointed at Cloudflare: one unauthenticated request
+// in, one JWKS fetch out, no malformed key or hostile input required. The fix
+// is construct-server's: stamp the attempt unconditionally, before the fetch.
+//
+// Stamping it up front is only honest if the attempt actually happens, which is
+// why the fetch below is detached from the caller's context and why a second
+// request arriving mid-fetch waits rather than being turned away. Without
+// those, one browser giving up mid-fetch would consume the whole window on
+// everybody's behalf and complete nothing.
+func (v *CFAccessVerifier) refresh(ctx context.Context, waitForInflight bool) error {
+	v.mu.Lock()
+	if done := v.inflight; done != nil {
+		v.mu.Unlock()
+		if !waitForInflight {
+			return errCFAccessCooling
+		}
+		// Wait for the fetch already running instead of refusing: at a cold
+		// start there is no key to fall back on, and a burst of concurrent
+		// sign-ins right after a deploy is the ordinary case, not an attack.
+		//
+		// With both cases ready the select picks at random, so an already
+		// cancelled waiter can return ctx.Err() with usable keys sitting in the
+		// cache. That costs nothing: its connection is gone either way, and the
+		// keys are there for whoever comes next.
+		select {
+		case <-done:
+			v.mu.RLock()
+			defer v.mu.RUnlock()
+			return v.lastErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+	if !v.lastFetch.IsZero() && time.Since(v.lastFetch) < cfJWKSRefreshCooldown {
+		v.mu.Unlock()
+		return errCFAccessCooling
+	}
+	v.lastFetch = time.Now() // stamped for the ATTEMPT, not for its success
+	done := make(chan struct{})
+	v.inflight = done
+	v.mu.Unlock()
 
-	keys, err := fetchJWKS(ctx, v.httpClient, v.certsURL)
+	// The fetch fills a cache every caller shares, so it must not run on one
+	// caller's request context: handleAuthCFAccess passes r.Context(), so a
+	// browser that gives up mid-fetch would cancel it and leave behind the
+	// cooldown window it had already consumed — refusing every sign-in for the
+	// next 30 seconds against a perfectly healthy certs endpoint, with no key
+	// set to fall back on. Detach it and bound it on its own.
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfJWKSFetchTimeout)
+	defer cancel()
+	keys, err := fetchJWKS(fetchCtx, v.httpClient, v.certsURL)
 
 	v.mu.Lock()
-	v.lastFetch = time.Now()
-	if err == nil {
-		v.keys = keys
-		v.fetchedAt = time.Now()
+	defer v.mu.Unlock()
+	v.inflight = nil
+	v.lastErr = err
+	close(done)
+	if err != nil {
+		// A failed fetch leaves the previous key set in place: replacing a
+		// working set with nothing would turn a Cloudflare blip into a total
+		// sign-in outage.
+		return err
 	}
-	v.mu.Unlock()
-	return err
+	v.keys = keys
+	v.fetchedAt = time.Now()
+	return nil
 }
+
+// errCFAccessCooling means the refresh was skipped by the cooldown, not that it
+// failed. The caller treats the two the same way — it has no key either way —
+// but keeping them distinct stops a skipped refresh reading as an outage.
+var errCFAccessCooling = errors.New("cf access: jwks refresh is cooling down")
 
 // jwksResponse is the JSON shape of Cloudflare's certs endpoint: a set of RSA
 // public keys in JWK form.
@@ -242,6 +321,7 @@ type jwksResponse struct {
 	Keys []struct {
 		Kty string `json:"kty"`
 		Kid string `json:"kid"`
+		Use string `json:"use"`
 		N   string `json:"n"` // base64url big-endian modulus
 		E   string `json:"e"` // base64url big-endian exponent
 	} `json:"keys"`
@@ -262,14 +342,18 @@ func fetchJWKS(ctx context.Context, client *http.Client, certsURL string) (map[s
 		return nil, fmt.Errorf("cf access: fetch jwks: status %d", resp.StatusCode)
 	}
 
+	// Bounded read: a remote document parsed on a request path that must not be
+	// able to exhaust memory, however unlikely the source is to misbehave.
 	var jwks jwksResponse
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJWKSBytes)).Decode(&jwks); err != nil {
 		return nil, fmt.Errorf("cf access: decode jwks: %w", err)
 	}
 
 	keys := make(map[string]*rsa.PublicKey, len(jwks.Keys))
 	for _, k := range jwks.Keys {
-		if k.Kty != "RSA" || k.Kid == "" {
+		// Non-RSA and non-signing keys are skipped rather than rejected: the
+		// endpoint is allowed to publish key types this verifier doesn't use.
+		if k.Kty != "RSA" || k.Kid == "" || (k.Use != "" && k.Use != "sig") {
 			continue
 		}
 		pub, err := rsaPublicKey(k.N, k.E)
@@ -295,21 +379,36 @@ func rsaPublicKey(nB64, eB64 string) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(nBytes) == 0 || len(eBytes) == 0 {
-		return nil, errors.New("cf access: empty RSA modulus or exponent")
+	// The upper bound is not paranoia about RSA: without it, a >8-byte exponent
+	// from a hostile or malformed key set slices eBuf with a negative index and
+	// panics the process before copy is ever called. A real exponent is three
+	// bytes.
+	if len(nBytes) == 0 || len(eBytes) == 0 || len(eBytes) > 8 {
+		return nil, errors.New("cf access: unusable RSA modulus or exponent")
+	}
+	// A short modulus is a broken key, not a small one. Cloudflare publishes
+	// 2048-bit keys; refusing anything under that means a downgraded key set
+	// can't quietly weaken verification.
+	//
+	// Measured on the integer, not on len(nBytes): the encoded length counts
+	// leading zero bytes, so a 1024-bit modulus left-padded to 256 bytes would
+	// clear a byte-length floor and still yield a 1024-bit key. (construct-
+	// server's guard tests the encoding — SERV-131 carries the same fix.)
+	n := new(big.Int).SetBytes(nBytes)
+	if n.BitLen() < minRSAModulusBits {
+		return nil, errors.New("cf access: RSA modulus is below the 2048-bit minimum")
 	}
 	// The exponent is a big-endian integer of up to a few bytes; left-pad to 8
 	// so it fits a uint64.
 	var eBuf [8]byte
 	copy(eBuf[8-len(eBytes):], eBytes)
 	e := binary.BigEndian.Uint64(eBuf[:])
-	if e == 0 {
-		return nil, errors.New("cf access: zero RSA exponent")
+	// E is an int: an exponent above MaxInt32 is implementation-defined
+	// truncation on a 32-bit build and a nonsense key everywhere.
+	if e == 0 || e > 1<<31-1 {
+		return nil, errors.New("cf access: RSA exponent out of range")
 	}
-	return &rsa.PublicKey{
-		N: new(big.Int).SetBytes(nBytes),
-		E: int(e),
-	}, nil
+	return &rsa.PublicKey{N: n, E: int(e)}, nil
 }
 
 // decodeSegment base64url-decodes a JWS segment and unmarshals its JSON.
