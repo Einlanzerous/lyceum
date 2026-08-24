@@ -157,10 +157,12 @@ guard. A new per-book lookup inside a library loop belongs in a batch.
 - Postgres, shared with the rest of the estate. Migrations run at boot.
 - The Flutter app is hybrid: native library and settings, WebView epub.js reader,
   so reading positions stay CFI-compatible with the web reader.
-- **Merging does not deploy.** A merge to main publishes `:sha-<short>` only.
-  `:latest` is the RELEASE image, published by the `v*` tag build that
-  release-please cuts, and production only moves on a construct-server deploy
-  dispatch. Do not describe a merge as shipping.
+- **Merging does not deploy.** A merge to main publishes `:sha-<short>` only —
+  and that tag is main's alone, so it always names an unstamped build. `:latest`
+  is the RELEASE image, published only by the release tag build (a bare-semver
+  `v*` tag; a prerelease or hand-cut tag moves nothing), and production only
+  moves on a construct-server deploy dispatch. Do not describe a merge as
+  shipping.
 
 ## Verification bar
 
