@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/magos/lyceum/internal/version"
@@ -59,4 +60,19 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 		Version: id.Version,
 		SHA:     id.SHA,
 	})
+}
+
+// logBuildIdentity announces the build on the boot line, in the same shape
+// /healthz reports it: the bare semver (or "dev") and the full commit.
+//
+// Reads through version.Get() rather than the vars, so the blank-ARG rule
+// applies here too — a stamped-blank build must say "dev" in the log for the
+// same reason it says "dev" on the wire.
+func logBuildIdentity() {
+	id := version.Get()
+	commit := "no commit recorded"
+	if id.SHA != nil {
+		commit = *id.SHA
+	}
+	log.Printf("lyceum build: version=%s commit=%s", id.Version, commit)
 }

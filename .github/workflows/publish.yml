@@ -2,8 +2,23 @@ name: publish
 
 # Builds the production image (deploy/Dockerfile: Vue reader SPA embedded into
 # the Go binary) and pushes it to GHCR (LYCM-61). construct-server pulls
-# ghcr.io/einlanzerous/lyceum:latest. main publishes :latest; release-please
-# tags (v*) publish the semver tags.
+# ghcr.io/einlanzerous/lyceum:latest.
+#
+# WHICH BUILD PUBLISHES WHICH TAG:
+#
+#   push to main       :sha-<short> only. main is not a release, so it has no
+#                      version to claim and does not touch the tag that gets
+#                      deployed.
+#   push of a v* tag   :latest, the semver pair (:1.12.0 and :1.12), and
+#                      :sha-<short>. release-please cuts these tags, and it does
+#                      so with a GitHub App token, so the push DOES create a
+#                      workflow run (the SERV-125 trap is that a GITHUB_TOKEN
+#                      tag creates none — verified here: a tag-ref run exists
+#                      for every release).
+#
+# :latest is deliberately the RELEASE image and not main's tip, because it is
+# the one construct-server deploys and /healthz has to answer for it (LYCM-121).
+# See the `flavor: latest=false` note on the meta step.
 on:
   push:
     branches: [main]
@@ -28,8 +43,31 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/einlanzerous/lyceum
+          # `latest=false` is load-bearing, not tidying (LYCM-121).
+          #
+          # The default is `latest=auto`, which emits :latest BY ITSELF on any
+          # type=semver match — independently of the type=raw entry below. So
+          # both builds of a release commit published :latest: the main build
+          # (VERSION blank, label `version=latest`) and the tag build (VERSION
+          # the bare semver, label `version=1.12.0`). Two runs, two different
+          # digests, same moving tag, no ordering between them.
+          #
+          # That is a race, and it was decided by which runner finished last.
+          # At v1.12.0 the tag build won by nine seconds and :latest is correct
+          # today — which is the bad kind of correct, because a slow tag build
+          # or a cache miss silently hands :latest to the image that reports
+          # `dev`. construct-server pulls :latest, so the coin flip lands in
+          # the delivery ledger.
+          #
+          # A main build can never satisfy the contract anyway: main is not a
+          # release, so it has no semver to report, and its label says the
+          # literal `latest`. `dev` != `latest` under the reconciler's strict
+          # equality no matter which side you look from. If :latest is what
+          # gets deployed, :latest has to BE a release — so it is published by
+          # the tag build alone, and a main push publishes sha-<short> only.
+          flavor: latest=false
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=sha,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -42,13 +80,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Build identity for /healthz (LYCM-121) — see deploy/Dockerfile.
           #
-          # VERSION is passed ONLY on a tag build. On a push to main
-          # `steps.meta.outputs.version` is `latest`, and `latest` names a
-          # moving target rather than a build: reporting it would put the
-          # string "latest" in the delivery ledger as an identity, to be
-          # compared against whatever the image label says and disagree for
-          # ever. Blank instead, which `internal/version` maps to "dev" — the
-          # honest answer for a build no release cut.
+          # VERSION is passed ONLY on a tag build, and the guard is kept
+          # rather than leaned on `outputs.version` being sensible. On a main
+          # build that output is whatever the highest-priority tag happens to
+          # be — `latest` before `flavor: latest=false`, `sha-<short>` after —
+          # and NEITHER is a version. Feeding either one through would store a
+          # moving tag in the delivery ledger as though it were an identity, to
+          # be compared against the image label and disagree for ever. Blank
+          # instead, which `internal/version` maps to "dev": the honest answer
+          # for a build no release cut.
           #
           # On a tag build metadata-action's `version` output is already the
           # BARE semver (`1.10.0`), matching the image label character for

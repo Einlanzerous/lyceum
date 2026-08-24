@@ -3,7 +3,9 @@
 # Production image (LYCM-61): one self-contained Go binary that serves the JSON
 # API *and* the embedded Vue reader SPA same-origin (web/embed.go). No separate
 # frontend service, no CORS surface for the web build. construct-server pulls
-# ghcr.io/einlanzerous/lyceum:latest. Build from the repo root:
+# ghcr.io/einlanzerous/lyceum:latest, which publish.yml publishes from the
+# release tag build only — never from a main push, so the deployed image always
+# carries a real semver to report on /healthz. Build from the repo root:
 #   docker build -f deploy/Dockerfile -t lyceum:latest .
 
 # 1) Build the Vite SPA -> web/dist (embedded by the Go binary in step 2).

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/magos/lyceum/internal/version"
@@ -81,5 +84,51 @@ func TestHandleHealthzUnstampedBuild(t *testing.T) {
 	}
 	if got["sha"] != nil {
 		t.Errorf("sha = %v, want null", got["sha"])
+	}
+}
+
+// The boot log exists to make a mis-stamped image obvious in `docker logs`, so
+// it has to obey the same blank-is-not-unset rule as the wire. A build stamped
+// with an empty ARG must announce "dev" — printing an empty version would make
+// the one line an operator relies on read as though the field were missing.
+func TestLogBuildIdentityAppliesTheDevFallback(t *testing.T) {
+	origVersion, origCommit := version.Version, version.Commit
+	origFlags, origPrefix := log.Flags(), log.Prefix()
+	t.Cleanup(func() {
+		version.Version, version.Commit = origVersion, origCommit
+		log.SetOutput(os.Stderr)
+		log.SetFlags(origFlags)
+		log.SetPrefix(origPrefix)
+	})
+	log.SetFlags(0)
+
+	for _, tc := range []struct {
+		name            string
+		version, commit string
+		want            string
+	}{
+		{
+			name:    "stamped release",
+			version: "1.12.0", commit: "ce25438d348b78399e44f4cad937ff17b951c1e2",
+			want: "lyceum build: version=1.12.0 commit=ce25438d348b78399e44f4cad937ff17b951c1e2\n",
+		},
+		{
+			// Exactly what an image built with no --build-arg produces.
+			name:    "blank ARG",
+			version: "", commit: "",
+			want: "lyceum build: version=dev commit=no commit recorded\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			version.Version, version.Commit = tc.version, tc.commit
+
+			logBuildIdentity()
+
+			if got := buf.String(); got != tc.want {
+				t.Errorf("boot log = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
