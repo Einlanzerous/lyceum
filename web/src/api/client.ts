@@ -131,6 +131,49 @@ export async function listPendingReview(): Promise<Book[]> {
   return (await res.json()) as Book[]
 }
 
+/** An inventory entry (GET /inventory): an owned title and whether a book fulfils it. */
+export interface InventoryEntry {
+  id: number
+  isbn: string
+  title?: string
+  author?: string
+  /** `owned` (scanned), `wanted` (a grab requested), or `ingested` (a book is linked). */
+  state: string
+  book_id?: number
+  series?: string
+  series_index?: number
+}
+
+/** GET /inventory — every owned title, most recently updated first. */
+export async function listInventory(): Promise<InventoryEntry[]> {
+  const res = await apiFetch('/inventory')
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as InventoryEntry[]
+}
+
+export interface LinkInventoryResult {
+  book: Book
+  inventory: InventoryEntry
+}
+
+/**
+ * POST /books/{id}/inventory — say which wanted title a held book fulfils
+ * (LYCM-128): the entry flips to ingested with this book and any series intent
+ * it carried lands on the book. 409 when the entry already has another book.
+ */
+export async function linkBookToInventory(
+  bookId: number,
+  inventoryId: number,
+): Promise<LinkInventoryResult> {
+  const res = await apiFetch(`/books/${bookId}/inventory`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inventory_id: inventoryId }),
+  })
+  if (!res.ok) throw await readError(res)
+  return (await res.json()) as LinkInventoryResult
+}
+
 /** POST /books/{id}/approve — publish a pending book to the shelf. */
 export async function approveBook(id: number): Promise<Book> {
   const res = await apiFetch(`/books/${id}/approve`, { method: 'POST' })

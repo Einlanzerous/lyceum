@@ -71,6 +71,8 @@ type Store interface {
 	UpsertInventory(ctx context.Context, inv store.Inventory) (store.Inventory, error)
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
 	SetInventorySeries(ctx context.Context, isbn, series string, index float64) (store.Inventory, error)
+	// FulfilInventory links a book to an entry by hand (LYCM-128).
+	FulfilInventory(ctx context.Context, id, bookID int64, code string) (store.Inventory, error)
 	LinkBookToInventory(ctx context.Context, isbn, workID string, bookID int64, title, author string) (store.Inventory, error)
 	ListInventory(ctx context.Context) ([]store.Inventory, error)
 	GetInventoryByISBN(ctx context.Context, isbn string) (store.Inventory, error)
@@ -343,6 +345,7 @@ func (a *API) Handler() *http.ServeMux {
 	// Ingest QC review queue (LYCM-58): held books plus approve / replace-cover.
 	mux.HandleFunc("GET /ingest/review", a.requireUser(a.handleReviewList))
 	mux.HandleFunc("POST /books/{id}/approve", a.requireUser(a.handleApprove))
+	mux.HandleFunc("POST /books/{id}/inventory", a.requireUser(a.handleLinkInventory))
 	mux.HandleFunc("POST /books/{id}/cover", a.requireUser(a.handleReplaceCover))
 	mux.HandleFunc("POST /books/{id}/cover/refetch", a.requireUser(a.handleRefetchCover))
 

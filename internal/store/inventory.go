@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/magos/lyceum/internal/dedup"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -142,14 +143,22 @@ func (s *Store) SetInventorySeries(ctx context.Context, isbn, series string, ind
 	return inv, nil
 }
 
+// ErrInventoryFulfilled is returned by FulfilInventory when the entry already
+// has a different book linked: one row per work, so a second ebook for it is a
+// duplicate to resolve, not a link to overwrite.
+var ErrInventoryFulfilled = errors.New("store: inventory entry already fulfilled by another book")
+
 // LinkBookToInventory records that bookID is the ingested EPUB for code: it sets
 // book_id and flips the state to ingested. It reconciles print↔ebook editions
 // (LYCM-35): the book joins the entry that already knows this ISBN, else a
-// sibling edition of the same work (workID), else a fresh row is created (a
-// direct upload or a Bindery grab that no scan preceded). code is always
-// registered as a known ISBN of the resulting row, so a later lookup by the
-// ebook number finds the same entry a print scan created. An existing non-empty
-// title/author is preserved. The stored row is returned.
+// sibling edition of the same work (workID), else — since the resolver can be
+// blind to an ebook ISBN altogether (LYCM-128: Open Library has no record of
+// the Pottermore HP #1, so it produced no work key) — an entry still waiting
+// for a book whose title and author match the EPUB's, else a fresh row is
+// created (a direct upload or a Bindery grab that no scan preceded). code is
+// always registered as a known ISBN of the resulting row, so a later lookup by
+// the ebook number finds the same entry a print scan created. An existing
+// non-empty title/author is preserved. The stored row is returned.
 func (s *Store) LinkBookToInventory(ctx context.Context, code, workID string, bookID int64, title, author string) (Inventory, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -157,7 +166,7 @@ func (s *Store) LinkBookToInventory(ctx context.Context, code, workID string, bo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	targetID, found, err := findInventoryTarget(ctx, tx, code, workID)
+	targetID, found, err := findInventoryTarget(ctx, tx, code, workID, title, author)
 	if err != nil {
 		return Inventory{}, err
 	}
@@ -194,10 +203,12 @@ func (s *Store) LinkBookToInventory(ctx context.Context, code, workID string, bo
 	return inv, nil
 }
 
-// findInventoryTarget picks the inventory row an ingest of code (work workID)
-// should join: first an entry that already maps this exact ISBN, then a sibling
-// edition of the same work. found is false when neither exists (a fresh title).
-func findInventoryTarget(ctx context.Context, tx pgx.Tx, code, workID string) (int64, bool, error) {
+// findInventoryTarget picks the inventory row an ingest of code (work workID,
+// titled title by author) should join: first an entry that already maps this
+// exact ISBN, then a sibling edition of the same work, then an entry with no
+// book yet whose title and author match. found is false when none exists (a
+// fresh title).
+func findInventoryTarget(ctx context.Context, tx pgx.Tx, code, workID, title, author string) (int64, bool, error) {
 	var id int64
 	switch err := tx.QueryRow(ctx,
 		`SELECT inventory_id FROM inventory_isbns WHERE isbn13 = $1`, code).Scan(&id); {
@@ -216,7 +227,85 @@ func findInventoryTarget(ctx context.Context, tx pgx.Tx, code, workID string) (i
 			return 0, false, fmt.Errorf("store: find inventory by work: %w", err)
 		}
 	}
+
+	return findUnfulfilledByTitleAuthor(ctx, tx, title, author)
+}
+
+// findUnfulfilledByTitleAuthor is the last resort before creating a row: an
+// entry still waiting for its book (book_id NULL — owned or wanted) whose
+// title and author both match the EPUB's under dedup's normalisation
+// (case, accents, punctuation, a leading article, "Surname, Given"). Both must
+// match — a title alone joins the wrong author's same-named book, and an
+// author alone joins the wrong volume — and an entry already holding a book
+// is never a target, so a second copy of a work stays a duplicate for review
+// rather than silently taking over the row. Entries with no title or author
+// recorded cannot match. Ties go to the oldest entry.
+func findUnfulfilledByTitleAuthor(ctx context.Context, tx pgx.Tx, title, author string) (int64, bool, error) {
+	wantTitle, wantAuthor := dedup.NormalizeTitle(title), dedup.NormalizeAuthor(author)
+	if wantTitle == "" || wantAuthor == "" {
+		return 0, false, nil
+	}
+	rows, err := tx.Query(ctx,
+		`SELECT id, COALESCE(title, ''), COALESCE(author, '') FROM inventory
+		 WHERE book_id IS NULL ORDER BY id ASC`)
+	if err != nil {
+		return 0, false, fmt.Errorf("store: find inventory by title/author: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var t, a string
+		if err := rows.Scan(&id, &t, &a); err != nil {
+			return 0, false, fmt.Errorf("store: scan inventory by title/author: %w", err)
+		}
+		if dedup.NormalizeTitle(t) == wantTitle && dedup.NormalizeAuthor(a) == wantAuthor {
+			return id, true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("store: find inventory by title/author: %w", err)
+	}
 	return 0, false, nil
+}
+
+// FulfilInventory links bookID to the inventory entry with id by hand
+// (LYCM-128): the reviewer's "this held book is that wanted title" for an
+// EPUB that carried no ISBN to join on. It sets book_id and flips the state to
+// ingested; code, when the book has one, is registered as a known ISBN of the
+// entry. An entry already holding a different book returns
+// ErrInventoryFulfilled; re-linking the same book is a no-op. Returns
+// ErrNotFound for an unknown id. The stored row is returned.
+func (s *Store) FulfilInventory(ctx context.Context, id, bookID int64, code string) (Inventory, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var current *int64
+	switch err := tx.QueryRow(ctx, `SELECT book_id FROM inventory WHERE id = $1 FOR UPDATE`, id).Scan(&current); {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Inventory{}, ErrNotFound
+	case err != nil:
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: %w", err)
+	}
+	if current != nil && *current != bookID {
+		return Inventory{}, ErrInventoryFulfilled
+	}
+	inv, err := scanInventory(tx.QueryRow(ctx,
+		`UPDATE inventory SET book_id = $2, acquisition_state = $3, updated_at = now()
+		 WHERE id = $1
+		 RETURNING `+inventoryColumns, id, bookID, StateIngested))
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: %w", err)
+	}
+	if err := registerISBN(ctx, tx, code, inv.ID); err != nil {
+		return Inventory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: commit: %w", err)
+	}
+	return inv, nil
 }
 
 // registerISBN records code as a known ISBN of inventoryID. It is idempotent and

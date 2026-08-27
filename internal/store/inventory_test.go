@@ -216,3 +216,125 @@ func TestListInventory(t *testing.T) {
 		t.Fatalf("ListInventory returned %d, want 2", len(got))
 	}
 }
+
+// An ebook whose ISBN the resolver does not know (no work key — Open Library
+// has no record of the Pottermore HP #1, LYCM-128) still joins the wanted
+// print entry when its title and author match, instead of opening a second
+// row for the same work.
+func TestLinkFallsBackToTitleAuthor(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	// The scan recorded the US print ISBN under the work title OL gives.
+	if _, err := s.UpsertInventory(ctx, Inventory{
+		ISBN: "9780590353427", Title: "Harry Potter and the Philosopher's Stone", Author: "J. K. Rowling",
+	}); err != nil {
+		t.Fatalf("UpsertInventory: %v", err)
+	}
+	if _, err := s.SetInventoryState(ctx, "9780590353427", StateWanted); err != nil {
+		t.Fatalf("SetInventoryState: %v", err)
+	}
+	// A decoy with the same title by someone else must not be joined.
+	if _, err := s.UpsertInventory(ctx, Inventory{
+		ISBN: "9780000000019", Title: "Harry Potter and the Philosopher's Stone", Author: "Somebody Else",
+	}); err != nil {
+		t.Fatalf("UpsertInventory decoy: %v", err)
+	}
+	book, err := s.InsertBook(ctx, sampleBook("hash-hp1-ebook"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+
+	// The Pottermore ebook: different ISBN, no work key, inverted author and
+	// a different article/punctuation in the title.
+	inv, err := s.LinkBookToInventory(ctx, "9781781100073", "", book.ID,
+		"Harry Potter and the Philosopher’s Stone", "Rowling, J. K.")
+	if err != nil {
+		t.Fatalf("LinkBookToInventory: %v", err)
+	}
+	if inv.ISBN != "9780590353427" || inv.State != StateIngested || inv.BookID == nil || *inv.BookID != book.ID {
+		t.Fatalf("linked = %+v, want the wanted print entry fulfilled", inv)
+	}
+	all, err := s.ListInventory(ctx)
+	if err != nil {
+		t.Fatalf("ListInventory: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("inventory has %d rows, want 2 (no new row for the ebook)", len(all))
+	}
+	// The ebook ISBN now finds the same entry.
+	if got, err := s.GetInventoryByAnyISBN(ctx, "9781781100073"); err != nil || got.ID != inv.ID {
+		t.Fatalf("GetInventoryByAnyISBN(ebook) = %+v err=%v, want entry %d", got, err, inv.ID)
+	}
+}
+
+// The fallback never joins an entry that already holds a book: a second copy
+// of a work is a duplicate for review, not a new owner of the row.
+func TestLinkTitleAuthorFallbackSkipsFulfilledEntries(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	first, err := s.InsertBook(ctx, sampleBook("hash-dune-1"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	if _, err := s.LinkBookToInventory(ctx, "9780441172719", "", first.ID, "Dune", "Frank Herbert"); err != nil {
+		t.Fatalf("link first: %v", err)
+	}
+	second, err := s.InsertBook(ctx, sampleBook("hash-dune-2"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	inv, err := s.LinkBookToInventory(ctx, "9781473233966", "", second.ID, "Dune", "Frank Herbert")
+	if err != nil {
+		t.Fatalf("link second: %v", err)
+	}
+	if inv.BookID == nil || *inv.BookID != second.ID || inv.ISBN != "9781473233966" {
+		t.Fatalf("second link = %+v, want its own fresh row", inv)
+	}
+	if got, _ := s.GetInventoryByISBN(ctx, "9780441172719"); got.BookID == nil || *got.BookID != first.ID {
+		t.Fatalf("first entry = %+v, want still linked to the first book", got)
+	}
+}
+
+// FulfilInventory is the reviewer's by-hand link for an EPUB with nothing to
+// join on (LYCM-128).
+func TestFulfilInventory(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	wanted, err := s.UpsertInventory(ctx, Inventory{ISBN: "9780765311788", Title: "The Final Empire", Author: "Brandon Sanderson"})
+	if err != nil {
+		t.Fatalf("UpsertInventory: %v", err)
+	}
+	if _, err := s.SetInventoryState(ctx, wanted.ISBN, StateWanted); err != nil {
+		t.Fatalf("SetInventoryState: %v", err)
+	}
+	book, err := s.InsertBook(ctx, sampleBook("hash-fulfil"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+
+	inv, err := s.FulfilInventory(ctx, wanted.ID, book.ID, "")
+	if err != nil {
+		t.Fatalf("FulfilInventory: %v", err)
+	}
+	if inv.State != StateIngested || inv.BookID == nil || *inv.BookID != book.ID {
+		t.Fatalf("fulfilled = %+v, want ingested with book %d", inv, book.ID)
+	}
+	// Idempotent for the same book.
+	if _, err := s.FulfilInventory(ctx, wanted.ID, book.ID, ""); err != nil {
+		t.Fatalf("re-fulfil same book: %v", err)
+	}
+	// Refused for a different one.
+	other, err := s.InsertBook(ctx, sampleBook("hash-fulfil-2"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	if _, err := s.FulfilInventory(ctx, wanted.ID, other.ID, ""); !errors.Is(err, ErrInventoryFulfilled) {
+		t.Fatalf("fulfil with another book = %v, want ErrInventoryFulfilled", err)
+	}
+	if _, err := s.FulfilInventory(ctx, 999999, book.ID, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("fulfil unknown entry = %v, want ErrNotFound", err)
+	}
+}

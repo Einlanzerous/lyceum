@@ -14,6 +14,8 @@ import {
   replaceCover,
   updateBook,
   uploadBook,
+  listInventory,
+  linkBookToInventory,
 } from './client'
 import type { Book, Position } from './types'
 
@@ -210,6 +212,37 @@ describe('ingest QC review (LYCM-58)', () => {
       '/books/3/approve',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+
+  it('listInventory GETs /inventory', async () => {
+    const fetchFn = mockFetch(() =>
+      jsonResponse(200, [
+        { id: 7, isbn: '9780765311788', title: 'The Final Empire', state: 'wanted' },
+      ]),
+    )
+    await expect(listInventory()).resolves.toEqual([
+      { id: 7, isbn: '9780765311788', title: 'The Final Empire', state: 'wanted' },
+    ])
+    expect(fetchFn.mock.calls[0]?.[0]).toBe('/inventory')
+  })
+
+  it('linkBookToInventory POSTs the chosen entry (LYCM-128)', async () => {
+    let body: Record<string, unknown> = {}
+    const fetchFn = mockFetch((_url, init) => {
+      body = JSON.parse(init?.body as string)
+      return jsonResponse(200, {
+        book: { id: 2, title: 'T', author: 'A', cover_url: '' },
+        inventory: { id: 7, isbn: '9780765311788', state: 'ingested', book_id: 2 },
+      })
+    })
+    await expect(linkBookToInventory(2, 7)).resolves.toMatchObject({
+      inventory: { state: 'ingested' },
+    })
+    expect(fetchFn).toHaveBeenCalledWith(
+      '/books/2/inventory',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(body).toEqual({ inventory_id: 7 })
   })
 
   it('updateBook PATCHes title/author as JSON', async () => {

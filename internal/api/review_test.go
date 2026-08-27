@@ -327,3 +327,72 @@ func TestReviewQueueReflectsAMarkedPendingBook(t *testing.T) {
 			pending.ID, single.Finished, queue[0].Finished)
 	}
 }
+
+// A held book with no ISBN can be linked to the wanted entry it fulfils
+// (LYCM-128): the entry flips to ingested with the book, the entry's series
+// intent lands on the book, and the book stays in the review queue until
+// approved.
+func TestLinkHeldBookToWantedInventory(t *testing.T) {
+	s := testStore(t)
+	srv := httptest.NewServer(New(s, "").Handler())
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+
+	wanted, err := s.UpsertInventory(ctx, store.Inventory{ISBN: "9780765311788", Title: "The Final Empire", Author: "Brandon Sanderson"})
+	if err != nil {
+		t.Fatalf("UpsertInventory: %v", err)
+	}
+	if _, err := s.SetInventoryState(ctx, wanted.ISBN, store.StateWanted); err != nil {
+		t.Fatalf("SetInventoryState: %v", err)
+	}
+	if _, err := s.SetInventorySeries(ctx, wanted.ISBN, "Mistborn", 1); err != nil {
+		t.Fatalf("SetInventorySeries: %v", err)
+	}
+	filePath, _, err := s.SaveBlobs("converted-azw3", epubBytes, nil)
+	if err != nil {
+		t.Fatalf("SaveBlobs: %v", err)
+	}
+	book, err := s.InsertBook(ctx, store.Book{
+		Title: "Mistborn - The Final Empire", Author: "Brandon Sanderson",
+		FilePath: filePath, FileHash: "converted-azw3", SizeBytes: int64(len(epubBytes)),
+		ReviewState: store.ReviewPending, ReviewFlags: []string{"no_isbn"},
+	})
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	id := strconv.FormatInt(book.ID, 10)
+
+	resp := postJSON(t, srv.URL+"/books/"+id+"/inventory", map[string]any{"inventory_id": wanted.ID})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("link = %d %s, want 200", resp.StatusCode, body)
+	}
+	got := decode[linkInventoryResponse](t, resp)
+	if got.Inventory.ID != wanted.ID || got.Inventory.State != store.StateIngested || got.Inventory.BookID == nil || *got.Inventory.BookID != book.ID {
+		t.Fatalf("inventory = %+v, want entry %d ingested with book %d", got.Inventory, wanted.ID, book.ID)
+	}
+	if got.Book.Series != "Mistborn" || got.Book.SeriesIndex == nil || *got.Book.SeriesIndex != 1 {
+		t.Fatalf("book = %+v, want the entry's series intent applied", got.Book)
+	}
+	if got.Book.ReviewState != store.ReviewPending {
+		t.Fatalf("review_state = %q, want still pending (linking is not approving)", got.Book.ReviewState)
+	}
+
+	// A second held book cannot take the same entry.
+	other := seedBook(t, s, "another-copy", "The Final Empire", "Brandon Sanderson", nil)
+	resp = postJSON(t, srv.URL+"/books/"+strconv.FormatInt(other.ID, 10)+"/inventory", map[string]any{"inventory_id": wanted.ID})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("link a fulfilled entry = %d, want 409", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postJSON(t, srv.URL+"/books/"+id+"/inventory", map[string]any{"inventory_id": 424242})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("link unknown entry = %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postJSON(t, srv.URL+"/books/"+id+"/inventory", map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("link without inventory_id = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
