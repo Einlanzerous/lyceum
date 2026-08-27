@@ -416,6 +416,25 @@ func TestConfirmWithDetailsStillNeedsValidISBN(t *testing.T) {
 	}
 }
 
+// Typed details never stand in for a pick: a review candidate has real
+// editions (with the work key that groups print and ebook) and must still be
+// resolved by choosing one.
+func TestConfirmDetailsIgnoredForReviewCandidate(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnDune}},
+	}))
+	if b.Candidates[0].Status != store.CandidateReview {
+		t.Fatalf("status = %q, want review", b.Candidates[0].Status)
+	}
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(b.Candidates[0].ID)+"/confirm",
+		map[string]any{"title": "Dune", "author": "Frank Herbert"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirm with details on a review candidate = %d, want 400 (pick an edition)", resp.StatusCode)
+	}
+}
+
 // Typed details never override a resolved edition.
 func TestConfirmDetailsIgnoredWhenEditionChosen(t *testing.T) {
 	srv, _ := ingestServer(t, nil)

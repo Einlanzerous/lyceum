@@ -335,8 +335,10 @@ func (a *API) handleCandidatePick(w http.ResponseWriter, r *http.Request) {
 type confirmRequest struct {
 	Series      string  `json:"series"`
 	SeriesIndex float64 `json:"series_index"`
-	// Title/Author confirm a candidate the resolver could not place from what
-	// the reviewer typed (LYCM-124). Ignored when an edition is already chosen.
+	// Title/Author confirm a no_match candidate — one the resolver could not
+	// place at all — from what the reviewer typed (LYCM-124). Ignored on any
+	// other status: a review candidate has real editions (work key, cover) to
+	// pick from, and a ready one is already chosen.
 	Title  string `json:"title"`
 	Author string `json:"author"`
 }
@@ -362,10 +364,8 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if title := strings.TrimSpace(req.Title); title != "" {
-		if _, ok := c.ChosenEdition(); !ok {
-			c = withTypedEdition(c, title, strings.TrimSpace(req.Author))
-		}
+	if title := strings.TrimSpace(req.Title); title != "" && c.Status == store.CandidateNoMatch {
+		c = withTypedEdition(c, title, strings.TrimSpace(req.Author))
 	}
 	inv, saved, err := a.confirmCandidate(ctx, c, strings.TrimSpace(req.Series), req.SeriesIndex)
 	switch {
