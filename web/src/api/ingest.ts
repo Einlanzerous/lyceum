@@ -110,15 +110,27 @@ export interface ConfirmResult {
   inventory: { id: number; isbn: string; title?: string; author?: string; state: string }
 }
 
+/**
+ * What a reviewer typed for a candidate the resolver could not place
+ * (LYCM-124). The server synthesises the edition from these; ignored when the
+ * candidate already has a chosen edition.
+ */
+export interface TypedDetails {
+  title: string
+  author: string
+}
+
 /** POST /ingest/candidates/{id}/confirm — shelve one candidate into inventory. */
 export function confirmCandidate(
   candidateId: number,
   series = '',
   seriesIndex = 0,
+  details?: TypedDetails,
 ): Promise<ConfirmResult> {
   return sendJSON<ConfirmResult>(`/ingest/candidates/${candidateId}/confirm`, {
     series,
     series_index: seriesIndex,
+    ...(details ? { title: details.title, author: details.author } : {}),
   })
 }
 

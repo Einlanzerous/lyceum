@@ -14,6 +14,7 @@ import {
   type CandidateStatus,
   type Edition,
   type ScanSource,
+  type TypedDetails,
 } from '@/api/ingest'
 
 /** Statuses that still need the reviewer: everything not yet confirmed/skipped. */
@@ -158,12 +159,17 @@ export const useIngestStore = defineStore('ingest', {
       })
     },
 
-    /** Confirm the selected candidate into inventory, then advance to the next. */
-    async confirm(series = '', seriesIndex = 0): Promise<void> {
+    /**
+     * Confirm the selected candidate into inventory, then advance to the next.
+     * `details` confirms a no_match candidate from a typed title/author
+     * (LYCM-124).
+     */
+    async confirm(series = '', seriesIndex = 0, details?: TypedDetails): Promise<void> {
       const c = this.selected
       if (!c) return
       await this.run(async () => {
-        await confirmCandidate(c.id, series, seriesIndex)
+        if (details) await confirmCandidate(c.id, series, seriesIndex, details)
+        else await confirmCandidate(c.id, series, seriesIndex)
         await this.refresh()
         this.advanceFrom(c.id)
       })

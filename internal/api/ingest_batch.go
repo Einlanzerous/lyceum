@@ -335,6 +335,10 @@ func (a *API) handleCandidatePick(w http.ResponseWriter, r *http.Request) {
 type confirmRequest struct {
 	Series      string  `json:"series"`
 	SeriesIndex float64 `json:"series_index"`
+	// Title/Author confirm a candidate the resolver could not place from what
+	// the reviewer typed (LYCM-124). Ignored when an edition is already chosen.
+	Title  string `json:"title"`
+	Author string `json:"author"`
 }
 
 type confirmResponse struct {
@@ -358,10 +362,15 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if title := strings.TrimSpace(req.Title); title != "" {
+		if _, ok := c.ChosenEdition(); !ok {
+			c = withTypedEdition(c, title, strings.TrimSpace(req.Author))
+		}
+	}
 	inv, saved, err := a.confirmCandidate(ctx, c, strings.TrimSpace(req.Series), req.SeriesIndex)
 	switch {
 	case errors.Is(err, errNoChoice):
-		http.Error(w, "pick an edition before confirming", http.StatusBadRequest)
+		http.Error(w, "pick an edition, or confirm with a typed title, before confirming", http.StatusBadRequest)
 		return
 	case errors.Is(err, errNoISBN):
 		http.Error(w, "candidate has no valid ISBN to confirm", http.StatusBadRequest)
@@ -377,6 +386,22 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		Candidate: toCandidateJSON(saved),
 		Inventory: toInventoryJSON(inv),
 	})
+}
+
+// withTypedEdition synthesises the edition a reviewer typed for a candidate the
+// resolver could not place (LYCM-124) — typically a new release not yet in Open
+// Library — so the ordinary confirm path shelves it like any other: the
+// inventory row keys on the scanned ISBN with the typed title/author, the
+// acquirer is asked for it, and the candidate records the typed metadata at
+// full confidence. No work key is known, so a later ebook ingest reconciles by
+// ISBN (or title/author) rather than by work. isbn.Valid still gates the
+// confirm downstream: a malformed scan must be corrected first.
+func withTypedEdition(c store.Candidate, title, author string) store.Candidate {
+	e := store.Edition{ID: c.ISBN, ISBN13: c.ISBN, Title: title, Author: author}
+	c.Editions = []store.Edition{e}
+	c.ChosenEditionID = e.ID
+	c.Confidence = 1
+	return c
 }
 
 // confirmCandidate is the shared confirm path (single confirm + batch
