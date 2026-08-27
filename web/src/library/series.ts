@@ -35,6 +35,19 @@ export interface SeriesGroup {
 export type ShelfItem =
   { kind: 'book'; key: string; book: Book } | { kind: 'series'; key: string; series: SeriesGroup }
 
+/**
+ * The number a volume is labelled with: its series_index as given ("4",
+ * "3.5" for a novella), or null when the book has none. It is deliberately not
+ * the book's position in the member list — an owned series with gaps (1, 4, 5,
+ * 7) would otherwise be renumbered 1–4 (LYCM-130). Callers show no number
+ * rather than inventing one.
+ */
+export function volumeNumber(b: Book): string | null {
+  const n = b.series_index
+  if (n == null || !Number.isFinite(n)) return null
+  return String(n)
+}
+
 export function memberStatus(b: Book): MemberStatus {
   if (b.finished) return 'finished' // explicit mark-as-read wins over the % heuristic
   const p = b.progress ?? 0

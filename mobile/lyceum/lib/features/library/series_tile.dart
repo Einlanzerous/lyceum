@@ -231,9 +231,10 @@ class _SeriesSheet extends ConsumerWidget {
     final client = ref.watch(lyceumClientProvider);
     // The resume target comes off the group, so the sheet's Resume button, the
     // tile's cover and the pinned Continue chip all name the same volume. The
-    // index is only for the "Resume book N" label.
+    // number is only for the "Resume book N" label, and comes from the volume's
+    // own seriesIndex, never its list position (LYCM-130).
     final resumeBook = series.resumeBook;
-    final resumeAt = resumeIndex(series.members);
+    final resumeNumber = volumeNumber(resumeBook);
 
     // Captured up front so it stays valid after the confirm dialog's await.
     final sheetNav = Navigator.of(context);
@@ -293,7 +294,11 @@ class _SeriesSheet extends ConsumerWidget {
                   ),
                   FilledButton(
                     onPressed: () => open(resumeBook.id),
-                    child: Text('Resume book ${resumeAt + 1}'),
+                    child: Text(
+                      resumeNumber == null
+                          ? 'Resume'
+                          : 'Resume book $resumeNumber',
+                    ),
                   ),
                 ],
               ),
@@ -309,7 +314,6 @@ class _SeriesSheet extends ConsumerWidget {
                 itemBuilder: (context, i) {
                   final b = series.members[i];
                   return _MemberRow(
-                    index: i,
                     book: b,
                     coverUrl: b.hasCover ? client.coverUrl(b.id) : null,
                     onTap: () => open(b.id),
@@ -337,13 +341,11 @@ class _SeriesSheet extends ConsumerWidget {
 
 class _MemberRow extends StatelessWidget {
   const _MemberRow({
-    required this.index,
     required this.book,
     required this.coverUrl,
     required this.onTap,
     required this.onLongPress,
   });
-  final int index;
   final Book book;
   final String? coverUrl;
   final VoidCallback onTap;
@@ -353,6 +355,7 @@ class _MemberRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final lyc = context.lyc;
     final status = memberStatus(book);
+    final number = volumeNumber(book);
     final statusColor = status == MemberStatus.finished
         ? lyc.brassBright
         : lyc.dim;
@@ -394,7 +397,10 @@ class _MemberRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${status.label} · Book ${index + 1}',
+                    [
+                      status.label,
+                      if (number != null) 'Book $number',
+                    ].join(' · '),
                     style: TextStyle(fontSize: 11.5, color: statusColor),
                   ),
                 ],
