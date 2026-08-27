@@ -223,6 +223,13 @@ func TestInventorySeriesIntent(t *testing.T) {
 		t.Fatalf("linked book = %q #%v, want Mistborn #2 applied", reloaded.Series, reloaded.SeriesIndex)
 	}
 
+	// A position below zero is refused on this path as on PATCH /books.
+	if resp := postInventory(t, srv.URL, map[string]any{"isbn": "9780765311788", "series": "Mistborn", "series_index": -1}); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("negative series_index = %d, want 400", resp.StatusCode)
+	} else {
+		resp.Body.Close()
+	}
+
 	// Without series in the body, an existing intent is left alone.
 	postInventory(t, srv.URL, map[string]any{"isbn": "9780765311788", "title": "The Final Empire"}).Body.Close()
 	inv, _ = s.GetInventoryByISBN(context.Background(), "9780765311788")

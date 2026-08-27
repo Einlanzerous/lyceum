@@ -135,6 +135,10 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid ISBN", http.StatusBadRequest)
 		return
 	}
+	if !validSeriesIndex(req.SeriesIndex) {
+		http.Error(w, "series_index must be a number >= 0", http.StatusBadRequest)
+		return
+	}
 
 	inv, err := a.store.UpsertInventory(ctx, store.Inventory{
 		ISBN:   code,

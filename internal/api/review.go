@@ -95,7 +95,7 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	if req.SeriesIndex != nil && (*req.SeriesIndex < 0 || math.IsNaN(*req.SeriesIndex) || math.IsInf(*req.SeriesIndex, 0)) {
+	if req.SeriesIndex != nil && !validSeriesIndex(*req.SeriesIndex) {
 		http.Error(w, "series_index must be a number >= 0", http.StatusBadRequest)
 		return
 	}
@@ -125,6 +125,12 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.writeBook(w, r, b)
+}
+
+// validSeriesIndex is the one rule for a series position on every write path:
+// 0 means "no position", anything else must be a finite non-negative number.
+func validSeriesIndex(f float64) bool {
+	return f >= 0 && !math.IsNaN(f) && !math.IsInf(f, 0)
 }
 
 // handleReplaceCover replaces a book's cover from an uploaded image (LYCM-58,
