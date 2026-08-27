@@ -22,7 +22,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -68,6 +70,15 @@ type Bindery struct {
 	APIKey    string
 	Client    *http.Client
 	UserAgent string
+
+	// QualityProfile names the Bindery quality profile a newly created author
+	// should carry (LYCEUM_BINDERY_QUALITY_PROFILE): a numeric id or a profile
+	// name, matched case-insensitively. "" picks the first profile whose cutoff
+	// is "epub" (Bindery's stock "E-Book"). See ensureAuthorProfile.
+	QualityProfile string
+
+	profileMu sync.Mutex
+	profileID int64 // resolved QualityProfile, once known; 0 = not yet
 }
 
 // NewBindery returns a client targeting baseURL with the given API key (found in
@@ -87,10 +98,27 @@ func NewBindery(baseURL, apiKey string) *Bindery {
 type binderyBook struct {
 	ID            int64         `json:"id"`
 	ForeignBookID string        `json:"foreignBookId"`
+	AuthorID      int64         `json:"authorId"` // the library author row an add attached the book to
 	Title         string        `json:"title"`
 	MediaType     string        `json:"mediaType"`
 	Monitored     bool          `json:"monitored"`
 	Author        binderyAuthor `json:"author"`
+}
+
+// binderyAuthorRecord is the subset of Bindery's Author (GET /author/{id}) that
+// ensureAuthorProfile reads.
+type binderyAuthorRecord struct {
+	ID               int64  `json:"id"`
+	Name             string `json:"authorName"`
+	QualityProfileID *int64 `json:"qualityProfileId"`
+}
+
+// binderyQualityProfile is the subset of Bindery's QualityProfile
+// (GET /qualityprofile) that profile selection reads.
+type binderyQualityProfile struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Cutoff string `json:"cutoff"`
 }
 
 type binderyAuthor struct {
@@ -163,7 +191,144 @@ func (b *Bindery) Want(ctx context.Context, code string) error {
 		return nil
 	}
 	log.Printf("acquire: bindery grabbing ISBN %s (bookId=%d, %q)", code, created.ID, created.Title)
+	b.ensureAuthorProfile(ctx, created.AuthorID)
 	return nil
+}
+
+// ensureAuthorProfile gives the author an add just attached a book to a quality
+// profile when it has none (LYCM-81). Bindery's POST /author/book creates a
+// new author with no quality profile — its request body has no such field —
+// and a profile-less author has no format filter, so a .mobi/.azw3 omnibus
+// release wins over waiting for an EPUB; the EPUB-only watcher then refuses
+// the file (8 of 13 grabs on 2026-08-27). Setting the profile after the add
+// is the only seam Bindery offers. An author that already carries a profile —
+// set by hand, or by an earlier add — is left exactly as it is. Best effort:
+// the grab is already requested, so a failure here only logs.
+func (b *Bindery) ensureAuthorProfile(ctx context.Context, authorID int64) {
+	if authorID == 0 {
+		return // a 409 add returns no book; nothing to attach to
+	}
+	author, err := b.getAuthor(ctx, authorID)
+	if err != nil {
+		log.Printf("acquire: bindery author %d: %v; quality profile not checked", authorID, err)
+		return
+	}
+	if author.QualityProfileID != nil {
+		return
+	}
+	profileID, err := b.qualityProfileID(ctx)
+	if err != nil {
+		log.Printf("acquire: bindery author %d (%q) has no quality profile and none could be chosen: %v", authorID, author.Name, err)
+		return
+	}
+	if err := b.setAuthorProfile(ctx, authorID, profileID); err != nil {
+		log.Printf("acquire: bindery author %d (%q): set quality profile %d: %v", authorID, author.Name, profileID, err)
+		return
+	}
+	log.Printf("acquire: bindery author %d (%q) had no quality profile; set profile %d", authorID, author.Name, profileID)
+}
+
+// qualityProfileID resolves QualityProfile against Bindery's profile list and
+// caches the answer: profiles are configuration, not data, so one lookup per
+// process is plenty. A failed lookup is not cached, so a Bindery that was
+// briefly unreachable is asked again on the next add.
+func (b *Bindery) qualityProfileID(ctx context.Context) (int64, error) {
+	b.profileMu.Lock()
+	defer b.profileMu.Unlock()
+	if b.profileID != 0 {
+		return b.profileID, nil
+	}
+	profiles, err := b.listQualityProfiles(ctx)
+	if err != nil {
+		return 0, err
+	}
+	id, err := pickQualityProfile(profiles, b.QualityProfile)
+	if err != nil {
+		return 0, err
+	}
+	b.profileID = id
+	return id, nil
+}
+
+// pickQualityProfile chooses the profile `want` names — a numeric id, or a
+// name matched case-insensitively — or, when want is "", the first profile
+// whose cutoff is "epub": the profile that makes Bindery hold out for an EPUB
+// rather than take the first format that turns up.
+func pickQualityProfile(profiles []binderyQualityProfile, want string) (int64, error) {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		for _, p := range profiles {
+			if strings.EqualFold(p.Cutoff, "epub") {
+				return p.ID, nil
+			}
+		}
+		return 0, fmt.Errorf("acquire: bindery has no quality profile with cutoff epub (set LYCEUM_BINDERY_QUALITY_PROFILE)")
+	}
+	if id, err := strconv.ParseInt(want, 10, 64); err == nil {
+		for _, p := range profiles {
+			if p.ID == id {
+				return p.ID, nil
+			}
+		}
+	}
+	for _, p := range profiles {
+		if strings.EqualFold(p.Name, want) {
+			return p.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("acquire: bindery has no quality profile %q", want)
+}
+
+// getAuthor reads one library author (GET /author/{id}).
+func (b *Bindery) getAuthor(ctx context.Context, id int64) (binderyAuthorRecord, error) {
+	resp, err := b.do(ctx, http.MethodGet, "/api/v1/author/"+strconv.FormatInt(id, 10), nil)
+	if err != nil {
+		return binderyAuthorRecord{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return binderyAuthorRecord{}, fmt.Errorf("acquire: bindery author status %d", resp.StatusCode)
+	}
+	var a binderyAuthorRecord
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&a); err != nil {
+		return binderyAuthorRecord{}, fmt.Errorf("acquire: decode author: %w", err)
+	}
+	return a, nil
+}
+
+// setAuthorProfile assigns a quality profile to an author (PUT /author/{id});
+// Bindery's update handler leaves every field the body omits alone.
+func (b *Bindery) setAuthorProfile(ctx context.Context, id, profileID int64) error {
+	body, err := json.Marshal(map[string]int64{"qualityProfileId": profileID})
+	if err != nil {
+		return fmt.Errorf("acquire: encode author update: %w", err)
+	}
+	resp, err := b.do(ctx, http.MethodPut, "/api/v1/author/"+strconv.FormatInt(id, 10), body)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("acquire: bindery author update status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// listQualityProfiles reads Bindery's quality profiles (GET /qualityprofile).
+func (b *Bindery) listQualityProfiles(ctx context.Context) ([]binderyQualityProfile, error) {
+	resp, err := b.do(ctx, http.MethodGet, "/api/v1/qualityprofile", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("acquire: bindery quality profiles status %d", resp.StatusCode)
+	}
+	var profiles []binderyQualityProfile
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&profiles); err != nil {
+		return nil, fmt.Errorf("acquire: decode quality profiles: %w", err)
+	}
+	return profiles, nil
 }
 
 // lookup resolves an ISBN to Bindery's book metadata. A 404 (or an empty body)

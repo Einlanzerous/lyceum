@@ -3,9 +3,11 @@ package acquire
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -252,5 +254,154 @@ func TestWantAddConflictIsNonFatal(t *testing.T) {
 
 	if err := b.Want(context.Background(), "9780765382115"); err != nil {
 		t.Fatalf("Want on add 409 = %v, want nil", err)
+	}
+}
+
+// profileBindery is a fake whose add attaches the book to author 9, and which
+// serves the author record, the profile list and the author update that
+// ensureAuthorProfile (LYCM-81) drives. authorProfile is what GET /author/9
+// reports (nil = none); puts collects every PUT /author/9 body.
+type profileCapture struct {
+	mu           sync.Mutex
+	puts         []map[string]int64
+	profileLists int
+}
+
+func profileBindery(t *testing.T, authorProfile *int64, profiles string) (*Bindery, *profileCapture) {
+	t.Helper()
+	cap := &profileCapture{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v1/book/lookup":
+			_, _ = io.WriteString(w, freshLookup)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/author/book":
+			_, _ = io.WriteString(w, `{"id":77,"authorId":9,"title":"The Dinosaur Lords","foreignBookId":"OL1B"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/author/9":
+			if authorProfile == nil {
+				_, _ = io.WriteString(w, `{"id":9,"authorName":"Victor Milán","qualityProfileId":null}`)
+			} else {
+				_, _ = fmt.Fprintf(w, `{"id":9,"authorName":"Victor Milán","qualityProfileId":%d}`, *authorProfile)
+			}
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/author/9":
+			var body map[string]int64
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			cap.mu.Lock()
+			cap.puts = append(cap.puts, body)
+			cap.mu.Unlock()
+			_, _ = io.WriteString(w, `{"id":9}`)
+		case r.URL.Path == "/api/v1/qualityprofile":
+			cap.mu.Lock()
+			cap.profileLists++
+			cap.mu.Unlock()
+			_, _ = io.WriteString(w, profiles)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewBindery(srv.URL, "k"), cap
+}
+
+// Bindery's stock profiles: "Any" (id 1, cutoff mobi) and "E-Book" (id 2,
+// cutoff epub).
+const stockProfiles = `[{"id":1,"name":"Any","cutoff":"mobi","items":[]},{"id":2,"name":"E-Book","cutoff":"epub","items":[]}]`
+
+func TestWantGivesNewAuthorTheEpubProfile(t *testing.T) {
+	// POST /author/book creates the author with no quality profile, and a
+	// profile-less author takes the first format that turns up (LYCM-81). The
+	// add must be followed by an author update assigning the epub-cutoff one.
+	b, cap := profileBindery(t, nil, stockProfiles)
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if len(cap.puts) != 1 || cap.puts[0]["qualityProfileId"] != 2 {
+		t.Fatalf("author updates = %v, want one setting qualityProfileId 2 (cutoff epub)", cap.puts)
+	}
+}
+
+func TestWantLeavesAnAssignedProfileAlone(t *testing.T) {
+	// A profile the user chose by hand (or an earlier add set) is never
+	// overwritten.
+	five := int64(5)
+	b, cap := profileBindery(t, &five, stockProfiles)
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if len(cap.puts) != 0 {
+		t.Fatalf("author updates = %v, want none for an author that has a profile", cap.puts)
+	}
+	if cap.profileLists != 0 {
+		t.Fatalf("profile list fetched %d times, want 0 when nothing needs choosing", cap.profileLists)
+	}
+}
+
+func TestWantProfileConfiguredByNameOrID(t *testing.T) {
+	for _, tc := range []struct {
+		want string
+		id   int64
+	}{{"any", 1}, {"E-BOOK", 2}, {"1", 1}, {"2", 2}} {
+		b, cap := profileBindery(t, nil, stockProfiles)
+		b.QualityProfile = tc.want
+		if err := b.Want(context.Background(), "9780765382115"); err != nil {
+			t.Fatalf("Want: %v", err)
+		}
+		if len(cap.puts) != 1 || cap.puts[0]["qualityProfileId"] != tc.id {
+			t.Fatalf("QualityProfile %q: author updates = %v, want profile %d", tc.want, cap.puts, tc.id)
+		}
+	}
+}
+
+func TestWantNoUsableProfileIsNonFatal(t *testing.T) {
+	// No epub-cutoff profile (or a configured name that matches nothing): the
+	// grab was already requested, so Want still succeeds and only logs.
+	for _, tc := range []struct{ want, profiles string }{
+		{"", `[{"id":1,"name":"Any","cutoff":"mobi","items":[]}]`},
+		{"Audiobook", stockProfiles},
+	} {
+		b, cap := profileBindery(t, nil, tc.profiles)
+		b.QualityProfile = tc.want
+		if err := b.Want(context.Background(), "9780765382115"); err != nil {
+			t.Fatalf("Want with no usable profile = %v, want nil (best-effort)", err)
+		}
+		if len(cap.puts) != 0 {
+			t.Fatalf("author updates = %v, want none", cap.puts)
+		}
+	}
+}
+
+func TestWantCachesTheProfileLookup(t *testing.T) {
+	b, cap := profileBindery(t, nil, stockProfiles)
+	for i := 0; i < 3; i++ {
+		if err := b.Want(context.Background(), "9780765382115"); err != nil {
+			t.Fatalf("Want: %v", err)
+		}
+	}
+	if cap.profileLists != 1 {
+		t.Fatalf("profile list fetched %d times over 3 adds, want 1", cap.profileLists)
+	}
+	if len(cap.puts) != 3 {
+		t.Fatalf("author updates = %d, want 3", len(cap.puts))
+	}
+}
+
+func TestPickQualityProfile(t *testing.T) {
+	profiles := []binderyQualityProfile{{ID: 1, Name: "Any", Cutoff: "mobi"}, {ID: 2, Name: "E-Book", Cutoff: "epub"}}
+	if id, err := pickQualityProfile(profiles, ""); err != nil || id != 2 {
+		t.Fatalf("default pick = %d, %v; want 2 (cutoff epub)", id, err)
+	}
+	if id, err := pickQualityProfile(profiles, " e-book "); err != nil || id != 2 {
+		t.Fatalf("by name = %d, %v; want 2", id, err)
+	}
+	if id, err := pickQualityProfile(profiles, "1"); err != nil || id != 1 {
+		t.Fatalf("by id = %d, %v; want 1", id, err)
+	}
+	if _, err := pickQualityProfile(profiles, "7"); err == nil {
+		t.Fatalf("unknown id should fail rather than fall back")
+	}
+	if _, err := pickQualityProfile(nil, ""); err == nil {
+		t.Fatalf("no profiles should fail")
 	}
 }

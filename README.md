@@ -211,7 +211,13 @@ recorded before any digital file exists.
   watcher ingests them. The `ISBN → request a grab` step is behind an `Acquirer`
   seam. Set both `LYCEUM_BINDERY_BASE_URL` and `LYCEUM_BINDERY_API_KEY` and the
   live Bindery client is wired in at boot (the log prints `bindery acquirer
-  enabled`). Leave *either* unset and the seam falls back to a logging no-op:
+  enabled`). Bindery creates the authors it adds this way with **no quality
+  profile**, and a profile-less author takes the first format that turns up
+  (`.mobi`/`.azw3` omnibus releases the EPUB-only watcher then refuses), so
+  after each add the acquirer gives a profile-less author one: by default the
+  first profile whose cutoff is `epub` (Bindery's stock "E-Book"), or the id or
+  name in `LYCEUM_BINDERY_QUALITY_PROFILE`. Authors that already carry a
+  profile are left alone. Leave *either* unset and the seam falls back to a logging no-op:
   `find_digital` requests still move the inventory row to `wanted`, but nothing
   is ever grabbed — so a deploy that forgets the vars looks healthy while
   acquiring nothing. The boot log calls this out (`no-op acquirer`); watch for
