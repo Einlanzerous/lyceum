@@ -7,6 +7,8 @@ import SeriesDrawer from '@/components/SeriesDrawer.vue'
 import SortControl from '@/components/SortControl.vue'
 import LibrarySearch from '@/components/LibrarySearch.vue'
 import TileMenu from '@/components/TileMenu.vue'
+import EditBookDialog from '@/components/EditBookDialog.vue'
+import type { BookPatch } from '@/api/client'
 import { bookMenuItems, isFinished } from '@/library/bookMenu'
 import { useLibraryStore } from '@/stores/library'
 import { listPendingReview } from '@/api/client'
@@ -171,6 +173,20 @@ function onSetFinished(id: number, finished: boolean): void {
   void store.setFinished(id, finished)
 }
 
+// "Edit details…" from any tile menu opens one dialog over the shelf (LYCM-129).
+const editing = ref<Book | null>(null)
+function onEdit(id: number): void {
+  editing.value = books.value.find((b) => b.id === id) ?? null
+}
+async function onSaveEdit(id: number, patch: BookPatch): Promise<void> {
+  try {
+    await store.updateDetails(id, patch)
+    editing.value = null
+  } catch (err) {
+    window.alert(err instanceof Error ? err.message : 'Could not save the book.')
+  }
+}
+
 // List rows are plain links, so they get the same menu the grid tiles carry —
 // otherwise mark-as-read and remove are unreachable in list view (LYCM-109).
 const rowMenu = ref<{ x: number; y: number; book: Book } | null>(null)
@@ -182,7 +198,8 @@ function onRowMenuSelect(key: string): void {
   const open = rowMenu.value
   rowMenu.value = null
   if (!open) return
-  if (key === 'finish') onSetFinished(open.book.id, !isFinished(open.book))
+  if (key === 'edit') onEdit(open.book.id)
+  else if (key === 'finish') onSetFinished(open.book.id, !isFinished(open.book))
   else if (key === 'remove') void onRemove(open.book.id)
 }
 
@@ -342,6 +359,7 @@ async function onRemove(id: number): Promise<void> {
         v-for="book in matchedBooks"
         :key="book.id"
         :book="book"
+        @edit="onEdit"
         @set-finished="onSetFinished"
         @remove="onRemove"
       />
@@ -354,6 +372,7 @@ async function onRemove(id: number): Promise<void> {
           v-if="item.kind === 'book'"
           :book="item.book"
           :pinned="pinnedId != null && item.book.id === pinnedId"
+          @edit="onEdit"
           @set-finished="onSetFinished"
           @remove="onRemove"
         />
@@ -374,6 +393,7 @@ async function onRemove(id: number): Promise<void> {
             :series="openSeries"
             :arrow-left-pct="arrowLeftPct"
             @close="openKey = null"
+            @edit="onEdit"
             @set-finished="onSetFinished"
             @remove="onRemove"
           />
@@ -412,6 +432,14 @@ async function onRemove(id: number): Promise<void> {
         @close="rowMenu = null"
       />
     </div>
+
+    <EditBookDialog
+      v-if="editing"
+      :key="editing.id"
+      :book="editing"
+      @save="onSaveEdit"
+      @close="editing = null"
+    />
   </section>
 </template>
 

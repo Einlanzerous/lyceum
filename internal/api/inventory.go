@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/magos/lyceum/internal/isbn"
@@ -78,33 +79,42 @@ func (a *API) waitWants() { a.wantWG.Wait() }
 
 // inventoryJSON is the wire shape for an inventory entry.
 type inventoryJSON struct {
-	ID     int64  `json:"id"`
-	ISBN   string `json:"isbn"`
-	Title  string `json:"title,omitempty"`
-	Author string `json:"author,omitempty"`
-	State  string `json:"state"`
-	BookID *int64 `json:"book_id,omitempty"`
+	ID          int64   `json:"id"`
+	ISBN        string  `json:"isbn"`
+	Title       string  `json:"title,omitempty"`
+	Author      string  `json:"author,omitempty"`
+	State       string  `json:"state"`
+	BookID      *int64  `json:"book_id,omitempty"`
+	Series      string  `json:"series,omitempty"`
+	SeriesIndex float64 `json:"series_index,omitempty"`
 }
 
 func toInventoryJSON(inv store.Inventory) inventoryJSON {
 	return inventoryJSON{
-		ID:     inv.ID,
-		ISBN:   inv.ISBN,
-		Title:  inv.Title,
-		Author: inv.Author,
-		State:  inv.State,
-		BookID: inv.BookID,
+		ID:          inv.ID,
+		ISBN:        inv.ISBN,
+		Title:       inv.Title,
+		Author:      inv.Author,
+		State:       inv.State,
+		BookID:      inv.BookID,
+		Series:      inv.Series,
+		SeriesIndex: inv.SeriesIndex,
 	}
 }
 
 // inventoryRequest is the POST /inventory body. ISBN is required (any form an
 // ISBN-10/13 takes — hyphenated, urn:isbn:, etc.); FindDigital asks the
 // acquisition pipeline for a DRM-free copy, moving the entry to `wanted`.
+// Series/SeriesIndex record series intent on the entry (LYCM-129), the way a
+// batch confirm does: the grabbed EPUB rarely carries series metadata, and
+// without intent on the row it lands series-less.
 type inventoryRequest struct {
-	ISBN        string `json:"isbn"`
-	Title       string `json:"title"`
-	Author      string `json:"author"`
-	FindDigital bool   `json:"find_digital"`
+	ISBN        string  `json:"isbn"`
+	Title       string  `json:"title"`
+	Author      string  `json:"author"`
+	FindDigital bool    `json:"find_digital"`
+	Series      string  `json:"series"`
+	SeriesIndex float64 `json:"series_index"`
 }
 
 // handleInventoryCreate is the capture endpoint a barcode scan (LYCM-602) calls:
@@ -135,6 +145,11 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverError(w, "upsert inventory", err)
 		return
+	}
+	// Series intent rides the row to the eventual EPUB ingest (LYCM-82), or
+	// lands on the book at once when one is already linked.
+	if series := strings.TrimSpace(req.Series); series != "" {
+		inv = a.recordSeriesIntent(ctx, inv, series, req.SeriesIndex)
 	}
 
 	// Only request a digital copy when one isn't already in hand. A title that

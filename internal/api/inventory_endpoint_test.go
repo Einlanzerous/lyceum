@@ -178,3 +178,55 @@ func TestInventoryFindDigitalSkipsIngested(t *testing.T) {
 		t.Fatalf("acquirer called %v for an ingested title, want none", acq.wants)
 	}
 }
+
+// POST /inventory records series intent on the entry (LYCM-129), so an EPUB
+// grabbed for it later gets the series the way a batch confirm's would — and
+// a book already linked to the entry gets it at once.
+func TestInventorySeriesIntent(t *testing.T) {
+	s := testStore(t)
+	srv := httptest.NewServer(New(s, "").Handler())
+	t.Cleanup(srv.Close)
+
+	resp := postInventory(t, srv.URL, map[string]any{
+		"isbn":         "9780765311788",
+		"title":        "The Final Empire",
+		"author":       "Brandon Sanderson",
+		"find_digital": true,
+		"series":       "Mistborn",
+		"series_index": 1,
+	})
+	got := decode[inventoryJSON](t, resp)
+	if got.Series != "Mistborn" || got.SeriesIndex != 1 {
+		t.Fatalf("inventory = %+v, want Mistborn #1 recorded on the row", got)
+	}
+	inv, err := s.GetInventoryByISBN(context.Background(), "9780765311788")
+	if err != nil {
+		t.Fatalf("GetInventoryByISBN: %v", err)
+	}
+	if inv.Series != "Mistborn" || inv.SeriesIndex != 1 {
+		t.Fatalf("stored intent = %q #%v, want Mistborn #1", inv.Series, inv.SeriesIndex)
+	}
+
+	// A linked, series-less book takes the intent immediately.
+	book := seedBook(t, s, "intent-now", "The Well of Ascension", "Brandon Sanderson", nil)
+	if _, err := s.LinkBookToInventory(context.Background(), "9780765316882", "", book.ID, book.Title, book.Author); err != nil {
+		t.Fatalf("LinkBookToInventory: %v", err)
+	}
+	postInventory(t, srv.URL, map[string]any{
+		"isbn": "9780765316882", "series": "Mistborn", "series_index": 2,
+	}).Body.Close()
+	reloaded, err := s.GetBook(context.Background(), book.ID)
+	if err != nil {
+		t.Fatalf("GetBook: %v", err)
+	}
+	if reloaded.Series != "Mistborn" || reloaded.SeriesIndex != 2 {
+		t.Fatalf("linked book = %q #%v, want Mistborn #2 applied", reloaded.Series, reloaded.SeriesIndex)
+	}
+
+	// Without series in the body, an existing intent is left alone.
+	postInventory(t, srv.URL, map[string]any{"isbn": "9780765311788", "title": "The Final Empire"}).Body.Close()
+	inv, _ = s.GetInventoryByISBN(context.Background(), "9780765311788")
+	if inv.Series != "Mistborn" {
+		t.Fatalf("intent after a plain re-post = %q, want Mistborn kept", inv.Series)
+	}
+}

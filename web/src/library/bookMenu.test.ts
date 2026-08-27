@@ -11,15 +11,16 @@ const book = (over: Partial<Book> = {}): Book => ({
 })
 
 describe('bookMenuItems', () => {
-  it('offers read/unread and a destructive remove', () => {
+  it('offers edit, read/unread and a destructive remove', () => {
     const items = bookMenuItems(book())
-    expect(items.map((i) => i.key)).toEqual(['finish', 'remove'])
-    expect(items[1]!.danger).toBe(true)
+    expect(items.map((i) => i.key)).toEqual(['edit', 'finish', 'remove'])
+    expect(items[2]!.danger).toBe(true)
+    expect(items[0]!.danger).toBeUndefined()
   })
 
   it('labels the toggle from the finished flag', () => {
-    expect(bookMenuItems(book({ finished: false }))[0]!.label).toBe('Mark as read')
-    expect(bookMenuItems(book({ finished: true }))[0]!.label).toBe('Mark as unread')
+    expect(bookMenuItems(book({ finished: false }))[1]!.label).toBe('Mark as read')
+    expect(bookMenuItems(book({ finished: true }))[1]!.label).toBe('Mark as unread')
   })
 
   // The series drawer used to label this from memberStatus(), which calls a book
@@ -30,11 +31,11 @@ describe('bookMenuItems', () => {
   it('ignores the progress heuristic: 99% but unread still offers "Mark as read"', () => {
     const nearlyDone = book({ progress: 0.995, finished: false })
     expect(isFinished(nearlyDone)).toBe(false)
-    expect(bookMenuItems(nearlyDone)[0]!.label).toBe('Mark as read')
+    expect(bookMenuItems(nearlyDone)[1]!.label).toBe('Mark as read')
   })
 
   it('treats a missing finished flag as unread', () => {
     expect(isFinished(book())).toBe(false)
-    expect(bookMenuItems(book())[0]!.label).toBe('Mark as read')
+    expect(bookMenuItems(book())[1]!.label).toBe('Mark as read')
   })
 })

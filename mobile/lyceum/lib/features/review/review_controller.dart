@@ -68,10 +68,22 @@ class ReviewController extends AsyncNotifier<List<Book>> {
 
   /// Correct the title and author a converted file mangled. The row stays in the
   /// queue — an edit is not an approval.
-  Future<void> saveMeta(int bookId, String title, String author) async {
+  Future<void> saveMeta(
+    int bookId,
+    String title,
+    String author, {
+    String? series,
+    double? seriesIndex,
+  }) async {
     final updated = await ref
         .read(lyceumClientProvider)
-        .updateBookMeta(bookId, title, author);
+        .updateBookMeta(
+          bookId,
+          title,
+          author,
+          series: series,
+          seriesIndex: seriesIndex,
+        );
     _replace(updated);
   }
 

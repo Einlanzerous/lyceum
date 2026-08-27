@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -76,9 +77,15 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid book id", http.StatusBadRequest)
 		return
 	}
+	// Series and SeriesIndex are pointers so "not sent" (leave alone) is
+	// distinct from "" / 0 (clear). A book's series otherwise comes only from
+	// its EPUB or the batch-confirm intent, with no way to set or fix it after
+	// ingest (LYCM-129).
 	var req struct {
-		Title  string `json:"title"`
-		Author string `json:"author"`
+		Title       string   `json:"title"`
+		Author      string   `json:"author"`
+		Series      *string  `json:"series"`
+		SeriesIndex *float64 `json:"series_index"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -86,6 +93,10 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Title) == "" {
 		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+	if req.SeriesIndex != nil && (*req.SeriesIndex < 0 || math.IsNaN(*req.SeriesIndex) || math.IsInf(*req.SeriesIndex, 0)) {
+		http.Error(w, "series_index must be a number >= 0", http.StatusBadRequest)
 		return
 	}
 	b, err := a.store.UpdateBookMeta(r.Context(), id, req.Title, req.Author)
@@ -96,6 +107,22 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		serverError(w, "update book", err)
 		return
+	}
+	if req.Series != nil || req.SeriesIndex != nil {
+		series, index := b.Series, b.SeriesIndex
+		if req.Series != nil {
+			series = strings.TrimSpace(*req.Series)
+		}
+		if req.SeriesIndex != nil {
+			index = *req.SeriesIndex
+		}
+		if series == "" {
+			index = 0 // a position without a series is meaningless
+		}
+		if b, err = a.store.UpdateBookSeries(r.Context(), id, series, index); err != nil {
+			serverError(w, "update book series", err)
+			return
+		}
 	}
 	a.writeBook(w, r, b)
 }

@@ -2,7 +2,7 @@ import type { Book } from '@/api/types'
 
 /** One entry in a book's context menu. `danger` styles destructive actions. */
 export interface BookMenuItem {
-  key: 'finish' | 'remove'
+  key: 'edit' | 'finish' | 'remove'
   label: string
   danger?: boolean
 }
@@ -19,6 +19,9 @@ export interface BookMenuItem {
  */
 export function bookMenuItems(book: Book): BookMenuItem[] {
   return [
+    // Title/author/series are otherwise fixed at ingest — an EPUB with no
+    // series metadata stays series-less for good (LYCM-129).
+    { key: 'edit', label: 'Edit details…' },
     { key: 'finish', label: isFinished(book) ? 'Mark as unread' : 'Mark as read' },
     // Destructive and unreachable elsewhere on the shelf (LYCM-109); every
     // caller confirms before acting on it.
