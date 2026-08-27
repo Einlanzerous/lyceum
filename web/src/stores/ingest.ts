@@ -208,6 +208,11 @@ export const useIngestStore = defineStore('ingest', {
      * Re-resolve a no-match candidate: add the corrected ISBN as a fresh
      * candidate (which re-runs resolution) and drop the stale no-match row,
      * then select the replacement. (LYCM-75)
+     *
+     * Re-entering the *same* ISBN comes back as the old row, re-resolved in
+     * place rather than appended (LYCM-125) — skipping it then would throw the
+     * fresh resolution away, so the old row is only dropped when a different
+     * one replaced it.
      */
     async reResolve(oldId: number, isbn: string): Promise<void> {
       if (!this.batch) return
@@ -215,7 +220,7 @@ export const useIngestStore = defineStore('ingest', {
       if (!code) return
       await this.run(async () => {
         const added = await addCandidate(this.batch!.id, code, 'manual')
-        await skipCandidate(oldId)
+        if (added.id !== oldId) await skipCandidate(oldId)
         await this.refresh()
         this.selectedId = added.id
       })
