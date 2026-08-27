@@ -42,14 +42,20 @@ const (
 	// big batch confirm doesn't hit the acquisition backend with N searches at
 	// once (LYCM-79).
 	maxConcurrentWants = 3
-	// wantTimeout bounds one background dispatch. A live Bindery Want does a
-	// lookup + add (a synchronous metadata pull each, ~60s cap apiece, retried
-	// up to a few times under burst — see acquire.requestTimeout/maxAttempts),
-	// and an add that 404s while the author's catalogue sync runs waits it out
-	// on a 30s/60s/120s schedule (acquire.addNotFoundBackoff, LYCM-127). This
-	// outer deadline is sized to let that whole schedule run while still
-	// stopping a wedged dispatch from pinning a semaphore slot forever.
-	wantTimeout = 6 * time.Minute
+	// wantTimeout bounds one background dispatch. Two budgets have to fit:
+	//
+	//   - HTTP: a lookup + add, each a synchronous metadata pull capped at
+	//     acquire.requestTimeout (60s) and retried up to maxAttempts under
+	//     burst, so ~3 min worst case — the 4 min LYCM-99 sized for.
+	//   - Waiting: an add that 404s while the author's catalogue sync runs
+	//     sleeps through acquire.addNotFoundBackoff (30s+60s+120s = 3.5 min,
+	//     LYCM-127) before its final attempt.
+	//
+	// 8 min covers both back to back, so the last add — the expensive one,
+	// with the synchronous pull and searchOnAdd — is not squeezed against the
+	// deadline by the sleeps that preceded it, while a wedged dispatch still
+	// cannot pin a semaphore slot forever.
+	wantTimeout = 8 * time.Minute
 )
 
 // dispatchWant hands an ISBN to the acquirer in the background, so the confirm
