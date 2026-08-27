@@ -1,12 +1,15 @@
 package acquire
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,7 @@ type capture struct {
 	addHits    int
 	addBody    addBookRequest
 	apiKeySeen string
+	searchIDs  []int64 // ids handed to POST /book/bulk action=search
 }
 
 // stubBindery stands up a fake Bindery whose /book/lookup returns lookupBody
@@ -46,6 +50,17 @@ func stubBindery(t *testing.T, lookupStatus int, lookupBody string) (*Bindery, *
 			_ = json.NewDecoder(r.Body).Decode(&cap.addBody)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"id":77,"title":"The Dinosaur Lords","foreignBookId":"OL1B"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/book/bulk":
+			var req struct {
+				IDs    []int64 `json:"ids"`
+				Action string  `json:"action"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.Action == "search" {
+				cap.searchIDs = append(cap.searchIDs, req.IDs...)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"results":{"77":{"ok":true}}}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -62,7 +77,7 @@ const freshLookup = `{
 	"author":{"foreignAuthorId":"OL2A","authorName":"Victor Milán"}
 }`
 
-func TestWantAddsFreshBookWithSearchOnAdd(t *testing.T) {
+func TestWantAddsFreshBookThenSearches(t *testing.T) {
 	b, cap := stubBindery(t, http.StatusOK, freshLookup)
 
 	if err := b.Want(context.Background(), "9780765382115"); err != nil {
@@ -77,8 +92,13 @@ func TestWantAddsFreshBookWithSearchOnAdd(t *testing.T) {
 	if cap.addHits != 1 {
 		t.Fatalf("add hits = %d, want 1", cap.addHits)
 	}
-	if !cap.addBody.SearchOnAdd {
-		t.Fatalf("add did not set searchOnAdd")
+	// The search is Want's own explicit trigger, after the profile step, not
+	// searchOnAdd racing it (LYCM-81).
+	if cap.addBody.SearchOnAdd {
+		t.Fatalf("add set searchOnAdd; the search must follow the profile assignment instead")
+	}
+	if len(cap.searchIDs) != 1 || cap.searchIDs[0] != 77 {
+		t.Fatalf("search ids = %v, want [77] (the created book)", cap.searchIDs)
 	}
 	if cap.addBody.ForeignBookID != "OL1B" || cap.addBody.ForeignAuthorID != "OL2A" {
 		t.Fatalf("add foreign ids = %q/%q", cap.addBody.ForeignBookID, cap.addBody.ForeignAuthorID)
@@ -257,6 +277,19 @@ func TestWantAddConflictIsNonFatal(t *testing.T) {
 	}
 }
 
+// An add that came back with no authorId is the one way this feature can
+// silently do nothing, so it must say so — distinguishably from a 409.
+func TestWantLogsWhenAddCarriesNoAuthorID(t *testing.T) {
+	logs := captureLog(t)
+	b, _ := stubBindery(t, http.StatusOK, freshLookup) // its add response has no authorId
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if out := logs.String(); !strings.Contains(out, "returned no authorId") {
+		t.Fatalf("expected a log line naming the missing authorId; got:\n%s", out)
+	}
+}
+
 // profileBindery is a fake whose add attaches the book to author 9, and which
 // serves the author record, the profile list and the author update that
 // ensureAuthorProfile (LYCM-81) drives. authorProfile is what GET /author/9
@@ -265,6 +298,10 @@ type profileCapture struct {
 	mu           sync.Mutex
 	puts         []map[string]int64
 	profileLists int
+	// order is the sequence of writes Bindery saw — "put" for the author
+	// profile update, "search" for the bulk search — so a test can assert
+	// the profile landed before the search was queued.
+	order []string
 }
 
 func profileBindery(t *testing.T, authorProfile *int64, profiles string) (*Bindery, *profileCapture) {
@@ -288,8 +325,14 @@ func profileBindery(t *testing.T, authorProfile *int64, profiles string) (*Binde
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			cap.mu.Lock()
 			cap.puts = append(cap.puts, body)
+			cap.order = append(cap.order, "put")
 			cap.mu.Unlock()
 			_, _ = io.WriteString(w, `{"id":9}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/book/bulk":
+			cap.mu.Lock()
+			cap.order = append(cap.order, "search")
+			cap.mu.Unlock()
+			_, _ = io.WriteString(w, `{"results":{"77":{"ok":true}}}`)
 		case r.URL.Path == "/api/v1/qualityprofile":
 			cap.mu.Lock()
 			cap.profileLists++
@@ -319,6 +362,11 @@ func TestWantGivesNewAuthorTheEpubProfile(t *testing.T) {
 	if len(cap.puts) != 1 || cap.puts[0]["qualityProfileId"] != 2 {
 		t.Fatalf("author updates = %v, want one setting qualityProfileId 2 (cutoff epub)", cap.puts)
 	}
+	// The whole point: the profile is on the author before the search is
+	// queued, so the release decision sees it.
+	if strings.Join(cap.order, ",") != "put,search" {
+		t.Fatalf("write order = %v, want the profile update before the search", cap.order)
+	}
 }
 
 func TestWantLeavesAnAssignedProfileAlone(t *testing.T) {
@@ -335,6 +383,9 @@ func TestWantLeavesAnAssignedProfileAlone(t *testing.T) {
 	}
 	if cap.profileLists != 0 {
 		t.Fatalf("profile list fetched %d times, want 0 when nothing needs choosing", cap.profileLists)
+	}
+	if strings.Join(cap.order, ",") != "search" {
+		t.Fatalf("write order = %v, want just the search", cap.order)
 	}
 }
 
@@ -404,4 +455,14 @@ func TestPickQualityProfile(t *testing.T) {
 	if _, err := pickQualityProfile(nil, ""); err == nil {
 		t.Fatalf("no profiles should fail")
 	}
+}
+
+// captureLog routes the package logger into a buffer for the test's duration.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+	return &buf
 }

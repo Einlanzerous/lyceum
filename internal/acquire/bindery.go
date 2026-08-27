@@ -134,10 +134,12 @@ func (a binderyAuthor) name() string {
 	return a.Name
 }
 
-// addBookRequest is the POST /author/book body. searchOnAdd makes Bindery run
-// its own search+grab once the book is monitored/wanted — that pipeline
-// augments the release with the bookId (the field a raw-release grab omits,
-// which is what previously blocked auto-import).
+// addBookRequest is the POST /author/book body. searchOnAdd would make Bindery
+// run its own search+grab straight from the add; Want sends it false and
+// triggers that same pipeline itself once the author's quality profile is in
+// place (LYCM-81). Either way the pipeline augments the release with the
+// bookId (the field a raw-release grab omits, which is what previously
+// blocked auto-import).
 type addBookRequest struct {
 	ForeignBookID   string `json:"foreignBookId"`
 	ForeignAuthorID string `json:"foreignAuthorId"`
@@ -153,10 +155,11 @@ type addBookRequest struct {
 // download asynchronously; the file later lands in /data/media/books and the
 // folder-ingest watcher imports it.
 //
-// If searchOnAdd ever proves insufficient in live runs, the explicit escalation
-// is: POST /api/v1/book/{id}/search, pick the best approved release, then POST
-// /api/v1/queue/grab with {guid,title,nzbUrl,size,protocol,mediaType,bookId} —
-// setting bookId is the essential part.
+// The grab itself is Bindery's search+grab pipeline, triggered explicitly after
+// the add (see searchBook). If that ever proves insufficient in live runs, the
+// next escalation is: POST /api/v1/book/{id}/search, pick the best approved
+// release, then POST /api/v1/queue/grab with {guid,title,nzbUrl,size,protocol,
+// mediaType,bookId} — setting bookId is the essential part.
 func (b *Bindery) Want(ctx context.Context, code string) error {
 	book, err := b.lookup(ctx, code)
 	if err != nil {
@@ -179,19 +182,35 @@ func (b *Bindery) Want(ctx context.Context, code string) error {
 		return nil
 	}
 
+	// The search is triggered separately below rather than with searchOnAdd:
+	// an add for a new author creates that author with no quality profile, and
+	// a searchOnAdd search would be queued against it before the profile is in
+	// place (LYCM-81). Add → profile → search keeps the order deterministic.
 	created, err := b.addBook(ctx, addBookRequest{
 		ForeignBookID:   book.ForeignBookID,
 		ForeignAuthorID: book.Author.ForeignAuthorID, // may be empty; Bindery resolves by ISBN
 		AuthorName:      book.Author.name(),
-		SearchOnAdd:     true,
+		SearchOnAdd:     false,
 		MediaType:       "ebook",
 	})
 	if err != nil {
 		log.Printf("acquire: bindery add ISBN %s failed: %v; recorded wanted only", code, err)
 		return nil
 	}
+	if created.ID == 0 {
+		// A 409: a concurrent confirm added it first, and that add's own
+		// pipeline owns the grab.
+		log.Printf("acquire: bindery already added ISBN %s concurrently; its own search owns the grab", code)
+		return nil
+	}
+	b.ensureAuthorProfile(ctx, created)
+	if err := b.searchBook(ctx, created.ID); err != nil {
+		// The book is monitored and wanted in Bindery, so its scheduled
+		// wanted-search still picks it up — later than an explicit search.
+		log.Printf("acquire: bindery search for ISBN %s (bookId=%d) failed: %v; Bindery's scheduled search will retry", code, created.ID, err)
+		return nil
+	}
 	log.Printf("acquire: bindery grabbing ISBN %s (bookId=%d, %q)", code, created.ID, created.Title)
-	b.ensureAuthorProfile(ctx, created.AuthorID)
 	return nil
 }
 
@@ -201,12 +220,21 @@ func (b *Bindery) Want(ctx context.Context, code string) error {
 // and a profile-less author has no format filter, so a .mobi/.azw3 omnibus
 // release wins over waiting for an EPUB; the EPUB-only watcher then refuses
 // the file (8 of 13 grabs on 2026-08-27). Setting the profile after the add
-// is the only seam Bindery offers. An author that already carries a profile —
-// set by hand, or by an earlier add — is left exactly as it is. Best effort:
-// the grab is already requested, so a failure here only logs.
-func (b *Bindery) ensureAuthorProfile(ctx context.Context, authorID int64) {
+// (and before Want triggers the search) is the only seam Bindery offers. An
+// author that already carries a profile — set by hand, or by an earlier add —
+// is left exactly as it is.
+//
+// Best effort: a failure here only logs, and is not retried for this book —
+// a re-triggered wanted row finds the book already tracked and returns before
+// reaching here — so a dropped update is only repaired by the author's next
+// add. Every exit is logged, so a Bindery whose add response stopped carrying
+// authorId (the one field this feature hangs on) reads as a broken feature
+// in the log rather than a working one.
+func (b *Bindery) ensureAuthorProfile(ctx context.Context, created binderyBook) {
+	authorID := created.AuthorID
 	if authorID == 0 {
-		return // a 409 add returns no book; nothing to attach to
+		log.Printf("acquire: bindery add of bookId=%d returned no authorId; quality profile not checked (does this Bindery's book response carry authorId?)", created.ID)
+		return
 	}
 	author, err := b.getAuthor(ctx, authorID)
 	if err != nil {
@@ -231,12 +259,17 @@ func (b *Bindery) ensureAuthorProfile(ctx context.Context, authorID int64) {
 // qualityProfileID resolves QualityProfile against Bindery's profile list and
 // caches the answer: profiles are configuration, not data, so one lookup per
 // process is plenty. A failed lookup is not cached, so a Bindery that was
-// briefly unreachable is asked again on the next add.
+// briefly unreachable is asked again on the next add. The lock covers only the
+// cache, never the HTTP call: concurrent dispatches may both fetch the list
+// once on a cold cache, which is cheap, whereas holding the lock through
+// do()'s retries against an unreachable Bindery would stall the other
+// dispatches past their own deadlines.
 func (b *Bindery) qualityProfileID(ctx context.Context) (int64, error) {
 	b.profileMu.Lock()
-	defer b.profileMu.Unlock()
-	if b.profileID != 0 {
-		return b.profileID, nil
+	cached := b.profileID
+	b.profileMu.Unlock()
+	if cached != 0 {
+		return cached, nil
 	}
 	profiles, err := b.listQualityProfiles(ctx)
 	if err != nil {
@@ -246,8 +279,32 @@ func (b *Bindery) qualityProfileID(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	b.profileMu.Lock()
 	b.profileID = id
+	b.profileMu.Unlock()
 	return id, nil
+}
+
+// searchBook asks Bindery to search its indexers for a book and grab the best
+// release — the same SearchAndGrabBook that searchOnAdd would have queued,
+// via the bulk endpoint's "search" action (POST /book/bulk), which is the API
+// surface Bindery exposes for it (POST /book/{id}/search is the interactive
+// release list). Fire-and-forget on Bindery's side: results show in its
+// History.
+func (b *Bindery) searchBook(ctx context.Context, bookID int64) error {
+	body, err := json.Marshal(map[string]any{"ids": []int64{bookID}, "action": "search"})
+	if err != nil {
+		return fmt.Errorf("acquire: encode search: %w", err)
+	}
+	resp, err := b.do(ctx, http.MethodPost, "/api/v1/book/bulk", body)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("acquire: bindery book search status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // pickQualityProfile chooses the profile `want` names — a numeric id, or a
