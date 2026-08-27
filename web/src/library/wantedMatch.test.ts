@@ -88,6 +88,37 @@ describe('suggestWanted', () => {
     expect(suggestWanted(book, [row])?.id).toBe(1)
   })
 
+  it('does not preselect a same-author entry whose title is merely a stem of the book’s', () => {
+    // "Dune Messiah" contains "Dune"; both by Herbert. Linking would put Messiah
+    // on Dune's wanted row and stop Dune ever being grabbed. Offered, ranked
+    // first, but not selected.
+    const messiah: Book = { id: 3, title: 'Dune Messiah', author: 'Frank Herbert', cover_url: '' }
+    expect(rankWanted(messiah, [wellOfAscension, dune])[0]!.id).toBe(9)
+    expect(suggestWanted(messiah, [wellOfAscension, dune])).toBeNull()
+    // And the other way round: a longer entry title is not the book either.
+    const dunePart: Book = { id: 4, title: 'Dune', author: 'Frank Herbert', cover_url: '' }
+    const messiahRow: InventoryEntry = {
+      id: 12,
+      isbn: 'y',
+      title: 'Dune Messiah',
+      author: 'Frank Herbert',
+      state: 'wanted',
+    }
+    expect(suggestWanted(dunePart, [messiahRow])).toBeNull()
+  })
+
+  it('undoes the "Hobbit, The" inversion like the server does', () => {
+    const book: Book = { id: 5, title: 'The Hobbit', author: 'J. R. R. Tolkien', cover_url: '' }
+    const row: InventoryEntry = {
+      id: 13,
+      isbn: 'z',
+      title: 'Hobbit, The',
+      author: 'Tolkien, J. R. R.',
+      state: 'wanted',
+    }
+    expect(suggestWanted(book, [row])?.id).toBe(13)
+  })
+
   it('does not suggest a different author even with the same title', () => {
     expect(suggestWanted(held, [decoy, dune])).toBeNull()
   })

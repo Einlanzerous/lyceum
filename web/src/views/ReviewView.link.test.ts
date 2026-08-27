@@ -82,6 +82,31 @@ describe('ReviewView — fulfil a wanted title (LYCM-128)', () => {
     expect(wrapper.find('select.link__select').exists()).toBe(false)
   })
 
+  it('clears the same suggestion from other cards once the entry is taken', async () => {
+    // Two conversions of the same book both suggest entry 7. Linking one must
+    // not leave the other with a blank select and a live Link button.
+    const twin: Book = { ...held, id: 3 }
+    vi.mocked(client.listPendingReview).mockResolvedValue([held, twin])
+    const wrapper = mount(ReviewView, { global })
+    await flushPromises()
+
+    const selects = wrapper.findAll('select.link__select')
+    expect(selects.map((s) => (s.element as HTMLSelectElement).value)).toEqual(['7', '7'])
+
+    await wrapper.findAll('.link .btn')[0]!.trigger('click')
+    await flushPromises()
+
+    const remaining = wrapper.find('select.link__select')
+    expect((remaining.element as HTMLSelectElement).value).toBe('0')
+    expect(
+      remaining
+        .findAll('option')
+        .map((o) => o.text())
+        .join(' '),
+    ).not.toContain('The Final Empire')
+    expect((wrapper.find('.link .btn').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('leaves the button off until an entry is picked', async () => {
     vi.mocked(client.listInventory).mockResolvedValue([dune])
     const wrapper = mount(ReviewView, { global })

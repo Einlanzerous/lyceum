@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/magos/lyceum/internal/dedup"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/magos/lyceum/internal/dedup"
 )
 
 // Acquisition states for an inventory entry. A title starts owned (you have the
@@ -270,12 +271,16 @@ func findUnfulfilledByTitleAuthor(ctx context.Context, tx pgx.Tx, title, author 
 
 // FulfilInventory links bookID to the inventory entry with id by hand
 // (LYCM-128): the reviewer's "this held book is that wanted title" for an
-// EPUB that carried no ISBN to join on. It sets book_id and flips the state to
-// ingested; code, when the book has one, is registered as a known ISBN of the
-// entry. An entry already holding a different book returns
+// EPUB ingest could not join on its own. It sets book_id and flips the state
+// to ingested. Books carry no ISBN column, so there is nothing of the book's
+// to register here; but the book may already own an entry of its own — the
+// row ingest created when its ISBN was unknown to the resolver (the ticket's
+// row 131) — and that row is folded into the chosen one: its ISBNs move over,
+// then it is deleted, so the work ends up with one entry rather than two
+// naming the same book. An entry already holding a different book returns
 // ErrInventoryFulfilled; re-linking the same book is a no-op. Returns
 // ErrNotFound for an unknown id. The stored row is returned.
-func (s *Store) FulfilInventory(ctx context.Context, id, bookID int64, code string) (Inventory, error) {
+func (s *Store) FulfilInventory(ctx context.Context, id, bookID int64) (Inventory, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: fulfil inventory: begin: %w", err)
@@ -292,15 +297,51 @@ func (s *Store) FulfilInventory(ctx context.Context, id, bookID int64, code stri
 	if current != nil && *current != bookID {
 		return Inventory{}, ErrInventoryFulfilled
 	}
+
+	// Fold the book's own entries (there is normally at most one) into this
+	// one: their ISBNs first, so the ebook number keeps finding the work.
+	rows, err := tx.Query(ctx, `SELECT id, isbn FROM inventory WHERE book_id = $1 AND id <> $2`, bookID, id)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: own entries: %w", err)
+	}
+	type own struct {
+		id   int64
+		isbn string
+	}
+	var owned []own
+	for rows.Next() {
+		var o own
+		if err := rows.Scan(&o.id, &o.isbn); err != nil {
+			rows.Close()
+			return Inventory{}, fmt.Errorf("store: fulfil inventory: scan own entry: %w", err)
+		}
+		owned = append(owned, o)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return Inventory{}, fmt.Errorf("store: fulfil inventory: own entries: %w", err)
+	}
+	for _, o := range owned {
+		// Each isbn13 maps to exactly one entry, so re-pointing the old entry's
+		// rows cannot collide; a copy-then-cascade would lose them instead.
+		if _, err := tx.Exec(ctx,
+			`UPDATE inventory_isbns SET inventory_id = $2 WHERE inventory_id = $1`, o.id, id); err != nil {
+			return Inventory{}, fmt.Errorf("store: fulfil inventory: move isbns: %w", err)
+		}
+		if err := registerISBN(ctx, tx, o.isbn, id); err != nil {
+			return Inventory{}, err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM inventory WHERE id = $1`, o.id); err != nil {
+			return Inventory{}, fmt.Errorf("store: fulfil inventory: drop own entry: %w", err)
+		}
+	}
+
 	inv, err := scanInventory(tx.QueryRow(ctx,
 		`UPDATE inventory SET book_id = $2, acquisition_state = $3, updated_at = now()
 		 WHERE id = $1
 		 RETURNING `+inventoryColumns, id, bookID, StateIngested))
 	if err != nil {
 		return Inventory{}, fmt.Errorf("store: fulfil inventory: %w", err)
-	}
-	if err := registerISBN(ctx, tx, code, inv.ID); err != nil {
-		return Inventory{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Inventory{}, fmt.Errorf("store: fulfil inventory: commit: %w", err)

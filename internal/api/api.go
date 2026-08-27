@@ -72,7 +72,7 @@ type Store interface {
 	SetInventoryState(ctx context.Context, isbn, state string) (store.Inventory, error)
 	SetInventorySeries(ctx context.Context, isbn, series string, index float64) (store.Inventory, error)
 	// FulfilInventory links a book to an entry by hand (LYCM-128).
-	FulfilInventory(ctx context.Context, id, bookID int64, code string) (store.Inventory, error)
+	FulfilInventory(ctx context.Context, id, bookID int64) (store.Inventory, error)
 	LinkBookToInventory(ctx context.Context, isbn, workID string, bookID int64, title, author string) (store.Inventory, error)
 	ListInventory(ctx context.Context) ([]store.Inventory, error)
 	GetInventoryByISBN(ctx context.Context, isbn string) (store.Inventory, error)

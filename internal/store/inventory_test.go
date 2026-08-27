@@ -315,7 +315,7 @@ func TestFulfilInventory(t *testing.T) {
 		t.Fatalf("InsertBook: %v", err)
 	}
 
-	inv, err := s.FulfilInventory(ctx, wanted.ID, book.ID, "")
+	inv, err := s.FulfilInventory(ctx, wanted.ID, book.ID)
 	if err != nil {
 		t.Fatalf("FulfilInventory: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestFulfilInventory(t *testing.T) {
 		t.Fatalf("fulfilled = %+v, want ingested with book %d", inv, book.ID)
 	}
 	// Idempotent for the same book.
-	if _, err := s.FulfilInventory(ctx, wanted.ID, book.ID, ""); err != nil {
+	if _, err := s.FulfilInventory(ctx, wanted.ID, book.ID); err != nil {
 		t.Fatalf("re-fulfil same book: %v", err)
 	}
 	// Refused for a different one.
@@ -331,10 +331,61 @@ func TestFulfilInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertBook: %v", err)
 	}
-	if _, err := s.FulfilInventory(ctx, wanted.ID, other.ID, ""); !errors.Is(err, ErrInventoryFulfilled) {
+	if _, err := s.FulfilInventory(ctx, wanted.ID, other.ID); !errors.Is(err, ErrInventoryFulfilled) {
 		t.Fatalf("fulfil with another book = %v, want ErrInventoryFulfilled", err)
 	}
-	if _, err := s.FulfilInventory(ctx, 999999, book.ID, ""); !errors.Is(err, ErrNotFound) {
+	if _, err := s.FulfilInventory(ctx, 999999, book.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("fulfil unknown entry = %v, want ErrNotFound", err)
+	}
+}
+
+// A held book that already owns an entry — the row ingest opened when its
+// ISBN was unknown to the resolver — is folded into the chosen wanted entry
+// rather than left beside it: one entry per work, and the ebook ISBN still
+// finds it.
+func TestFulfilInventoryFoldsTheBooksOwnEntry(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	wanted, err := s.UpsertInventory(ctx, Inventory{ISBN: "9780590353427", Title: "Harry Potter and the Philosopher's Stone", Author: "J. K. Rowling"})
+	if err != nil {
+		t.Fatalf("UpsertInventory: %v", err)
+	}
+	if _, err := s.SetInventoryState(ctx, wanted.ISBN, StateWanted); err != nil {
+		t.Fatalf("SetInventoryState: %v", err)
+	}
+	book, err := s.InsertBook(ctx, sampleBook("hash-hp1-own-row"))
+	if err != nil {
+		t.Fatalf("InsertBook: %v", err)
+	}
+	// Ingest opened the book's own row under the ebook ISBN (a title the
+	// fallback would not have matched).
+	own, err := s.LinkBookToInventory(ctx, "9781781100073", "", book.ID, "HP1", "Rowling")
+	if err != nil {
+		t.Fatalf("LinkBookToInventory: %v", err)
+	}
+	if own.ID == wanted.ID {
+		t.Fatalf("setup: expected a separate own row")
+	}
+
+	inv, err := s.FulfilInventory(ctx, wanted.ID, book.ID)
+	if err != nil {
+		t.Fatalf("FulfilInventory: %v", err)
+	}
+	if inv.ID != wanted.ID || inv.State != StateIngested || inv.BookID == nil || *inv.BookID != book.ID {
+		t.Fatalf("fulfilled = %+v, want the wanted entry ingested with the book", inv)
+	}
+	if _, err := s.GetInventoryByISBN(ctx, "9781781100073"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("own row lookup = %v, want ErrNotFound (folded away)", err)
+	}
+	if got, err := s.GetInventoryByAnyISBN(ctx, "9781781100073"); err != nil || got.ID != wanted.ID {
+		t.Fatalf("ebook ISBN now resolves to %+v err=%v, want the wanted entry", got, err)
+	}
+	all, err := s.ListInventory(ctx)
+	if err != nil {
+		t.Fatalf("ListInventory: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("inventory has %d rows, want 1", len(all))
 	}
 }

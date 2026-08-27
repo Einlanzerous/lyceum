@@ -111,12 +111,13 @@ type linkInventoryResponse struct {
 
 // handleLinkInventory is the reviewer's "this held book is that wanted title"
 // (LYCM-128): an EPUB that carried no ISBN — a converted file, some retail
-// EPUBs — has nothing for ingest to join on, so its wanted print entry stays
-// wanted beside a fresh ingested book. This fulfils the chosen entry with the
-// book and applies any series intent the entry carried (LYCM-82), the same
-// two things an ISBN join would have done. The book's review state is not
-// touched: linking says which title it is, approving says it belongs on the
-// shelf.
+// EPUBs — or one whose ISBN the resolver did not know has nothing for ingest
+// to join on, so its wanted print entry stays wanted beside a fresh ingested
+// row. This fulfils the chosen entry with the book, folds any entry the book
+// already owned into it (store.FulfilInventory), and applies any series
+// intent the entry carried (LYCM-82) — what an ISBN join would have done. The
+// book's review state is not touched: linking says which title it is,
+// approving says it belongs on the shelf.
 func (a *API) handleLinkInventory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	book, ok := a.lookupBook(w, r)
@@ -128,7 +129,7 @@ func (a *API) handleLinkInventory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "inventory_id is required", http.StatusBadRequest)
 		return
 	}
-	inv, err := a.store.FulfilInventory(ctx, req.InventoryID, book.ID, "")
+	inv, err := a.store.FulfilInventory(ctx, req.InventoryID, book.ID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, "inventory entry not found", http.StatusNotFound)

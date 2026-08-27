@@ -176,6 +176,11 @@ function onLink(b: Book): Promise<void> {
     const res = await linkBookToInventory(b.id, id)
     linked.value = { ...linked.value, [b.id]: res.inventory }
     wanted.value = wanted.value.filter((r) => r.id !== id)
+    // Any other card that had this entry picked would now show a blank select
+    // with a live Link button — and a 409 behind it.
+    linkPick.value = Object.fromEntries(
+      Object.entries(linkPick.value).map(([k, v]) => [k, v === id ? 0 : v]),
+    )
     // The entry's series intent may have landed on the book.
     b.series = res.book.series
     b.series_index = res.book.series_index
