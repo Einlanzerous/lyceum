@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
-import { memberStatus, resumeIndex, type MemberStatus, type SeriesGroup } from '@/library/series'
+import { memberStatus, volumeNumber, type MemberStatus, type SeriesGroup } from '@/library/series'
 import TileMenu from '@/components/TileMenu.vue'
 import { bookMenuItems, isFinished } from '@/library/bookMenu'
 import type { Book } from '@/api/types'
@@ -36,10 +36,11 @@ function onSelect(key: string): void {
 }
 
 // The resume target comes off the group, so the drawer's Resume button, the
-// card's cover and the pinned Continue chip all name the same volume. The index
-// is only for the "Resume book N" label.
+// card's cover and the pinned Continue chip all name the same volume. The number
+// is only for the "Resume book N" label, and comes from the volume's own
+// series_index, never its list position (LYCM-130).
 const resumeBook = computed<Book>(() => props.series.resumeBook)
-const resumeAt = computed(() => resumeIndex(props.series.members))
+const resumeNumber = computed(() => volumeNumber(resumeBook.value))
 
 const STATUS_LABEL: Record<MemberStatus, string> = {
   finished: 'Finished',
@@ -65,7 +66,7 @@ function pct(b: Book): number {
           <div class="drawer__sub">{{ series.members.length }} books · {{ series.author }}</div>
           <div class="drawer__spacer" />
           <RouterLink :to="`/reader/${resumeBook.id}`" class="drawer__resume">
-            ▸ Resume book {{ resumeAt + 1 }}
+            ▸ Resume<template v-if="resumeNumber"> book {{ resumeNumber }}</template>
           </RouterLink>
           <button
             type="button"
@@ -78,7 +79,7 @@ function pct(b: Book): number {
         </header>
 
         <ul class="drawer__grid">
-          <li v-for="(member, i) in series.members" :key="member.id" class="drawer__item">
+          <li v-for="member in series.members" :key="member.id" class="drawer__item">
             <RouterLink
               :to="`/reader/${member.id}`"
               class="drawer__link"
@@ -104,7 +105,10 @@ function pct(b: Book): number {
               </div>
               <div class="drawer__title">{{ member.title }}</div>
               <div class="drawer__status" :class="`is-${memberStatus(member)}`">
-                {{ STATUS_LABEL[memberStatus(member)] }} · Book {{ i + 1 }}
+                {{ STATUS_LABEL[memberStatus(member)]
+                }}<template v-if="volumeNumber(member)">
+                  · Book {{ volumeNumber(member) }}</template
+                >
               </div>
             </RouterLink>
           </li>

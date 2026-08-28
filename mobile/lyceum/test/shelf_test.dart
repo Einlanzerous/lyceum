@@ -37,6 +37,25 @@ void main() {
     });
   });
 
+  group('volumeNumber', () {
+    test('labels a volume with its own seriesIndex, not its list position', () {
+      // Harry Potter with 1, 4, 5, 7 on the shelf must read 1, 4, 5, 7 — not
+      // 1–4 (LYCM-130).
+      final owned = [1, 4, 5, 7]
+          .map((n) => _book(id: n, series: 'HP', seriesIndex: n.toDouble()))
+          .toList();
+      expect(owned.map(volumeNumber), ['1', '4', '5', '7']);
+    });
+
+    test('renders a non-integer index as given', () {
+      expect(volumeNumber(_book(id: 1, seriesIndex: 3.5)), '3.5');
+    });
+
+    test('has no number for an unindexed volume', () {
+      expect(volumeNumber(_book(id: 1, series: 'HP')), isNull);
+    });
+  });
+
   group('finished flag', () {
     test('marks the book finished regardless of progress', () {
       final b = Book(
