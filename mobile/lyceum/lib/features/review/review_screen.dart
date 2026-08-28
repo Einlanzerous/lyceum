@@ -11,6 +11,7 @@ import '../../widgets/cover_image.dart';
 import '../library/library_controller.dart';
 import 'review_controller.dart';
 import 'review_flags.dart';
+import 'series_field.dart';
 
 /// The ingest-QC review queue (LYCM-72, the native half of LYCM-58).
 ///
@@ -112,6 +113,12 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
   late final TextEditingController _author = TextEditingController(
     text: widget.book.author,
   );
+  late final TextEditingController _series = TextEditingController(
+    text: widget.book.series ?? '',
+  );
+  late final TextEditingController _seriesIndex = TextEditingController(
+    text: seriesIndexText(widget.book.seriesIndex),
+  );
 
   /// The action in flight, or null when idle. One at a time per card: the
   /// buttons all mutate the same row, and letting two race would leave the card
@@ -132,6 +139,8 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
   void dispose() {
     _title.dispose();
     _author.dispose();
+    _series.dispose();
+    _seriesIndex.dispose();
     super.dispose();
   }
 
@@ -243,6 +252,31 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                       controller: _author,
                       enabled: !busy,
                     ),
+                    const SizedBox(height: 8),
+                    // Series is otherwise fixed at ingest (LYCM-129).
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _Field(
+                            label: 'Series',
+                            controller: _series,
+                            enabled: !busy,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 64,
+                          child: _Field(
+                            label: 'No.',
+                            controller: _seriesIndex,
+                            enabled: !busy,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -265,7 +299,13 @@ class _ReviewCardState extends ConsumerState<_ReviewCard> {
                   'save the details',
                   () => ref
                       .read(reviewControllerProvider.notifier)
-                      .saveMeta(b.id, _title.text.trim(), _author.text.trim()),
+                      .saveMeta(
+                        b.id,
+                        _title.text.trim(),
+                        _author.text.trim(),
+                        series: _series.text.trim(),
+                        seriesIndex: parseSeriesIndex(_seriesIndex.text),
+                      ),
                 ),
               ),
               _Action(
@@ -548,10 +588,12 @@ class _Field extends StatelessWidget {
     required this.label,
     required this.controller,
     required this.enabled,
+    this.keyboardType,
   });
   final String label;
   final TextEditingController controller;
   final bool enabled;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
@@ -559,6 +601,7 @@ class _Field extends StatelessWidget {
     return TextField(
       controller: controller,
       enabled: enabled,
+      keyboardType: keyboardType,
       style: const TextStyle(fontSize: 14),
       decoration: InputDecoration(
         labelText: label,

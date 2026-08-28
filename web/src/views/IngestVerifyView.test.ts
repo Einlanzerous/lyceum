@@ -87,6 +87,49 @@ describe('IngestVerifyView', () => {
     expect((next[1].element as HTMLInputElement).value).toBe('')
   })
 
+  it('confirms a no_match candidate from typed title/author (LYCM-124)', async () => {
+    // A valid ISBN the resolver has nothing for was a dead end: re-resolve asks
+    // the same source and confirm is disabled. Typing the details from the book
+    // in hand must shelve it like any other confirm.
+    vi.mocked(api.getBatch)
+      .mockResolvedValueOnce(mkBatch([cand(1, 'no_match'), cand(2, 'ready')]))
+      .mockResolvedValueOnce(mkBatch([cand(2, 'ready')]))
+    vi.mocked(api.confirmCandidate).mockResolvedValue({
+      candidate: { ...cand(1, 'confirmed'), title: 'The Impossible Factory' },
+      inventory: { id: 1, isbn: '9780000000001', state: 'wanted' },
+    })
+
+    const wrapper = mountView()
+    const store = useIngestStore()
+    await store.openBatch(1)
+    await flushPromises()
+    expect(store.selected?.id).toBe(1)
+
+    // The ordinary confirm stays off for no_match; the details form is the way.
+    expect(
+      (wrapper.find('.detail__actions .btn--brass').element as HTMLButtonElement).disabled,
+    ).toBe(true)
+    const submit = wrapper.find('.fallback__details button[type=submit]')
+    expect((submit.element as HTMLButtonElement).disabled).toBe(true) // no title yet
+
+    await wrapper
+      .find('.fallback__details input[aria-label=Title]')
+      .setValue(' The Impossible Factory ')
+    await wrapper.find('.fallback__details input[aria-label=Author]').setValue('Josh Dean')
+    await wrapper.find('.fallback__details input[aria-label=Series]').setValue('Factory')
+    await wrapper.find('.fallback__details input[aria-label="Series number"]').setValue('1')
+    expect((submit.element as HTMLButtonElement).disabled).toBe(false)
+    await wrapper.find('form.fallback__details').trigger('submit')
+    await flushPromises()
+
+    expect(api.confirmCandidate).toHaveBeenCalledWith(1, 'Factory', 1, {
+      title: 'The Impossible Factory',
+      author: 'Josh Dean',
+    })
+    expect(store.selected?.id).toBe(2)
+    expect(wrapper.text()).toContain('Confirmed “The Impossible Factory”')
+  })
+
   it('keeps each book’s series draft when you switch between books', async () => {
     vi.mocked(api.getBatch).mockResolvedValue(mkBatch([cand(1, 'ready'), cand(2, 'ready')]))
 

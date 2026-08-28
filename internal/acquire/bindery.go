@@ -56,6 +56,30 @@ const (
 // var so tests can shrink it.
 var retryBackoff = 2 * time.Second
 
+// addNotFoundBackoff is the wait before each re-attempt of an add that Bindery
+// answered 404. The first add for a new author kicks off Bindery's catalogue
+// sync for that author (~1 min for 200 works, ~3 min for 400), and every add
+// for the same author that lands during that window 404s — 9 of 30 adds on a
+// prod re-trigger (LYCM-127). A re-POST after the sync succeeds, so the add is
+// retried on this schedule (bounded by the caller's context, api.wantTimeout).
+// One more attempt than there are waits. A var so tests can shrink it.
+var addNotFoundBackoff = []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second}
+
+// addNotFoundError is Bindery's 404 to an add: the work is not (yet) in its
+// synced catalogue for the author. Transient while the author sync runs;
+// persistent when the sync's language/dedup filter dropped the work Lyceum
+// resolved the ISBN to, which no retry fixes.
+type addNotFoundError struct {
+	body string // Bindery's response body, trimmed, for the log
+}
+
+func (e *addNotFoundError) Error() string {
+	if e.body == "" {
+		return "acquire: bindery add status 404"
+	}
+	return "acquire: bindery add status 404: " + e.body
+}
+
 // errNotFound signals that Bindery could not resolve the ISBN to an addable
 // book (no metadata match). It is handled internally by Want as a best-effort
 // miss — the inventory entry still records intent as `wanted` — and is not
@@ -186,13 +210,39 @@ func (b *Bindery) Want(ctx context.Context, code string) error {
 	// an add for a new author creates that author with no quality profile, and
 	// a searchOnAdd search would be queued against it before the profile is in
 	// place (LYCM-81). Add → profile → search keeps the order deterministic.
-	created, err := b.addBook(ctx, addBookRequest{
+	req := addBookRequest{
 		ForeignBookID:   book.ForeignBookID,
 		ForeignAuthorID: book.Author.ForeignAuthorID, // may be empty; Bindery resolves by ISBN
 		AuthorName:      book.Author.name(),
 		SearchOnAdd:     false,
 		MediaType:       "ebook",
-	})
+	}
+	var created binderyBook
+	for attempt := 0; ; attempt++ {
+		created, err = b.addBook(ctx, req)
+		var nf *addNotFoundError
+		if !errors.As(err, &nf) {
+			break
+		}
+		// A 404 on add is usually the author's catalogue sync still running
+		// (LYCM-127); it clears on its own, so wait it out. Only once the whole
+		// schedule is spent is it the other thing: the work is not in the synced
+		// catalogue at all, which needs a hand in Bindery, not another retry.
+		if attempt >= len(addNotFoundBackoff) {
+			log.Printf("acquire: bindery add ISBN %s still 404 after %d retries (%v): work %s is not in Bindery's synced catalogue for author %q — monitor it in Bindery by hand; recorded wanted only",
+				code, attempt, err, book.ForeignBookID, req.AuthorName)
+			return nil
+		}
+		wait := addNotFoundBackoff[attempt]
+		log.Printf("acquire: bindery add ISBN %s 404 (author %q catalogue likely still syncing); retrying in %s (%d/%d)",
+			code, req.AuthorName, wait, attempt+1, len(addNotFoundBackoff))
+		select {
+		case <-ctx.Done():
+			log.Printf("acquire: bindery add ISBN %s gave up waiting for author %q sync: %v; recorded wanted only", code, req.AuthorName, ctx.Err())
+			return nil
+		case <-time.After(wait):
+		}
+	}
 	if err != nil {
 		log.Printf("acquire: bindery add ISBN %s failed: %v; recorded wanted only", code, err)
 		return nil
@@ -419,7 +469,8 @@ func (b *Bindery) lookup(ctx context.Context, code string) (binderyBook, error) 
 // addBook adds a book to Bindery's library and returns the created record (with
 // its assigned id). A 409 Conflict means the book already exists — a benign
 // race with a concurrent confirm — and is reported as success with an empty
-// book so Want treats it idempotently.
+// book so Want treats it idempotently. A 404 is returned as *addNotFoundError
+// so Want can tell the retryable case from a plain failure.
 func (b *Bindery) addBook(ctx context.Context, req addBookRequest) (binderyBook, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -433,6 +484,10 @@ func (b *Bindery) addBook(ctx context.Context, req addBookRequest) (binderyBook,
 
 	if resp.StatusCode == http.StatusConflict {
 		return binderyBook{}, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return binderyBook{}, &addNotFoundError{body: strings.TrimSpace(string(msg))}
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return binderyBook{}, fmt.Errorf("acquire: bindery add status %d", resp.StatusCode)

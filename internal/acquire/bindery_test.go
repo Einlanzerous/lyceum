@@ -457,6 +457,14 @@ func TestPickQualityProfile(t *testing.T) {
 	}
 }
 
+// shrinkAddBackoff makes the 404-on-add retry schedule instant for a test.
+func shrinkAddBackoff(t *testing.T) {
+	t.Helper()
+	old := addNotFoundBackoff
+	addNotFoundBackoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { addNotFoundBackoff = old })
+}
+
 // captureLog routes the package logger into a buffer for the test's duration.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
@@ -465,4 +473,89 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(old) })
 	return &buf
+}
+
+// syncingBindery is a fake whose /author/book answers 404 to the first
+// notFoundAdds adds — Bindery mid author-catalogue sync (LYCM-127) — and
+// creates the book after that. addHits counts every add it saw.
+func syncingBindery(t *testing.T, notFoundAdds int64) (*Bindery, *atomic.Int64) {
+	t.Helper()
+	var addHits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/book/lookup":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, freshLookup)
+		case "/api/v1/author/book":
+			if addHits.Add(1) <= notFoundAdds {
+				http.Error(w, "book not found for author", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":77,"title":"The Dinosaur Lords","foreignBookId":"OL1B"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewBindery(srv.URL, "k"), &addHits
+}
+
+func TestWantRetriesAddWhileAuthorSyncs(t *testing.T) {
+	// The add 404s twice (the author's catalogue is still syncing) and then
+	// succeeds: Want must keep re-POSTing rather than give up on the first 404,
+	// which is what left 9 of 30 prod adds as "recorded wanted only".
+	shrinkAddBackoff(t)
+	b, addHits := syncingBindery(t, 2)
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if got := addHits.Load(); got != 3 {
+		t.Fatalf("add hits = %d, want 3 (two 404s, then created)", got)
+	}
+}
+
+func TestWantPersistentAddNotFoundGivesUpDistinctly(t *testing.T) {
+	// A 404 that outlives the whole schedule is the other case — the work is
+	// not in Bindery's synced catalogue at all — so Want stops after the last
+	// retry, stays best-effort, and says so in a way that does not read like
+	// the transient case.
+	shrinkAddBackoff(t)
+	logs := captureLog(t)
+	b, addHits := syncingBindery(t, 1<<30)
+
+	if err := b.Want(context.Background(), "9780765382115"); err != nil {
+		t.Fatalf("Want on persistent add 404 = %v, want nil (best-effort)", err)
+	}
+	if got, want := addHits.Load(), int64(len(addNotFoundBackoff)+1); got != want {
+		t.Fatalf("add hits = %d, want %d (one per schedule slot plus the first)", got, want)
+	}
+	if out := logs.String(); !strings.Contains(out, "not in Bindery's synced catalogue") ||
+		!strings.Contains(out, "book not found for author") {
+		t.Fatalf("exhausted-retries log should name the persistent case and carry Bindery's body; got:\n%s", out)
+	}
+}
+
+func TestWantAddRetryStopsAtDeadline(t *testing.T) {
+	// The retry wait is bounded by the dispatch context: a deadline that
+	// expires mid-backoff ends the Want promptly instead of sleeping through
+	// the schedule against a dead context.
+	old := addNotFoundBackoff
+	addNotFoundBackoff = []time.Duration{time.Hour}
+	t.Cleanup(func() { addNotFoundBackoff = old })
+	b, addHits := syncingBindery(t, 1<<30)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := b.Want(ctx, "9780765382115"); err != nil {
+		t.Fatalf("Want: %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("Want slept through the backoff past its deadline")
+	}
+	if got := addHits.Load(); got != 1 {
+		t.Fatalf("add hits = %d, want 1 (no retry after the deadline)", got)
+	}
 }

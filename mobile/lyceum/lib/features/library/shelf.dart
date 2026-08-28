@@ -38,6 +38,17 @@ const double kFinishedAt = 0.99;
 
 enum MemberStatus { finished, inProgress, notStarted }
 
+/// The number a volume is labelled with: its seriesIndex as given ("4", or
+/// "3.5" for a novella), or null when the book has none. It is deliberately not
+/// the book's position in the member list — an owned series with gaps (1, 4, 5,
+/// 7) would otherwise be renumbered 1–4 (LYCM-130). Callers show no number
+/// rather than inventing one.
+String? volumeNumber(Book b) {
+  final n = b.seriesIndex;
+  if (n == null || !n.isFinite) return null;
+  return n == n.truncateToDouble() ? n.toInt().toString() : n.toString();
+}
+
 MemberStatus memberStatus(Book b) {
   if (b.finished) return MemberStatus.finished; // explicit mark-as-read wins
   final p = b.progress ?? 0;

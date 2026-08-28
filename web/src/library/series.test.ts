@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildShelf, memberStatus, pinnedBookId, resumeIndex, type ShelfItem } from './series'
+import {
+  buildShelf,
+  memberStatus,
+  pinnedBookId,
+  resumeIndex,
+  volumeNumber,
+  type ShelfItem,
+} from './series'
 import type { Book } from '@/api/types'
 
 function book(partial: Partial<Book> & { id: number }): Book {
@@ -25,6 +32,24 @@ describe('memberStatus', () => {
   it('treats an explicit finished flag as finished regardless of progress', () => {
     expect(memberStatus(book({ id: 1, progress: 0.4, finished: true }))).toBe('finished')
     expect(memberStatus(book({ id: 2, finished: true }))).toBe('finished')
+  })
+})
+
+describe('volumeNumber', () => {
+  it('labels a volume with its own series_index, not its list position', () => {
+    // Harry Potter with 1, 4, 5, 7 on the shelf must read 1, 4, 5, 7 — not 1–4
+    // (LYCM-130).
+    const owned = [1, 4, 5, 7].map((n) => book({ id: n, series: 'HP', series_index: n }))
+    expect(owned.map(volumeNumber)).toEqual(['1', '4', '5', '7'])
+  })
+
+  it('renders a non-integer index as given', () => {
+    expect(volumeNumber(book({ id: 1, series_index: 3.5 }))).toBe('3.5')
+  })
+
+  it('has no number for an unindexed volume rather than inventing one', () => {
+    expect(volumeNumber(book({ id: 1, series: 'HP' }))).toBeNull()
+    expect(volumeNumber(book({ id: 2, series_index: Number.NaN }))).toBeNull()
   })
 })
 

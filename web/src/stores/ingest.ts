@@ -14,6 +14,7 @@ import {
   type CandidateStatus,
   type Edition,
   type ScanSource,
+  type TypedDetails,
 } from '@/api/ingest'
 
 /** Statuses that still need the reviewer: everything not yet confirmed/skipped. */
@@ -158,12 +159,17 @@ export const useIngestStore = defineStore('ingest', {
       })
     },
 
-    /** Confirm the selected candidate into inventory, then advance to the next. */
-    async confirm(series = '', seriesIndex = 0): Promise<void> {
+    /**
+     * Confirm the selected candidate into inventory, then advance to the next.
+     * `details` confirms a no_match candidate from a typed title/author
+     * (LYCM-124).
+     */
+    async confirm(series = '', seriesIndex = 0, details?: TypedDetails): Promise<void> {
       const c = this.selected
       if (!c) return
       await this.run(async () => {
-        await confirmCandidate(c.id, series, seriesIndex)
+        if (details) await confirmCandidate(c.id, series, seriesIndex, details)
+        else await confirmCandidate(c.id, series, seriesIndex)
         await this.refresh()
         this.advanceFrom(c.id)
       })
@@ -208,6 +214,11 @@ export const useIngestStore = defineStore('ingest', {
      * Re-resolve a no-match candidate: add the corrected ISBN as a fresh
      * candidate (which re-runs resolution) and drop the stale no-match row,
      * then select the replacement. (LYCM-75)
+     *
+     * Re-entering the *same* ISBN comes back as the old row, re-resolved in
+     * place rather than appended (LYCM-125) — skipping it then would throw the
+     * fresh resolution away, so the old row is only dropped when a different
+     * one replaced it.
      */
     async reResolve(oldId: number, isbn: string): Promise<void> {
       if (!this.batch) return
@@ -215,7 +226,7 @@ export const useIngestStore = defineStore('ingest', {
       if (!code) return
       await this.run(async () => {
         const added = await addCandidate(this.batch!.id, code, 'manual')
-        await skipCandidate(oldId)
+        if (added.id !== oldId) await skipCandidate(oldId)
         await this.refresh()
         this.selectedId = added.id
       })

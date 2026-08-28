@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/magos/lyceum/internal/isbn"
@@ -42,12 +43,20 @@ const (
 	// big batch confirm doesn't hit the acquisition backend with N searches at
 	// once (LYCM-79).
 	maxConcurrentWants = 3
-	// wantTimeout bounds one background dispatch. A live Bindery Want does a
-	// lookup + add (a synchronous metadata pull each, ~60s cap apiece, retried
-	// up to a few times under burst — see acquire.requestTimeout/maxAttempts);
-	// this outer deadline is sized to let those retries run while still stopping
-	// a wedged dispatch from pinning a semaphore slot forever.
-	wantTimeout = 4 * time.Minute
+	// wantTimeout bounds one background dispatch. Two budgets have to fit:
+	//
+	//   - HTTP: a lookup + add, each a synchronous metadata pull capped at
+	//     acquire.requestTimeout (60s) and retried up to maxAttempts under
+	//     burst, so ~3 min worst case — the 4 min LYCM-99 sized for.
+	//   - Waiting: an add that 404s while the author's catalogue sync runs
+	//     sleeps through acquire.addNotFoundBackoff (30s+60s+120s = 3.5 min,
+	//     LYCM-127) before its final attempt.
+	//
+	// 8 min covers both back to back, so the last add — the expensive one,
+	// with the synchronous pull and searchOnAdd — is not squeezed against the
+	// deadline by the sleeps that preceded it, while a wedged dispatch still
+	// cannot pin a semaphore slot forever.
+	wantTimeout = 8 * time.Minute
 )
 
 // dispatchWant hands an ISBN to the acquirer in the background, so the confirm
@@ -78,33 +87,42 @@ func (a *API) waitWants() { a.wantWG.Wait() }
 
 // inventoryJSON is the wire shape for an inventory entry.
 type inventoryJSON struct {
-	ID     int64  `json:"id"`
-	ISBN   string `json:"isbn"`
-	Title  string `json:"title,omitempty"`
-	Author string `json:"author,omitempty"`
-	State  string `json:"state"`
-	BookID *int64 `json:"book_id,omitempty"`
+	ID          int64   `json:"id"`
+	ISBN        string  `json:"isbn"`
+	Title       string  `json:"title,omitempty"`
+	Author      string  `json:"author,omitempty"`
+	State       string  `json:"state"`
+	BookID      *int64  `json:"book_id,omitempty"`
+	Series      string  `json:"series,omitempty"`
+	SeriesIndex float64 `json:"series_index,omitempty"`
 }
 
 func toInventoryJSON(inv store.Inventory) inventoryJSON {
 	return inventoryJSON{
-		ID:     inv.ID,
-		ISBN:   inv.ISBN,
-		Title:  inv.Title,
-		Author: inv.Author,
-		State:  inv.State,
-		BookID: inv.BookID,
+		ID:          inv.ID,
+		ISBN:        inv.ISBN,
+		Title:       inv.Title,
+		Author:      inv.Author,
+		State:       inv.State,
+		BookID:      inv.BookID,
+		Series:      inv.Series,
+		SeriesIndex: inv.SeriesIndex,
 	}
 }
 
 // inventoryRequest is the POST /inventory body. ISBN is required (any form an
 // ISBN-10/13 takes — hyphenated, urn:isbn:, etc.); FindDigital asks the
 // acquisition pipeline for a DRM-free copy, moving the entry to `wanted`.
+// Series/SeriesIndex record series intent on the entry (LYCM-129), the way a
+// batch confirm does: the grabbed EPUB rarely carries series metadata, and
+// without intent on the row it lands series-less.
 type inventoryRequest struct {
-	ISBN        string `json:"isbn"`
-	Title       string `json:"title"`
-	Author      string `json:"author"`
-	FindDigital bool   `json:"find_digital"`
+	ISBN        string  `json:"isbn"`
+	Title       string  `json:"title"`
+	Author      string  `json:"author"`
+	FindDigital bool    `json:"find_digital"`
+	Series      string  `json:"series"`
+	SeriesIndex float64 `json:"series_index"`
 }
 
 // handleInventoryCreate is the capture endpoint a barcode scan (LYCM-602) calls:
@@ -125,6 +143,10 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid ISBN", http.StatusBadRequest)
 		return
 	}
+	if !validSeriesIndex(req.SeriesIndex) {
+		http.Error(w, "series_index must be a number >= 0", http.StatusBadRequest)
+		return
+	}
 
 	inv, err := a.store.UpsertInventory(ctx, store.Inventory{
 		ISBN:   code,
@@ -135,6 +157,11 @@ func (a *API) handleInventoryCreate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverError(w, "upsert inventory", err)
 		return
+	}
+	// Series intent rides the row to the eventual EPUB ingest (LYCM-82), or
+	// lands on the book at once when one is already linked.
+	if series := strings.TrimSpace(req.Series); series != "" {
+		inv = a.recordSeriesIntent(ctx, inv, series, req.SeriesIndex)
 	}
 
 	// Only request a digital copy when one isn't already in hand. A title that
