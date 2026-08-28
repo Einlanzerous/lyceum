@@ -31,8 +31,9 @@ jobs:
           # new Go major until a Wails release catches up, and `stable` moved the
           # runner to go1.27.0 the week it shipped, failing every build with
           # `internal error: package "context" without types was imported`. 1.26 is
-          # the last series this job passed on. Bump both together, after a local
-          # `wails build`, when moving to a Wails that supports the newer Go.
+          # the last series this job passed on. Keep in sync with
+          # windows-release.yml, which runs the same Wails on the same build; bump
+          # Go and Wails together there and here, after a local `wails build`.
           go-version: "1.26.x"
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
