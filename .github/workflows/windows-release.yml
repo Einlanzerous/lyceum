@@ -59,7 +59,10 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          # Pinned, not `stable` (LYCM-131) — keep in sync with wrappers.yml, which
+          # explains why: Wails v2.10.1 cannot build under go1.27, and a release
+          # built on `stable` would ship with no Windows installer.
+          go-version: "1.26.x"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
