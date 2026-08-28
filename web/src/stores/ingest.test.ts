@@ -157,6 +157,26 @@ describe('ingest store', () => {
     expect(store.selected?.id).toBe(3) // the freshly re-resolved candidate
   })
 
+  it('reResolve keeps a row the server re-resolved in place (same ISBN) instead of skipping it', async () => {
+    // LYCM-125: re-entering the same ISBN revives the no_match row itself, so
+    // the response carries the old id. Skipping "the old row" would skip the
+    // fresh resolution.
+    const before = mkBatch([cand(1, 'no_match')])
+    const after = mkBatch([cand(1, 'ready')])
+    vi.mocked(api.getBatch).mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    vi.mocked(api.addCandidate).mockResolvedValue(cand(1, 'ready'))
+    vi.mocked(api.skipCandidate).mockResolvedValue()
+
+    const store = useIngestStore()
+    await store.openBatch(1)
+    await store.reResolve(1, '9780306406157')
+
+    expect(api.addCandidate).toHaveBeenCalledWith(1, '9780306406157', 'manual')
+    expect(api.skipCandidate).not.toHaveBeenCalled()
+    expect(store.selected?.id).toBe(1)
+    expect(store.selected?.status).toBe('ready')
+  })
+
   it('reResolve ignores a blank ISBN', async () => {
     vi.mocked(api.getBatch).mockResolvedValue(mkBatch([cand(1, 'no_match')]))
     const store = useIngestStore()

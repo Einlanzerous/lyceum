@@ -336,6 +336,94 @@ func TestCandidateSkip(t *testing.T) {
 	}
 }
 
+func addCandidate(t *testing.T, srv *httptest.Server, batchID int64, code, source string) (candidateJSON, int) {
+	t.Helper()
+	resp := postJSON(t, srv.URL+"/ingest/batches/"+itoa(batchID)+"/candidates",
+		map[string]any{"isbn": code, "source": source})
+	defer resp.Body.Close()
+	var got candidateJSON
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode candidate: %v", err)
+	}
+	return got, resp.StatusCode
+}
+
+// A skipped row must not shadow its ISBN: a reviewer who skips a scan and then
+// types the same ISBN back in gets it re-resolved — onto the skipped row itself,
+// not as a "duplicate" of a dead row beside it (LYCM-125, prod batch 5 rows
+// 46/52). Skipping the only row had closed the batch; the revive reopens it.
+func TestSkippedCandidateRevivedOnReentry(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnPiranesi}},
+	}))
+	scanID := b.Candidates[0].ID
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(scanID)+"/skip", map[string]any{})
+	resp.Body.Close()
+	if got := decodeBatch(t, mustGet(t, srv.URL+"/ingest/batches/"+itoa(b.ID))); got.Status != store.BatchConfirmed {
+		t.Fatalf("batch status after skipping its only row = %q, want confirmed", got.Status)
+	}
+
+	got, code := addCandidate(t, srv, b.ID, isbnPiranesi, "manual")
+	if code != http.StatusOK {
+		t.Fatalf("re-add status = %d, want 200 (revived in place)", code)
+	}
+	if got.ID != scanID {
+		t.Fatalf("re-add id = %d, want the skipped row %d revived", got.ID, scanID)
+	}
+	if got.Status != store.CandidateReady || got.Title != "Piranesi" {
+		t.Fatalf("revived candidate = %+v, want ready Piranesi", got)
+	}
+
+	after := decodeBatch(t, mustGet(t, srv.URL+"/ingest/batches/"+itoa(b.ID)))
+	if len(after.Candidates) != 1 {
+		t.Fatalf("batch has %d candidates after re-add, want 1 (no ghost row)", len(after.Candidates))
+	}
+	if after.Status != store.BatchOpen {
+		t.Fatalf("batch status after revive = %q, want open", after.Status)
+	}
+}
+
+// Re-entering an unresolved ISBN re-runs resolution on the no_match row itself
+// (the web "re-resolve" flow adds first and skips second, so appending would
+// duplicate against the still-live no_match row).
+func TestNoMatchCandidateReresolvedInPlace(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnNoMatch}},
+	}))
+	if b.Candidates[0].Status != store.CandidateNoMatch {
+		t.Fatalf("status = %q, want no_match", b.Candidates[0].Status)
+	}
+
+	got, code := addCandidate(t, srv, b.ID, isbnNoMatch, "manual")
+	if code != http.StatusOK || got.ID != b.Candidates[0].ID {
+		t.Fatalf("re-add = %d id %d, want 200 on row %d", code, got.ID, b.Candidates[0].ID)
+	}
+	if got.Status != store.CandidateNoMatch {
+		t.Fatalf("status = %q, want no_match (resolver still has nothing), not duplicate", got.Status)
+	}
+	after := decodeBatch(t, mustGet(t, srv.URL+"/ingest/batches/"+itoa(b.ID)))
+	if len(after.Candidates) != 1 {
+		t.Fatalf("batch has %d candidates, want 1", len(after.Candidates))
+	}
+}
+
+// A row that still holds its place in the batch does shadow a re-entry.
+func TestLiveCandidateStillShadowsReentry(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnPiranesi}},
+	}))
+	got, code := addCandidate(t, srv, b.ID, isbnPiranesi, "manual")
+	if code != http.StatusCreated || got.Status != store.CandidateDuplicate {
+		t.Fatalf("re-add of a ready row = %d %q, want 201 duplicate", code, got.Status)
+	}
+	if got.ID == b.Candidates[0].ID {
+		t.Fatalf("a live row must not be overwritten by a re-entry")
+	}
+}
+
 func mustGet(t *testing.T, url string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(url)
