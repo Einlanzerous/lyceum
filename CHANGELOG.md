@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.13.0](https://github.com/Einlanzerous/lyceum/compare/v1.12.0...v1.13.0) (2026-08-28)
+
+
+### Features
+
+* **acquire:** give a newly added Bindery author the E-Book quality profile (LYCM-81) ([#96](https://github.com/Einlanzerous/lyceum/issues/96)) ([5ad8a2a](https://github.com/Einlanzerous/lyceum/commit/5ad8a2a26478968d1b0ee9f392485d5dbf45c045))
+* **books:** make series editable after ingest (LYCM-129) ([#94](https://github.com/Einlanzerous/lyceum/issues/94)) ([acb7e20](https://github.com/Einlanzerous/lyceum/commit/acb7e20f7b21686083e675a6b54b23311bcf06df))
+* **ingest:** confirm a no_match candidate with typed title/author (LYCM-124) ([#95](https://github.com/Einlanzerous/lyceum/issues/95)) ([361c546](https://github.com/Einlanzerous/lyceum/commit/361c54659ecd39931f0635405b0fae955d163dcf))
+* **inventory:** join a grabbed EPUB to its wanted entry by title/author, or by hand (LYCM-128) ([#97](https://github.com/Einlanzerous/lyceum/issues/97)) ([71c95b2](https://github.com/Einlanzerous/lyceum/commit/71c95b2dd75583e31a0a86efa577164e64373da5))
+
+
+### Bug Fixes
+
+* **acquire:** retry a Bindery add that 404s while the author's catalogue syncs (LYCM-127) ([#93](https://github.com/Einlanzerous/lyceum/issues/93)) ([257e588](https://github.com/Einlanzerous/lyceum/commit/257e588c1ab837b4b707e90bac120c67a510172f))
+* **auth:** contain a malformed Access signing key instead of dying on it (LYCM-122) ([#88](https://github.com/Einlanzerous/lyceum/issues/88)) ([6457ac0](https://github.com/Einlanzerous/lyceum/commit/6457ac07e27638e801d0e752b8f95e0b0e41db4a))
+* **ci:** pin the wrappers job to Go 1.26 instead of stable (LYCM-131) ([#98](https://github.com/Einlanzerous/lyceum/issues/98)) ([4c70acf](https://github.com/Einlanzerous/lyceum/commit/4c70acf7cc22ea535bcb14fb4ef6e3104413264a))
+* **ci:** publish :latest from the release build only (LYCM-121) ([#89](https://github.com/Einlanzerous/lyceum/issues/89)) ([d4292b2](https://github.com/Einlanzerous/lyceum/commit/d4292b2b7d6262c5c39740cf7b33bf577d7c7430))
+* **ingest:** re-resolve a skipped or no_match ISBN in place instead of filing it duplicate (LYCM-125) ([#92](https://github.com/Einlanzerous/lyceum/issues/92)) ([d5bf705](https://github.com/Einlanzerous/lyceum/commit/d5bf7054d7b8a727691e39c9db027c60b2966fea))
+* **library:** label series volumes by series_index, not list position (LYCM-130) ([#91](https://github.com/Einlanzerous/lyceum/issues/91)) ([e68552b](https://github.com/Einlanzerous/lyceum/commit/e68552b75d0492eeac7b4aec50748ab20203b630))
+
 ## [1.12.0](https://github.com/Einlanzerous/lyceum/compare/v1.11.0...v1.12.0) (2026-08-23)
 
 
