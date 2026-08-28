@@ -432,3 +432,107 @@ func mustGet(t *testing.T, url string) *http.Response {
 	}
 	return resp
 }
+
+// A no_match candidate — a valid ISBN the resolver has nothing for, the normal
+// case for a new release — can be confirmed from a typed title/author
+// (LYCM-124): it shelves exactly like a resolved confirm (inventory keyed on the
+// scanned ISBN, wanted, acquirer asked) and the candidate records the typed
+// metadata at full confidence so the batch closes normally.
+func TestConfirmNoMatchWithTypedDetails(t *testing.T) {
+	acq := &recordingAcquirer{}
+	s := testStore(t)
+	a := New(s, "", WithResolver(testResolver()), WithAcquirer(acq))
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnNoMatch}},
+	}))
+	c := b.Candidates[0]
+	if c.Status != store.CandidateNoMatch {
+		t.Fatalf("status = %q, want no_match", c.Status)
+	}
+	confirmURL := srv.URL + "/ingest/candidates/" + itoa(c.ID) + "/confirm"
+
+	// Without details it is still the dead end it was.
+	if resp := postJSON(t, confirmURL, map[string]any{}); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bare confirm of no_match = %d, want 400", resp.StatusCode)
+	} else {
+		resp.Body.Close()
+	}
+
+	resp := postJSON(t, confirmURL, map[string]any{
+		"title": " The Impossible Factory ", "author": "Josh Dean",
+		"series": "Factory", "series_index": 1,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirm with details = %d, want 200", resp.StatusCode)
+	}
+	got := decode[confirmResponse](t, resp)
+	if got.Candidate.Status != store.CandidateConfirmed || got.Candidate.Confidence != 1 ||
+		got.Candidate.Title != "The Impossible Factory" || got.Candidate.Author != "Josh Dean" ||
+		got.Candidate.Series != "Factory" {
+		t.Fatalf("candidate = %+v, want confirmed at 1.0 with the typed details", got.Candidate)
+	}
+	if got.Inventory.ISBN != isbnNoMatch || got.Inventory.State != store.StateWanted ||
+		got.Inventory.Title != "The Impossible Factory" || got.Inventory.Author != "Josh Dean" {
+		t.Fatalf("inventory = %+v, want wanted %s with the typed details", got.Inventory, isbnNoMatch)
+	}
+	a.waitWants()
+	if len(acq.wants) != 1 || acq.wants[0] != isbnNoMatch {
+		t.Fatalf("acquirer wants = %v, want [%s]", acq.wants, isbnNoMatch)
+	}
+	if inv, err := s.GetInventoryByISBN(context.Background(), isbnNoMatch); err != nil || inv.Series != "Factory" {
+		t.Fatalf("stored inventory = %+v err=%v, want series intent recorded", inv, err)
+	}
+	if after := decodeBatch(t, mustGet(t, srv.URL+"/ingest/batches/"+itoa(b.ID))); after.Status != store.BatchConfirmed {
+		t.Fatalf("batch status = %q, want confirmed once its only candidate is", after.Status)
+	}
+}
+
+// Typed details do not bypass the ISBN gate: a malformed scan is still
+// corrected via re-resolve, not confirmed as-is.
+func TestConfirmWithDetailsStillNeedsValidISBN(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": "not-an-isbn"}},
+	}))
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(b.Candidates[0].ID)+"/confirm",
+		map[string]any{"title": "Whatever", "author": "Someone"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirm with details on a malformed ISBN = %d, want 400", resp.StatusCode)
+	}
+}
+
+// Typed details never stand in for a pick: a review candidate has real
+// editions (with the work key that groups print and ebook) and must still be
+// resolved by choosing one.
+func TestConfirmDetailsIgnoredForReviewCandidate(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnDune}},
+	}))
+	if b.Candidates[0].Status != store.CandidateReview {
+		t.Fatalf("status = %q, want review", b.Candidates[0].Status)
+	}
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(b.Candidates[0].ID)+"/confirm",
+		map[string]any{"title": "Dune", "author": "Frank Herbert"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirm with details on a review candidate = %d, want 400 (pick an edition)", resp.StatusCode)
+	}
+}
+
+// Typed details never override a resolved edition.
+func TestConfirmDetailsIgnoredWhenEditionChosen(t *testing.T) {
+	srv, _ := ingestServer(t, nil)
+	b := decodeBatch(t, postJSON(t, srv.URL+"/ingest/batches", map[string]any{
+		"scans": []map[string]any{{"isbn": isbnPiranesi}},
+	}))
+	resp := postJSON(t, srv.URL+"/ingest/candidates/"+itoa(b.Candidates[0].ID)+"/confirm",
+		map[string]any{"title": "Wrong Title", "author": "Nobody"})
+	got := decode[confirmResponse](t, resp)
+	if got.Candidate.Title != "Piranesi" || got.Inventory.Title != "Piranesi" {
+		t.Fatalf("confirm = %+v / %+v, want the resolved edition kept", got.Candidate, got.Inventory)
+	}
+}
