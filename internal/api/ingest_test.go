@@ -8,12 +8,21 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/magos/lyceum/internal/store"
 )
 
 // epubWithIdentifier builds a minimal valid EPUB whose dc:identifier is the
 // given value, so tests can exercise ISBN extraction (urn:isbn:...) vs. the
 // common non-ISBN case (urn:uuid:...).
 func epubWithIdentifier(t *testing.T, title, identifier string) []byte {
+	t.Helper()
+	return epubWithIdentifierAndAuthor(t, title, "Homer", identifier)
+}
+
+// epubWithIdentifierAndAuthor is epubWithIdentifier with the dc:creator chosen
+// too, for tests that match on author (LYCM-128).
+func epubWithIdentifierAndAuthor(t *testing.T, title, author, identifier string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -37,7 +46,7 @@ func epubWithIdentifier(t *testing.T, title, identifier string) []byte {
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>`+title+`</dc:title>
-    <dc:creator>Homer</dc:creator>
+    <dc:creator>`+author+`</dc:creator>
     <dc:language>en</dc:language>
     <dc:identifier id="bookid">`+identifier+`</dc:identifier>
   </metadata>
@@ -142,5 +151,40 @@ func TestIngestDuplicateIsNoOp(t *testing.T) {
 	}
 	if second.ID != first.ID {
 		t.Fatalf("dedup returned id %d, want %d", second.ID, first.ID)
+	}
+}
+
+// An ingested EPUB whose ISBN the resolver cannot place (no work key) joins the
+// wanted entry whose title and author match rather than opening a second row
+// (LYCM-128: HP #1's Pottermore ISBN is unknown to Open Library).
+func TestIngestJoinsWantedEntryByTitleAuthor(t *testing.T) {
+	s := testStore(t)
+	srv := newServer(t, s)
+	ctx := context.Background()
+	if _, err := s.UpsertInventory(ctx, store.Inventory{ISBN: "9780590353427", Title: "Harry Potter and the Philosopher's Stone", Author: "J. K. Rowling"}); err != nil {
+		t.Fatalf("UpsertInventory: %v", err)
+	}
+	if _, err := s.SetInventoryState(ctx, "9780590353427", store.StateWanted); err != nil {
+		t.Fatalf("SetInventoryState: %v", err)
+	}
+
+	data := epubWithIdentifierAndAuthor(t, "Harry Potter and the Philosopher's Stone", "Rowling, J. K.", "urn:isbn:9781781100073")
+	resp := postUpload(t, srv, "hp1.epub", data)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("upload status = %d, want 201; body=%s", resp.StatusCode, body)
+	}
+	var created bookJSON
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	inv := getInventory(t, srv.URL)
+	if len(inv) != 1 {
+		t.Fatalf("inventory has %d entries, want 1 (the wanted row fulfilled): %+v", len(inv), inv)
+	}
+	if inv[0].ISBN != "9780590353427" || inv[0].State != "ingested" || inv[0].BookID == nil || *inv[0].BookID != created.ID {
+		t.Fatalf("entry = %+v, want the print entry ingested with book %d", inv[0], created.ID)
 	}
 }

@@ -127,6 +127,64 @@ func (a *API) handleUpdateBook(w http.ResponseWriter, r *http.Request) {
 	a.writeBook(w, r, b)
 }
 
+type linkInventoryRequest struct {
+	InventoryID int64 `json:"inventory_id"`
+}
+
+type linkInventoryResponse struct {
+	Book      bookJSON      `json:"book"`
+	Inventory inventoryJSON `json:"inventory"`
+}
+
+// handleLinkInventory is the reviewer's "this held book is that wanted title"
+// (LYCM-128): an EPUB that carried no ISBN — a converted file, some retail
+// EPUBs — or one whose ISBN the resolver did not know has nothing for ingest
+// to join on, so its wanted print entry stays wanted beside a fresh ingested
+// row. This fulfils the chosen entry with the book, folds any entry the book
+// already owned into it (store.FulfilInventory), and applies any series
+// intent the entry carried (LYCM-82) — what an ISBN join would have done. The
+// book's review state is not touched: linking says which title it is,
+// approving says it belongs on the shelf.
+func (a *API) handleLinkInventory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	book, ok := a.lookupBook(w, r)
+	if !ok {
+		return
+	}
+	var req linkInventoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.InventoryID == 0 {
+		http.Error(w, "inventory_id is required", http.StatusBadRequest)
+		return
+	}
+	inv, err := a.store.FulfilInventory(ctx, req.InventoryID, book.ID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		http.Error(w, "inventory entry not found", http.StatusNotFound)
+		return
+	case errors.Is(err, store.ErrInventoryFulfilled):
+		http.Error(w, "that title already has a book linked", http.StatusConflict)
+		return
+	case err != nil:
+		serverError(w, "link inventory", err)
+		return
+	}
+	if book.Series == "" && inv.Series != "" {
+		a.applySeriesIntent(ctx, book.ID, inv.Series, inv.SeriesIndex)
+		if fresh, err := a.store.GetBook(ctx, book.ID); err == nil {
+			book = fresh
+		}
+	}
+	st, err := a.readerStateOne(ctx, book.ID)
+	if err != nil {
+		serverError(w, "assemble book", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, linkInventoryResponse{
+		Book:      a.bookJSONFor(book, st),
+		Inventory: toInventoryJSON(inv),
+	})
+}
+
 // validSeriesIndex is the one rule for a series position on every write path:
 // 0 means "no position", anything else must be a finite non-negative number.
 func validSeriesIndex(f float64) bool {

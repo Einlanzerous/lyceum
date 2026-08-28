@@ -19,7 +19,11 @@ import {
   replaceCover,
   deleteBook,
   getBook,
+  listInventory,
+  linkBookToInventory,
+  type InventoryEntry,
 } from '@/api/client'
+import { openEntries, rankWanted, suggestWanted } from '@/library/wantedMatch'
 import { applySaved, draftOf, patchOf, type BookDraft } from '@/library/bookDraft'
 import { coverSrc, invalidateCover } from '@/api/coverSrc'
 import type { Book } from '@/api/types'
@@ -49,6 +53,14 @@ function isDuplicate(b: Book): boolean {
 }
 
 const books = ref<Book[]>([])
+
+// Wanted titles a held book can be linked to by hand (LYCM-128): an EPUB with
+// no ISBN gives ingest nothing to join on, so the print entry a scan created
+// stays wanted beside the held book. `linkPick` is each card's chosen entry
+// (0 = none), defaulting to the best match; `linked` records a link made here.
+const wanted = ref<InventoryEntry[]>([])
+const linkPick = ref<Record<number, number>>({})
+const linked = ref<Record<number, InventoryEntry>>({})
 const loading = ref(true)
 const error = ref('')
 // Per-book UI state: the edit fields and any inline busy/error status.
@@ -70,6 +82,7 @@ async function load(): Promise<void> {
     books.value = list
     drafts.value = Object.fromEntries(list.map((b) => [b.id, draftOf(b)]))
     void loadMatches(list)
+    void loadWanted(list)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load the review queue.'
   } finally {
@@ -138,6 +151,41 @@ async function run(id: number, action: string, fn: () => Promise<void>): Promise
   } finally {
     busy.value = { ...busy.value, [id]: '' }
   }
+}
+
+// The wanted list is a convenience beside the queue, so a failure to load it
+// only hides the control rather than failing the page.
+async function loadWanted(list: Book[]): Promise<void> {
+  try {
+    wanted.value = openEntries(await listInventory())
+  } catch {
+    wanted.value = []
+  }
+  linkPick.value = Object.fromEntries(
+    list.map((b) => [b.id, suggestWanted(b, wanted.value)?.id ?? 0]),
+  )
+}
+
+function optionsFor(b: Book): InventoryEntry[] {
+  return rankWanted(b, wanted.value)
+}
+
+function onLink(b: Book): Promise<void> {
+  const id = linkPick.value[b.id]
+  if (!id) return Promise.resolve()
+  return run(b.id, 'link', async () => {
+    const res = await linkBookToInventory(b.id, id)
+    linked.value = { ...linked.value, [b.id]: res.inventory }
+    wanted.value = wanted.value.filter((r) => r.id !== id)
+    // Any other card that had this entry picked would now show a blank select
+    // with a live Link button — and a 409 behind it.
+    linkPick.value = Object.fromEntries(
+      Object.entries(linkPick.value).map(([k, v]) => [k, v === id ? 0 : v]),
+    )
+    // The entry's series intent may have landed on the book.
+    b.series = res.book.series
+    b.series_index = res.book.series_index
+  })
 }
 
 function saveMeta(b: Book): Promise<void> {
@@ -285,6 +333,33 @@ function onDelete(b: Book): Promise<void> {
                 placeholder="—"
               />
             </label>
+          </div>
+
+          <!-- Fulfil a wanted title by hand (LYCM-128): no ISBN, nothing to join on. -->
+          <p v-if="linked[b.id]" class="link link--done">
+            Fulfils “{{ linked[b.id].title || linked[b.id].isbn }}” — its wanted entry is now
+            ingested.
+          </p>
+          <div v-else-if="wanted.length" class="link">
+            <label class="link__label" :for="`link-${b.id}`">Fulfils a wanted title</label>
+            <select
+              :id="`link-${b.id}`"
+              v-model.number="linkPick[b.id]"
+              class="field__input link__select"
+            >
+              <option :value="0">— none —</option>
+              <option v-for="r in optionsFor(b)" :key="r.id" :value="r.id">
+                {{ r.title || r.isbn }}{{ r.author ? ` — ${r.author}` : '' }} · {{ r.isbn }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="btn"
+              :disabled="!!busy[b.id] || !linkPick[b.id]"
+              @click="onLink(b)"
+            >
+              Link
+            </button>
           </div>
 
           <div class="card__actions">
@@ -502,6 +577,28 @@ function onDelete(b: Book): Promise<void> {
   padding: 2px 9px;
   font-size: 11px;
   font-weight: 600;
+}
+.link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+}
+.link__label {
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.link__select {
+  flex: 1;
+  min-width: 0;
+}
+.link--done {
+  margin: 10px 0 4px;
+  font: 400 12.5px var(--font-ui);
+  color: var(--brass-bright);
 }
 .field-row {
   display: flex;
