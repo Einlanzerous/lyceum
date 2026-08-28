@@ -65,6 +65,10 @@ type config struct {
 	// base URL and API key are set.
 	binderyBaseURL string // LYCEUM_BINDERY_BASE_URL — e.g. http://localhost:8787
 	binderyAPIKey  string // LYCEUM_BINDERY_API_KEY — Bindery Settings → Security
+	// binderyQualityProfile is the quality profile given to authors the
+	// acquirer creates (LYCM-81): a Bindery profile id or name; "" picks the
+	// profile whose cutoff is epub. Without one, Bindery takes any format.
+	binderyQualityProfile string // LYCEUM_BINDERY_QUALITY_PROFILE
 
 	// Accounts (LYCM-801). userAuth gates the reader core behind a session token.
 	// It defaults OFF: the clients don't sign in yet, and turning it on before
@@ -125,6 +129,8 @@ func envConfig() config {
 
 		binderyBaseURL: os.Getenv("LYCEUM_BINDERY_BASE_URL"),
 		binderyAPIKey:  os.Getenv("LYCEUM_BINDERY_API_KEY"),
+
+		binderyQualityProfile: os.Getenv("LYCEUM_BINDERY_QUALITY_PROFILE"),
 
 		userAuth:      envBool("LYCEUM_AUTH", false),
 		ownerEmail:    os.Getenv("LYCEUM_OWNER_EMAIL"),
@@ -293,8 +299,14 @@ func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	}
 
 	if cfg.binderyBaseURL != "" && cfg.binderyAPIKey != "" {
-		opts = append(opts, api.WithAcquirer(acquire.NewBindery(cfg.binderyBaseURL, cfg.binderyAPIKey)))
-		log.Printf("bindery acquirer enabled (base=%s)", cfg.binderyBaseURL)
+		bindery := acquire.NewBindery(cfg.binderyBaseURL, cfg.binderyAPIKey)
+		bindery.QualityProfile = cfg.binderyQualityProfile
+		opts = append(opts, api.WithAcquirer(bindery))
+		profile := cfg.binderyQualityProfile
+		if profile == "" {
+			profile = "first profile with cutoff epub"
+		}
+		log.Printf("bindery acquirer enabled (base=%s, new-author quality profile: %s)", cfg.binderyBaseURL, profile)
 	} else if cfg.binderyBaseURL != "" || cfg.binderyAPIKey != "" {
 		log.Printf("config: Bindery acquirer needs both LYCEUM_BINDERY_BASE_URL and LYCEUM_BINDERY_API_KEY; using no-op acquirer")
 	} else {
