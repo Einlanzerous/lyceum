@@ -181,12 +181,24 @@ export async function approveBook(id: number): Promise<Book> {
   return (await res.json()) as Book
 }
 
-/** PATCH /books/{id} — correct a book's title/author. Title is required. */
-export async function updateBook(id: number, title: string, author: string): Promise<Book> {
+/**
+ * What PATCH /books/{id} accepts. Title is required. `series` and
+ * `series_index` are optional and independent: leave one out to keep what the
+ * book has, send `series: ''` to clear the series (LYCM-129).
+ */
+export interface BookPatch {
+  title: string
+  author: string
+  series?: string
+  series_index?: number
+}
+
+/** PATCH /books/{id} — correct a book's title/author/series. Title is required. */
+export async function updateBook(id: number, patch: BookPatch): Promise<Book> {
   const res = await apiFetch(`/books/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, author }),
+    body: JSON.stringify(patch),
   })
   if (!res.ok) throw await readError(res)
   return (await res.json()) as Book

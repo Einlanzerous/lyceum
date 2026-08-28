@@ -95,6 +95,26 @@ describe('ingest store', () => {
     expect(store.batches[0].status).toBe('confirmed') // no longer stale-open
   })
 
+  it('confirm passes typed details through for a no_match candidate (LYCM-124)', async () => {
+    const full = mkBatch([cand(1, 'no_match'), cand(2, 'ready')])
+    const after = mkBatch([cand(2, 'ready')])
+    vi.mocked(api.getBatch).mockResolvedValueOnce(full).mockResolvedValueOnce(after)
+    vi.mocked(api.confirmCandidate).mockResolvedValue({
+      candidate: { ...cand(1, 'confirmed') },
+      inventory: { id: 1, isbn: '9780000000001', state: 'wanted' },
+    })
+
+    const store = useIngestStore()
+    await store.openBatch(1)
+    await store.confirm('', 0, { title: 'The Impossible Factory', author: 'Josh Dean' })
+
+    expect(api.confirmCandidate).toHaveBeenCalledWith(1, '', 0, {
+      title: 'The Impossible Factory',
+      author: 'Josh Dean',
+    })
+    expect(store.selected?.id).toBe(2)
+  })
+
   it('setFilter narrows the visible queue', async () => {
     vi.mocked(api.getBatch).mockResolvedValue(mkBatch([cand(1, 'ready'), cand(2, 'review')]))
     const store = useIngestStore()
@@ -155,6 +175,26 @@ describe('ingest store', () => {
     expect(api.addCandidate).toHaveBeenCalledWith(1, '9780306406157', 'manual')
     expect(api.skipCandidate).toHaveBeenCalledWith(1)
     expect(store.selected?.id).toBe(3) // the freshly re-resolved candidate
+  })
+
+  it('reResolve keeps a row the server re-resolved in place (same ISBN) instead of skipping it', async () => {
+    // LYCM-125: re-entering the same ISBN revives the no_match row itself, so
+    // the response carries the old id. Skipping "the old row" would skip the
+    // fresh resolution.
+    const before = mkBatch([cand(1, 'no_match')])
+    const after = mkBatch([cand(1, 'ready')])
+    vi.mocked(api.getBatch).mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    vi.mocked(api.addCandidate).mockResolvedValue(cand(1, 'ready'))
+    vi.mocked(api.skipCandidate).mockResolvedValue()
+
+    const store = useIngestStore()
+    await store.openBatch(1)
+    await store.reResolve(1, '9780306406157')
+
+    expect(api.addCandidate).toHaveBeenCalledWith(1, '9780306406157', 'manual')
+    expect(api.skipCandidate).not.toHaveBeenCalled()
+    expect(store.selected?.id).toBe(1)
+    expect(store.selected?.status).toBe('ready')
   })
 
   it('reResolve ignores a blank ISBN', async () => {

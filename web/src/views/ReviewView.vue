@@ -24,6 +24,7 @@ import {
   type InventoryEntry,
 } from '@/api/client'
 import { openEntries, rankWanted, suggestWanted } from '@/library/wantedMatch'
+import { applySaved, draftOf, patchOf, type BookDraft } from '@/library/bookDraft'
 import { coverSrc, invalidateCover } from '@/api/coverSrc'
 import type { Book } from '@/api/types'
 
@@ -63,7 +64,7 @@ const linked = ref<Record<number, InventoryEntry>>({})
 const loading = ref(true)
 const error = ref('')
 // Per-book UI state: the edit fields and any inline busy/error status.
-const drafts = ref<Record<number, { title: string; author: string }>>({})
+const drafts = ref<Record<number, BookDraft>>({})
 const busy = ref<Record<number, string>>({}) // id -> action in flight ('' when idle)
 const rowError = ref<Record<number, string>>({})
 // Cache-buster so a replaced cover image reloads instead of showing the stale one.
@@ -79,7 +80,7 @@ async function load(): Promise<void> {
   try {
     const list = await listPendingReview()
     books.value = list
-    drafts.value = Object.fromEntries(list.map((b) => [b.id, { title: b.title, author: b.author }]))
+    drafts.value = Object.fromEntries(list.map((b) => [b.id, draftOf(b)]))
     void loadMatches(list)
     void loadWanted(list)
   } catch (e) {
@@ -188,11 +189,10 @@ function onLink(b: Book): Promise<void> {
 }
 
 function saveMeta(b: Book): Promise<void> {
-  const d = drafts.value[b.id]
+  const d = drafts.value[b.id]!
   return run(b.id, 'save', async () => {
-    const updated = await updateBook(b.id, d.title.trim(), d.author.trim())
-    b.title = updated.title
-    b.author = updated.author
+    const updated = await updateBook(b.id, patchOf(d))
+    applySaved(b, updated)
   })
 }
 
@@ -313,6 +313,27 @@ function onDelete(b: Book): Promise<void> {
             <span class="field__label">Author</span>
             <input v-model="drafts[b.id].author" type="text" class="field__input" />
           </label>
+          <div class="field-row">
+            <label class="field field--grow">
+              <span class="field__label">Series</span>
+              <input
+                v-model="drafts[b.id].series"
+                type="text"
+                class="field__input"
+                placeholder="None"
+              />
+            </label>
+            <label class="field field--index">
+              <span class="field__label">No.</span>
+              <input
+                v-model="drafts[b.id].seriesIndex"
+                type="text"
+                inputmode="decimal"
+                class="field__input"
+                placeholder="—"
+              />
+            </label>
+          </div>
 
           <!-- Fulfil a wanted title by hand (LYCM-128): no ISBN, nothing to join on. -->
           <p v-if="linked[b.id]" class="link link--done">
@@ -578,6 +599,17 @@ function onDelete(b: Book): Promise<void> {
   margin: 10px 0 4px;
   font: 400 12.5px var(--font-ui);
   color: var(--brass-bright);
+}
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+.field--grow {
+  flex: 1;
+  min-width: 0;
+}
+.field--index {
+  flex: 0 0 72px;
 }
 .field {
   display: flex;

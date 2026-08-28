@@ -47,6 +47,9 @@ const showAdd = ref(false)
 const addQuery = ref('')
 // Inline re-resolve field on a no-match card.
 const reIsbn = ref('')
+// Typed title/author for "Confirm with details" (LYCM-124); per selection.
+const typedTitle = ref('')
+const typedAuthor = ref('')
 
 onMounted(() => {
   void store.loadBatches()
@@ -54,6 +57,8 @@ onMounted(() => {
 
 watch(selected, (c) => {
   reIsbn.value = ''
+  typedTitle.value = ''
+  typedAuthor.value = ''
   flash.value = ''
   if (!c || !batch.value) {
     draftFor = null
@@ -161,6 +166,27 @@ async function onReResolve(): Promise<void> {
   const c = selected.value
   if (!c) return
   await store.reResolve(c.id, reIsbn.value)
+}
+
+// "Confirm with details" for a no_match candidate (LYCM-124): a valid ISBN the
+// resolver has nothing for — a new release, mostly — used to be a dead end
+// (re-resolve asks the same source; add-by-title too). The reviewer types the
+// title/author from the book in hand and it shelves like any other confirm.
+const canConfirmWithDetails = computed(() => typedTitle.value.trim() !== '')
+async function onConfirmWithDetails(): Promise<void> {
+  const c = selected.value
+  const batchId = batch.value?.id
+  if (!c || !canConfirmWithDetails.value) return
+  const title = typedTitle.value.trim()
+  await store.confirm(seriesName.value.trim(), seriesIndex.value ?? 0, {
+    title,
+    author: typedAuthor.value.trim(),
+  })
+  if (store.error) return
+  if (batchId != null) clearSeriesDraft(batchId, c.id)
+  typedTitle.value = ''
+  typedAuthor.value = ''
+  flash.value = `✓ Confirmed “${title}” — queued for your library`
 }
 
 // --- Add-book modal: one field, title-search or ISBN ---
@@ -520,6 +546,53 @@ function relTime(iso: string): string {
                 />
                 <button class="btn btn--brass" type="submit" :disabled="busy || !reIsbn.trim()">
                   Re-resolve
+                </button>
+              </form>
+
+              <p class="fallback__lead fallback__lead--or">
+                Or, if the code is right and the book is just too new for the catalogue, confirm it
+                with the details from the book in hand. It will be queued for your library under
+                this ISBN.
+              </p>
+              <form class="fallback__details" @submit.prevent="onConfirmWithDetails">
+                <input
+                  v-model="typedTitle"
+                  class="ing__input"
+                  type="text"
+                  placeholder="Title"
+                  aria-label="Title"
+                />
+                <input
+                  v-model="typedAuthor"
+                  class="ing__input"
+                  type="text"
+                  placeholder="Author"
+                  aria-label="Author"
+                />
+                <div class="fallback__series">
+                  <input
+                    v-model="seriesName"
+                    class="ing__input"
+                    type="text"
+                    placeholder="Series (optional)"
+                    aria-label="Series"
+                  />
+                  <input
+                    v-model.number="seriesIndex"
+                    class="ing__input ing__input--num"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="#"
+                    aria-label="Series number"
+                  />
+                </div>
+                <button
+                  class="btn btn--brass"
+                  type="submit"
+                  :disabled="busy || !canConfirmWithDetails"
+                >
+                  ✓ Confirm with details
                 </button>
               </form>
             </div>
@@ -1200,6 +1273,22 @@ function relTime(iso: string): string {
 }
 .fallback__lead {
   margin: 0 0 12px;
+}
+.fallback__lead--or {
+  margin-top: 14px;
+}
+.fallback__details {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fallback__series {
+  display: flex;
+  gap: 8px;
+}
+.fallback__series .ing__input:first-child {
+  flex: 1;
+  min-width: 0;
 }
 .fallback__form {
   display: flex;

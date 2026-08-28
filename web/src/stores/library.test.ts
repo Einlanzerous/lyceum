@@ -11,10 +11,11 @@ vi.mock('@/api/client', async () => {
     listLibrary: vi.fn(),
     uploadBook: vi.fn(),
     deleteBook: vi.fn(),
+    updateBook: vi.fn(),
   }
 })
 
-import { deleteBook, listLibrary, uploadBook } from '@/api/client'
+import { deleteBook, listLibrary, updateBook, uploadBook } from '@/api/client'
 
 const book = (id: number): Book => ({
   id,
@@ -117,5 +118,50 @@ describe('library store', () => {
     const store = useLibraryStore()
     const result = await store.upload(new File(['x'], 'bad.epub'))
     expect(result).toEqual({ kind: 'error', message: 'not an epub' })
+  })
+
+  it('updateDetails() writes the saved title/author/series back onto the shelf', async () => {
+    vi.mocked(listLibrary).mockResolvedValue([book(1), book(2)])
+    vi.mocked(updateBook).mockResolvedValue({
+      ...book(1),
+      title: 'The Final Empire',
+      series: 'Mistborn',
+      series_index: 1,
+    })
+    const store = useLibraryStore()
+    await store.load()
+
+    await store.updateDetails(1, {
+      title: 'The Final Empire',
+      author: 'Author',
+      series: 'Mistborn',
+      series_index: 1,
+    })
+
+    expect(updateBook).toHaveBeenCalledWith(1, {
+      title: 'The Final Empire',
+      author: 'Author',
+      series: 'Mistborn',
+      series_index: 1,
+    })
+    expect(store.books[0]).toMatchObject({
+      title: 'The Final Empire',
+      series: 'Mistborn',
+      series_index: 1,
+    })
+    expect(store.books[1]!.series).toBeUndefined()
+  })
+
+  it('updateDetails() leaves the shelf alone when the server refuses', async () => {
+    vi.mocked(listLibrary).mockResolvedValue([book(1)])
+    vi.mocked(updateBook).mockRejectedValue(new ApiError(400, 'title is required'))
+    const store = useLibraryStore()
+    await store.load()
+
+    await expect(
+      store.updateDetails(1, { title: '', author: 'Author', series: 'X', series_index: 0 }),
+    ).rejects.toThrow('title is required')
+    expect(store.books[0]).toMatchObject({ title: 'Book 1' })
+    expect(store.books[0]!.series).toBeUndefined()
   })
 })

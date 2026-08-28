@@ -27,7 +27,14 @@ jobs:
           bun-version: "1.3.14"
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          # Pinned, not `stable` (LYCM-131): Wails v2's package loader breaks on each
+          # new Go major until a Wails release catches up, and `stable` moved the
+          # runner to go1.27.0 the week it shipped, failing every build with
+          # `internal error: package "context" without types was imported`. 1.26 is
+          # the last series this job passed on. Keep in sync with
+          # windows-release.yml, which runs the same Wails on the same build; bump
+          # Go and Wails together there and here, after a local `wails build`.
+          go-version: "1.26.x"
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
       # copy-dist.mjs runs `bun run build:native` in web/, which needs vue-tsc —

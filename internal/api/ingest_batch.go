@@ -335,6 +335,12 @@ func (a *API) handleCandidatePick(w http.ResponseWriter, r *http.Request) {
 type confirmRequest struct {
 	Series      string  `json:"series"`
 	SeriesIndex float64 `json:"series_index"`
+	// Title/Author confirm a no_match candidate — one the resolver could not
+	// place at all — from what the reviewer typed (LYCM-124). Ignored on any
+	// other status: a review candidate has real editions (work key, cover) to
+	// pick from, and a ready one is already chosen.
+	Title  string `json:"title"`
+	Author string `json:"author"`
 }
 
 type confirmResponse struct {
@@ -358,10 +364,13 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if title := strings.TrimSpace(req.Title); title != "" && c.Status == store.CandidateNoMatch {
+		c = withTypedEdition(c, title, strings.TrimSpace(req.Author))
+	}
 	inv, saved, err := a.confirmCandidate(ctx, c, strings.TrimSpace(req.Series), req.SeriesIndex)
 	switch {
 	case errors.Is(err, errNoChoice):
-		http.Error(w, "pick an edition before confirming", http.StatusBadRequest)
+		http.Error(w, "pick an edition, or confirm with a typed title, before confirming", http.StatusBadRequest)
 		return
 	case errors.Is(err, errNoISBN):
 		http.Error(w, "candidate has no valid ISBN to confirm", http.StatusBadRequest)
@@ -377,6 +386,22 @@ func (a *API) handleCandidateConfirm(w http.ResponseWriter, r *http.Request) {
 		Candidate: toCandidateJSON(saved),
 		Inventory: toInventoryJSON(inv),
 	})
+}
+
+// withTypedEdition synthesises the edition a reviewer typed for a candidate the
+// resolver could not place (LYCM-124) — typically a new release not yet in Open
+// Library — so the ordinary confirm path shelves it like any other: the
+// inventory row keys on the scanned ISBN with the typed title/author, the
+// acquirer is asked for it, and the candidate records the typed metadata at
+// full confidence. No work key is known, so a later ebook ingest reconciles by
+// ISBN (or title/author) rather than by work. isbn.Valid still gates the
+// confirm downstream: a malformed scan must be corrected first.
+func withTypedEdition(c store.Candidate, title, author string) store.Candidate {
+	e := store.Edition{ID: c.ISBN, ISBN13: c.ISBN, Title: title, Author: author}
+	c.Editions = []store.Edition{e}
+	c.ChosenEditionID = e.ID
+	c.Confidence = 1
+	return c
 }
 
 // confirmCandidate is the shared confirm path (single confirm + batch
@@ -583,6 +608,14 @@ type addCandidateRequest struct {
 // handleBatchAddCandidate appends a single scan/pick to an existing batch — used
 // by add-by-title (the picked edition's ISBN) and manual entry. It dedupes
 // against the batch's existing candidates.
+//
+// Only a row that still holds a place in the batch — ready, review or confirmed
+// — shadows a re-entry of its ISBN. A skipped or no_match row is instead
+// *revived in place*: the re-entry runs through resolveScan again (library
+// dedupe included) and the result is written onto that row, so a reviewer who
+// skips a failed scan and types the ISBN back in, or re-resolves the same code,
+// gets a fresh resolution rather than a "duplicate" of a dead row (LYCM-125).
+// A revive answers 200 with the existing id; an append answers 201.
 func (a *API) handleBatchAddCandidate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	b, ok := a.lookupBatch(w, r)
@@ -600,10 +633,19 @@ func (a *API) handleBatchAddCandidate(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "list candidates", err)
 		return
 	}
+	// A malformed entry normalizes to "" and can match nothing; resolveScan
+	// files it as no_match carrying the raw text, as it does for a bad scan.
+	code, _ := isbn.Normalize(req.ISBN)
 	seen := map[string]bool{}
-	for _, c := range existing {
-		if c.ISBN != "" {
+	var revive *store.Candidate
+	for i := range existing {
+		c := &existing[i]
+		switch {
+		case c.ISBN == "":
+		case candidateShadows(c.Status):
 			seen[c.ISBN] = true
+		case c.ISBN == code && candidateRevivable(c.Status):
+			revive = c // ascending id order, so the most recent dead row wins
 		}
 	}
 
@@ -612,12 +654,51 @@ func (a *API) handleBatchAddCandidate(w http.ResponseWriter, r *http.Request) {
 		source = store.SourceTitle // added from desktop, not a camera capture
 	}
 	c := a.resolveScan(ctx, b.ID, scanJSON{ISBN: req.ISBN, Source: source}, seen)
-	saved, err := a.store.AddCandidate(ctx, c)
+
+	var saved store.Candidate
+	status := http.StatusCreated
+	if revive != nil {
+		r := *revive
+		r.Status, r.Confidence, r.ChosenEditionID, r.Editions = c.Status, c.Confidence, c.ChosenEditionID, c.Editions
+		r.Title, r.Author, r.CoverURL, r.Series, r.SeriesIndex = c.Title, c.Author, c.CoverURL, c.Series, c.SeriesIndex
+		saved, err = a.store.UpdateCandidate(ctx, r)
+		status = http.StatusOK
+	} else {
+		saved, err = a.store.AddCandidate(ctx, c)
+	}
 	if err != nil {
 		serverError(w, "add candidate", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toCandidateJSON(saved))
+
+	// Skipping the last reviewable row closes its batch (closeBatchIfDone), so
+	// the skip-then-retype flow above can land a reviewable row in a confirmed
+	// batch. Reopen it: "confirmed" means nothing is left to review.
+	if b.Status == store.BatchConfirmed && hasReviewable([]store.Candidate{saved}) {
+		if _, err := a.store.SetBatchStatus(ctx, b.ID, store.BatchOpen); err != nil {
+			log.Printf("api: reopen batch %d: %v", b.ID, err)
+		}
+	}
+	writeJSON(w, status, toCandidateJSON(saved))
+}
+
+// candidateShadows reports whether a row with this status still claims its ISBN
+// within the batch, so a re-entry of the same code is a duplicate of it.
+func candidateShadows(status string) bool {
+	switch status {
+	case store.CandidateReady, store.CandidateReview, store.CandidateConfirmed:
+		return true
+	}
+	return false
+}
+
+// candidateRevivable reports whether a re-entry of this row's ISBN should be
+// resolved onto the row itself rather than appended: the row is dead (skipped)
+// or never resolved (no_match), and a second row for the same code would only
+// be a ghost beside it. A duplicate row is neither — it points at the live row
+// that shadowed it and is left alone.
+func candidateRevivable(status string) bool {
+	return status == store.CandidateSkipped || status == store.CandidateNoMatch
 }
 
 // ---- helpers ----
