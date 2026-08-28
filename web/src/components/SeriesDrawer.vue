@@ -10,6 +10,7 @@ import type { Book } from '@/api/types'
 const props = defineProps<{ series: SeriesGroup; arrowLeftPct: number }>()
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'edit', id: number): void
   (e: 'set-finished', id: number, finished: boolean): void
   (e: 'remove', id: number): void
 }>()
@@ -28,7 +29,9 @@ function onSelect(key: string): void {
   const open = menu.value
   menu.value = null
   if (!open) return
-  if (key === 'finish') {
+  if (key === 'edit') {
+    emit('edit', open.book.id)
+  } else if (key === 'finish') {
     emit('set-finished', open.book.id, !isFinished(open.book))
   } else if (key === 'remove') {
     emit('remove', open.book.id)

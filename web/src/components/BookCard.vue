@@ -8,6 +8,7 @@ import { bookMenuItems, isFinished } from '@/library/bookMenu'
 
 const props = defineProps<{ book: Book; pinned?: boolean }>()
 const emit = defineEmits<{
+  (e: 'edit', id: number): void
   (e: 'set-finished', id: number, finished: boolean): void
   (e: 'remove', id: number): void
 }>()
@@ -38,7 +39,8 @@ const menuItems = computed(() => bookMenuItems(props.book))
 
 function onSelect(key: string): void {
   menu.value = null
-  if (key === 'finish') emit('set-finished', props.book.id, !isFinished(props.book))
+  if (key === 'edit') emit('edit', props.book.id)
+  else if (key === 'finish') emit('set-finished', props.book.id, !isFinished(props.book))
   else if (key === 'remove') emit('remove', props.book.id)
 }
 </script>

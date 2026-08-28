@@ -387,12 +387,27 @@ class LyceumClient {
 
   /// `PATCH /books/{id}` — correct the title/author a converted file mangled
   /// (LYCM-58). Title is required server-side; it does not change review state.
-  Future<Book> updateBookMeta(int id, String title, String author) async {
+  ///
+  /// [series] and [seriesIndex] set the book's series (LYCM-129): an empty
+  /// [series] clears it, and null leaves it as the server has it. [seriesIndex]
+  /// is only sent alongside a series; 0 means "no position".
+  Future<Book> updateBookMeta(
+    int id,
+    String title,
+    String author, {
+    String? series,
+    double? seriesIndex,
+  }) async {
     final r = await _http
         .patch(
           _uri('/books/$id'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'title': title, 'author': author}),
+          body: jsonEncode({
+            'title': title,
+            'author': author,
+            'series': ?series,
+            if (series != null) 'series_index': seriesIndex ?? 0,
+          }),
         )
         .timeout(timeout);
     if (r.statusCode != 200) _throw(r);

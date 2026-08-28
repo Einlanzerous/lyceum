@@ -287,7 +287,8 @@ void main() {
         .widgetList<TextField>(find.byType(TextField))
         .map((f) => f.controller!.text)
         .toList();
-    expect(fields, ['Piranesi', 'Clarke, Susanna']);
+    // Title, author, then the (empty) series and number fields (LYCM-129).
+    expect(fields, ['Piranesi', 'Clarke, Susanna', '', '']);
 
     // And saving sends the surviving book's own values.
     await tester.tap(find.text('Save details'));

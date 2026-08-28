@@ -327,3 +327,67 @@ func TestReviewQueueReflectsAMarkedPendingBook(t *testing.T) {
 			pending.ID, single.Finished, queue[0].Finished)
 	}
 }
+
+// PATCH /books/{id} sets, keeps and clears a book's series (LYCM-129): the
+// only other sources are the EPUB's own metadata and the batch-confirm intent,
+// so a grabbed EPUB with none stayed series-less with no way to fix it.
+func TestUpdateBookSeries(t *testing.T) {
+	s := testStore(t)
+	srv := httptest.NewServer(New(s, "").Handler())
+	t.Cleanup(srv.Close)
+	book := seedBook(t, s, "series-edit", "The Final Empire", "Brandon Sanderson", nil)
+	url := srv.URL + "/books/" + strconv.FormatInt(book.ID, 10)
+
+	patch := func(body string) (bookJSON, int) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPatch, url, bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PATCH: %v", err)
+		}
+		defer resp.Body.Close()
+		var got bookJSON
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+				t.Fatalf("decode PATCH: %v", err)
+			}
+		}
+		return got, resp.StatusCode
+	}
+
+	got, code := patch(`{"title":"The Final Empire","author":"Brandon Sanderson","series":" Mistborn ","series_index":1}`)
+	if code != http.StatusOK || got.Series != "Mistborn" || got.SeriesIndex == nil || *got.SeriesIndex != 1 {
+		t.Fatalf("set series = %d %+v, want 200 Mistborn #1", code, got)
+	}
+
+	// Title/author-only edits (the review queue's form before this change)
+	// leave the series alone.
+	got, _ = patch(`{"title":"Mistborn: The Final Empire","author":"Brandon Sanderson"}`)
+	if got.Title != "Mistborn: The Final Empire" || got.Series != "Mistborn" || got.SeriesIndex == nil {
+		t.Fatalf("title-only patch = %+v, want the series kept", got)
+	}
+
+	// The index alone moves the book within its series.
+	got, _ = patch(`{"title":"Mistborn: The Final Empire","author":"Brandon Sanderson","series_index":1.5}`)
+	if got.Series != "Mistborn" || got.SeriesIndex == nil || *got.SeriesIndex != 1.5 {
+		t.Fatalf("index-only patch = %+v, want Mistborn #1.5", got)
+	}
+
+	if _, code := patch(`{"title":"X","author":"","series_index":-1}`); code != http.StatusBadRequest {
+		t.Fatalf("negative series_index = %d, want 400", code)
+	}
+
+	// An empty series clears both.
+	got, _ = patch(`{"title":"The Final Empire","author":"Brandon Sanderson","series":""}`)
+	if got.Series != "" || got.SeriesIndex != nil {
+		t.Fatalf("cleared = %+v, want no series and no index", got)
+	}
+	reloaded, err := s.GetBook(context.Background(), book.ID)
+	if err != nil {
+		t.Fatalf("GetBook: %v", err)
+	}
+	if reloaded.Series != "" || reloaded.SeriesIndex != 0 {
+		t.Fatalf("stored after clear = %q #%v, want none", reloaded.Series, reloaded.SeriesIndex)
+	}
+}

@@ -219,9 +219,21 @@ describe('ingest QC review (LYCM-58)', () => {
       body = JSON.parse(init?.body as string)
       return jsonResponse(200, { id: 3, title: 'Fixed', author: 'Real', cover_url: '' })
     })
-    await expect(updateBook(3, 'Fixed', 'Real')).resolves.toMatchObject({ title: 'Fixed' })
+    await expect(updateBook(3, { title: 'Fixed', author: 'Real' })).resolves.toMatchObject({
+      title: 'Fixed',
+    })
     expect(fetchFn).toHaveBeenCalledWith('/books/3', expect.objectContaining({ method: 'PATCH' }))
     expect(body).toEqual({ title: 'Fixed', author: 'Real' })
+  })
+
+  it('updateBook carries series fields only when given (LYCM-129)', async () => {
+    let body: Record<string, unknown> = {}
+    mockFetch((_url, init) => {
+      body = JSON.parse(init?.body as string)
+      return jsonResponse(200, { id: 3, title: 'Fixed', author: 'Real', cover_url: '' })
+    })
+    await updateBook(3, { title: 'Fixed', author: 'Real', series: 'Mistborn', series_index: 2 })
+    expect(body).toEqual({ title: 'Fixed', author: 'Real', series: 'Mistborn', series_index: 2 })
   })
 
   it('replaceCover POSTs multipart with field "file"', async () => {

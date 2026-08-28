@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia'
-import { ApiError, deleteBook, listLibrary, setBookFinished, uploadBook } from '@/api/client'
+import {
+  ApiError,
+  type BookPatch,
+  deleteBook,
+  listLibrary,
+  setBookFinished,
+  updateBook,
+  uploadBook,
+} from '@/api/client'
 import type { Book } from '@/api/types'
+import { applySaved } from '@/library/bookDraft'
 
 /** Outcome of an upload attempt, so the view can message each case distinctly. */
 export type UploadResult =
@@ -100,6 +109,18 @@ export const useLibraryStore = defineStore('library', {
         }
         throw err
       }
+    },
+
+    /**
+     * Save edited title/author/series for a book (LYCM-129). The local book is
+     * updated from the server's reply — not optimistically — so a series that
+     * fails to save never briefly rolls the book into a card that then snaps
+     * back.
+     */
+    async updateDetails(bookId: number, patch: BookPatch): Promise<void> {
+      const saved = await updateBook(bookId, patch)
+      const book = this.books.find((b) => b.id === bookId)
+      if (book) applySaved(book, saved)
     },
 
     /** Upload several files, returning a result per file in input order. */
