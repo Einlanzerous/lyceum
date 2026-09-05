@@ -32,7 +32,11 @@ const (
 )
 
 func main() {
-	app := NewApp(winstate.DefaultPath())
+	statePath := winstate.DefaultPath()
+	if statePath == "" {
+		println("lyceum-desktop: no user config dir; window geometry won't persist")
+	}
+	app := NewApp(statePath)
 
 	width, height := defaultWidth, defaultHeight
 	startState := options.Normal

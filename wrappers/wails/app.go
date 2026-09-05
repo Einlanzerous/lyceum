@@ -29,12 +29,45 @@ func NewApp(stateFile string) *App {
 
 // startup captures the runtime context and restores the saved window position.
 // Size and maximised-ness are applied via options in main.go — position has no
-// launch option, only this runtime call.
+// launch option, only a runtime call.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	if a.savedOK && a.saved.PosValid && !a.saved.Maximised {
-		rt.WindowSetPosition(ctx, a.saved.X, a.saved.Y)
+	if !a.savedOK || !a.saved.PosValid || a.saved.Maximised {
+		return
 	}
+	if offscreen(ctx, a.saved.X, a.saved.Y) {
+		return
+	}
+	// WindowGetPosition reports absolute virtual-screen coordinates, but
+	// WindowSetPosition treats its arguments as offsets from the current
+	// monitor's work-area origin (winc SetPos adds workRect.Left/Top; Pos
+	// doesn't subtract it). Restoring the saved absolute position directly
+	// therefore drifts by that origin on every launch whenever the work area
+	// doesn't start at (0,0) — e.g. a left- or top-docked taskbar. Set, read
+	// back, and correct by the observed delta so the position round-trips.
+	rt.WindowSetPosition(ctx, a.saved.X, a.saved.Y)
+	gx, gy := rt.WindowGetPosition(ctx)
+	if dx, dy := gx-a.saved.X, gy-a.saved.Y; dx != 0 || dy != 0 {
+		rt.WindowSetPosition(ctx, a.saved.X-dx, a.saved.Y-dy)
+	}
+}
+
+// offscreen reports whether (x, y) cannot lie on any attached screen. Wails
+// exposes screen sizes but not origins, so this bounds the check by the widest
+// possible virtual-desktop extent: it catches a position saved on a
+// since-detached monitor in the common laid-out-right/below arrangements
+// without ever rejecting a position that is still reachable.
+func offscreen(ctx context.Context, x, y int) bool {
+	screens, err := rt.ScreenGetAll(ctx)
+	if err != nil || len(screens) == 0 {
+		return false
+	}
+	var totalW, totalH int
+	for _, s := range screens {
+		totalW += s.Size.Width
+		totalH += s.Size.Height
+	}
+	return x <= -totalW || x >= totalW || y <= -totalH || y >= totalH
 }
 
 // beforeClose persists the window geometry, then lets the close proceed.
