@@ -25,7 +25,7 @@ RUN bun run build
 # 2) Build the Go binary with the SPA embedded. Copy the freshly built dist over
 #    the checked-in placeholder before `go build` so //go:embed picks up the real
 #    bundle. Pure Go (pgx, archive/zip) => CGO disabled for a static binary.
-FROM golang:1.25-bookworm AS build
+FROM golang:1.26-bookworm AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -59,7 +59,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # 3) Runtime: slim Alpine with ca-certificates (HTTPS cover fetch + SMTP TLS) and
 #    wget (busybox) for the compose healthcheck. Blobs live on a mounted volume
 #    (LYCEUM_DATA_DIR); the books watch dir is mounted read-only at run time.
-FROM alpine:3.20 AS runtime
+FROM alpine:3.23 AS runtime
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/lyceum /usr/local/bin/lyceum
 ENV LYCEUM_ADDR=":4005" \
