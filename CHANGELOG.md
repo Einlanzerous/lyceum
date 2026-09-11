@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/Einlanzerous/lyceum/compare/v1.13.0...v1.13.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **deploy:** build on go 1.26 and alpine 3.23, both EOL as they were (SERV-170) ([#100](https://github.com/Einlanzerous/lyceum/issues/100)) ([5d93063](https://github.com/Einlanzerous/lyceum/commit/5d93063b4386dd9df0894e2fc6f2352efacb6c8b))
+
 ## [1.13.0](https://github.com/Einlanzerous/lyceum/compare/v1.12.0...v1.13.0) (2026-08-28)
 
 
