@@ -64,7 +64,8 @@ jobs:
               - "migrations/**"
               - ".github/workflows/backend.yml"
 
-      # go-version-file pins to the exact toolchain in go.mod (1.25.x); setup-go
+      # go-version-file pins to the exact toolchain in go.mod (1.26.x, the same one
+      # deploy/Dockerfile builds the shipped binary with — SERV-170); setup-go
       # caches the module + build cache keyed on go.sum.
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.go == 'true'
