@@ -35,6 +35,14 @@ jobs:
           # windows-release.yml, which runs the same Wails on the same build; bump
           # Go and Wails together there and here, after a local `wails build`.
           go-version: "1.26.x"
+      # Vet + unit-test the wrapper module before the build: winstate is the
+      # window-geometry persistence logic (LYCM-305); vet compiles package main
+      # under the same tags `wails build` uses.
+      - name: Vet + test wrapper module
+        working-directory: wrappers/wails
+        run: |
+          go vet -tags desktop,production ./...
+          go test ./winstate/
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
       # copy-dist.mjs runs `bun run build:native` in web/, which needs vue-tsc —
