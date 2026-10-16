@@ -4,6 +4,7 @@ import {
   memberStatus,
   pinnedBookId,
   resumeIndex,
+  seriesNames,
   volumeNumber,
   type ShelfItem,
 } from './series'
@@ -310,5 +311,27 @@ describe('pinnedBookId', () => {
       }),
     ]
     expect(pinnedBookId(books)).toBeNull()
+  })
+})
+
+describe('seriesNames', () => {
+  it('lists each series once, in its first-seen casing, sorted', () => {
+    const books = [
+      book({ id: 1, series: 'The Expanse', series_index: 4 }),
+      book({ id: 2, series: 'the expanse ', series_index: 5 }),
+      book({ id: 3, series: 'Shades of Magic', series_index: 2 }),
+      book({ id: 4, series: 'Noumena' }),
+      book({ id: 5 }),
+      book({ id: 6, series: '   ' }),
+    ]
+    expect(seriesNames(books)).toEqual(['Noumena', 'Shades of Magic', 'The Expanse'])
+  })
+
+  it('includes a lone member, which the shelf renders as a plain card', () => {
+    expect(seriesNames([book({ id: 1, series: 'Noumena', series_index: 2 })])).toEqual(['Noumena'])
+  })
+
+  it('is empty for a library with no series', () => {
+    expect(seriesNames([book({ id: 1 }), book({ id: 2 })])).toEqual([])
   })
 })

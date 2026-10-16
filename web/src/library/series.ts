@@ -106,6 +106,21 @@ function groupBySeries(books: readonly Book[]): {
   return { groups, loose }
 }
 
+/**
+ * The distinct series names already in the library, for suggesting a series
+ * while assigning one (LYCM-97). Names that group together on the shelf
+ * (same {@link normalizeKey}) collapse to one suggestion in their first-seen
+ * casing — the spelling the series card already shows — so picking a
+ * suggestion always joins the existing series rather than starting a near-twin.
+ * Sorted case-insensitively for a stable list.
+ */
+export function seriesNames(books: readonly Book[]): string[] {
+  const { groups } = groupBySeries(books)
+  return [...groups.values()]
+    .map((g) => g.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+}
+
 /** Members in reading order: by series_index, then title. */
 function orderMembers(members: readonly Book[]): Book[] {
   return [...members].sort((a, b) => {

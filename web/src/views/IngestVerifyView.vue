@@ -6,9 +6,15 @@ import { useIngestStore, type QueueFilter } from '@/stores/ingest'
 import type { Candidate, Edition } from '@/api/ingest'
 import { useAuthStore } from '@/stores/auth'
 import { clearSeriesDraft, loadSeriesDraft, saveSeriesDraft } from '@/library/seriesDraft'
+import { seriesNames } from '@/library/series'
+import { useLibraryStore } from '@/stores/library'
 
 const store = useIngestStore()
 const auth = useAuthStore()
+const library = useLibraryStore()
+// Series already in the library, offered as suggestions on the series inputs
+// (LYCM-97) so a multi-book series keeps one spelling without retyping.
+const knownSeries = computed(() => seriesNames(library.books))
 const initial = computed(() => auth.initial)
 const {
   batch,
@@ -53,6 +59,9 @@ const typedAuthor = ref('')
 
 onMounted(() => {
   void store.loadBatches()
+  // Suggestions only — reuse a library already loaded by the shelf, and a
+  // failed load just means no suggestions, never a blocked verify.
+  if (library.books.length === 0) void library.load()
 })
 
 watch(selected, (c) => {
@@ -249,6 +258,10 @@ function relTime(iso: string): string {
 
 <template>
   <section class="ing">
+    <!-- Series suggestions shared by both series inputs below (LYCM-97). -->
+    <datalist id="ing-known-series">
+      <option v-for="name in knownSeries" :key="name" :value="name" />
+    </datalist>
     <!-- Top bar -->
     <header class="ing__bar">
       <RouterLink to="/" class="ing__brand" title="Back to library">
@@ -489,6 +502,8 @@ function relTime(iso: string): string {
                       v-model="seriesName"
                       class="ing__input"
                       type="text"
+                      list="ing-known-series"
+                      autocomplete="off"
                       placeholder="Assign to a series (optional)"
                     />
                     <input
@@ -574,6 +589,8 @@ function relTime(iso: string): string {
                     v-model="seriesName"
                     class="ing__input"
                     type="text"
+                    list="ing-known-series"
+                    autocomplete="off"
                     placeholder="Series (optional)"
                     aria-label="Series"
                   />
