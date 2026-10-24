@@ -107,3 +107,14 @@ jobs:
             echo "::error file=.env.example::.env.example must set LYCEUM_AUTH to true or false (LYCM-116) — a copied .env without it boots a household as a single shared account"
             exit 1
           fi
+
+  # docs/architecture.archify.json is the repo's system map (LYCM-137). This
+  # checks that every cited source path and line still exists at the pinned
+  # commit. A stale pin only warns; a broken path or out-of-range line fails.
+  # Runs on every PR and main push with no path filter, so drift is always seen.
+  architecture-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Architecture map is renderable, and say if it has gone stale (SERV-159)
+        run: scripts/architecture-map-check.sh

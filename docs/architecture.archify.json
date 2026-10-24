@@ -1,0 +1,502 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Lyceum — system map",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "viewBox": [
+      1190,
+      660
+    ],
+    "repository": {
+      "url": "https://github.com/Einlanzerous/lyceum",
+      "revision": "d833fa0dd91a9c68dd8cf3c203abfa1d4dcb96a5"
+    },
+    "views": [
+      {
+        "id": "reading-path",
+        "label": "Reading and position sync",
+        "focus": [
+          "web",
+          "api",
+          "sync",
+          "postgres"
+        ],
+        "note": "The epub.js reader debounces a CFI position to the API, which validates it structurally and keeps the newest write per device."
+      },
+      {
+        "id": "ingest-path",
+        "label": "Getting a book in",
+        "focus": [
+          "api",
+          "ingest",
+          "postgres",
+          "bindery"
+        ],
+        "note": "Uploads and the folder watcher share one ingest core; wanted books are requested from the acquisition service."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web reader",
+      "sublabel": "Vue SPA · epub.js",
+      "tag": "embedded in the binary",
+      "pos": [
+        40,
+        160
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "web/src/reader/useReader.ts",
+          "line": 203,
+          "label": "epub.js book"
+        },
+        {
+          "path": "web/src/reader/sync.ts",
+          "line": 39,
+          "label": "debounced position PUT"
+        },
+        {
+          "path": "web/embed.go",
+          "label": "SPA embed"
+        }
+      ]
+    },
+    {
+      "id": "wails",
+      "type": "frontend",
+      "label": "Windows app",
+      "sublabel": "Wails shell · same SPA",
+      "tag": "thin client",
+      "pos": [
+        40,
+        280
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "wrappers/wails/main.go",
+          "line": 33,
+          "label": "asset server"
+        },
+        {
+          "path": "web/src/api/base.ts",
+          "line": 32,
+          "label": "native API base"
+        }
+      ]
+    },
+    {
+      "id": "flutter",
+      "type": "frontend",
+      "label": "Android app",
+      "sublabel": "Flutter · reader WebView",
+      "tag": "native library",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "mobile/lyceum/lib/api/client.dart",
+          "line": 71,
+          "label": "reader page URL"
+        },
+        {
+          "path": "mobile/lyceum/lib/features/reader/reader_screen.dart",
+          "line": 48,
+          "label": "WebView"
+        }
+      ]
+    },
+    {
+      "id": "cfaccess",
+      "type": "security",
+      "label": "Access verifier",
+      "sublabel": "Cloudflare JWT · JWKS",
+      "tag": "optional SSO",
+      "pos": [
+        360,
+        30
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/api/cfaccess.go",
+          "line": 145,
+          "label": "Verify"
+        },
+        {
+          "path": "cmd/lyceum/main.go",
+          "line": 253,
+          "label": "wired as an option"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Lyceum server",
+      "sublabel": "Go · one static binary",
+      "tag": "serves API and SPA",
+      "pos": [
+        360,
+        150
+      ],
+      "size": [
+        160,
+        370
+      ],
+      "sources": [
+        {
+          "path": "cmd/lyceum/main.go",
+          "line": 442,
+          "label": "mux and listener"
+        },
+        {
+          "path": "internal/api/api.go",
+          "line": 283,
+          "label": "routes"
+        },
+        {
+          "path": "deploy/Dockerfile",
+          "label": "image build"
+        }
+      ]
+    },
+    {
+      "id": "bindery",
+      "type": "external",
+      "label": "Bindery",
+      "sublabel": "acquisition service",
+      "tag": "needs base URL and key",
+      "pos": [
+        360,
+        570
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/acquire/bindery.go",
+          "line": 187,
+          "label": "Want"
+        }
+      ]
+    },
+    {
+      "id": "ingest",
+      "type": "backend",
+      "label": "EPUB ingest",
+      "sublabel": "parse · dedupe · covers",
+      "tag": "upload and folder watch",
+      "pos": [
+        680,
+        150
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/api/ingest.go",
+          "line": 86,
+          "label": "ingestEPUB"
+        },
+        {
+          "path": "internal/api/watch.go",
+          "line": 72,
+          "label": "folder poller"
+        },
+        {
+          "path": "internal/epub/epub.go",
+          "line": 118,
+          "label": "OPF parse"
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "type": "backend",
+      "label": "Position sync",
+      "sublabel": "EPUB CFI · last write wins",
+      "tag": "validated server side",
+      "pos": [
+        680,
+        250
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/api/sync.go",
+          "line": 57,
+          "label": "PUT /sync"
+        },
+        {
+          "path": "internal/epub/cfi.go",
+          "line": 58,
+          "label": "ParseCFI"
+        },
+        {
+          "path": "internal/store/repo.go",
+          "line": 283,
+          "label": "LWW upsert"
+        }
+      ]
+    },
+    {
+      "id": "eidolon",
+      "type": "backend",
+      "label": "Eidolon API",
+      "sublabel": "location · chapter text",
+      "tag": "bearer scope eidolon:read",
+      "pos": [
+        680,
+        350
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/api/eidolon.go",
+          "line": 35,
+          "label": "location"
+        },
+        {
+          "path": "internal/api/auth.go",
+          "line": 94,
+          "label": "requireScope"
+        }
+      ]
+    },
+    {
+      "id": "delivery",
+      "type": "backend",
+      "label": "Send to Kindle",
+      "sublabel": "queue · SMTP sender",
+      "tag": "off unless SMTP set",
+      "pos": [
+        680,
+        450
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/delivery/delivery.go",
+          "line": 81,
+          "label": "SendBook"
+        },
+        {
+          "path": "internal/api/deliveries.go",
+          "line": 64,
+          "label": "worker dispatcher"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "books · positions · users",
+      "tag": "embedded migrations",
+      "pos": [
+        990,
+        150
+      ],
+      "size": [
+        170,
+        264
+      ],
+      "sources": [
+        {
+          "path": "internal/store/migrate.go",
+          "line": 26,
+          "label": "Migrate"
+        },
+        {
+          "path": "migrations/0001_init.up.sql",
+          "line": 20,
+          "label": "reading_positions"
+        }
+      ]
+    },
+    {
+      "id": "kindle",
+      "type": "external",
+      "label": "Kindle mailbox",
+      "sublabel": "SMTP relay",
+      "tag": "STARTTLS by default",
+      "pos": [
+        990,
+        450
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web-api",
+      "from": "web",
+      "to": "api",
+      "label": "REST",
+      "variant": "emphasis",
+      "labelAt": [
+        248,
+        182
+      ]
+    },
+    {
+      "id": "wails-api",
+      "from": "wails",
+      "to": "api",
+      "label": "REST, CORS",
+      "labelAt": [
+        248,
+        302
+      ]
+    },
+    {
+      "id": "flutter-api",
+      "from": "flutter",
+      "to": "api",
+      "label": "REST + page",
+      "labelAt": [
+        248,
+        422
+      ]
+    },
+    {
+      "id": "access-api",
+      "from": "cfaccess",
+      "to": "api",
+      "label": "JWT to session",
+      "variant": "security",
+      "labelAt": [
+        440,
+        122
+      ]
+    },
+    {
+      "id": "api-bindery",
+      "from": "api",
+      "to": "bindery",
+      "label": "want a book",
+      "variant": "dashed",
+      "labelAt": [
+        440,
+        545
+      ]
+    },
+    {
+      "id": "api-ingest",
+      "from": "api",
+      "to": "ingest",
+      "label": "upload",
+      "labelAt": [
+        640,
+        172
+      ]
+    },
+    {
+      "id": "api-sync",
+      "from": "api",
+      "to": "sync",
+      "label": "PUT /sync",
+      "labelAt": [
+        640,
+        272
+      ]
+    },
+    {
+      "id": "api-eidolon",
+      "from": "api",
+      "to": "eidolon",
+      "label": "bearer",
+      "labelAt": [
+        640,
+        372
+      ]
+    },
+    {
+      "id": "api-delivery",
+      "from": "api",
+      "to": "delivery",
+      "label": "enqueue",
+      "labelAt": [
+        640,
+        472
+      ]
+    },
+    {
+      "id": "ingest-pg",
+      "from": "ingest",
+      "to": "postgres",
+      "label": "books",
+      "labelAt": [
+        880,
+        172
+      ]
+    },
+    {
+      "id": "sync-pg",
+      "from": "sync",
+      "to": "postgres",
+      "label": "positions",
+      "variant": "emphasis",
+      "labelAt": [
+        955,
+        272
+      ]
+    },
+    {
+      "id": "eidolon-pg",
+      "from": "eidolon",
+      "to": "postgres",
+      "label": "read",
+      "labelAt": [
+        880,
+        372
+      ]
+    },
+    {
+      "id": "delivery-kindle",
+      "from": "delivery",
+      "to": "kindle",
+      "label": "SMTP",
+      "variant": "dashed"
+    }
+  ],
+  "boundaries": []
+}
