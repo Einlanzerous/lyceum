@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe('createPositionSync.schedule', () => {
   it('debounces rapid page turns into one PUT with the latest position', async () => {
-    const put = vi.fn<[PositionInput], Promise<void>>().mockResolvedValue()
+    const put = vi.fn<(pos: PositionInput) => Promise<void>>().mockResolvedValue()
     const sync = createPositionSync(7, { put, deviceId: 'dev-1', debounceMs: 1000 })
 
     sync.schedule(info('cfi-a'))

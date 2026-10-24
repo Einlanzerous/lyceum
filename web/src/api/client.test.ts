@@ -20,7 +20,7 @@ import {
 import type { Book, Position } from './types'
 
 function mockFetch(impl: (url: string, init?: RequestInit) => Response | Promise<Response>) {
-  const fn = vi.fn(impl as never)
+  const fn = vi.fn(impl)
   vi.stubGlobal('fetch', fn)
   return fn
 }
