@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/Einlanzerous/lyceum/compare/v1.13.1...v1.13.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **web:** bump @xmldom/xmldom and toolchain past known advisories (LYCM-138) ([#103](https://github.com/Einlanzerous/lyceum/issues/103)) ([d833fa0](https://github.com/Einlanzerous/lyceum/commit/d833fa0dd91a9c68dd8cf3c203abfa1d4dcb96a5))
+
 ## [1.13.1](https://github.com/Einlanzerous/lyceum/compare/v1.13.0...v1.13.1) (2026-10-16)
 
 
