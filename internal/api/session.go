@@ -17,9 +17,9 @@ import (
 //
 // Two token namespaces live side by side and are never interchangeable:
 //
-//   - Service tokens (LYCEUM_API_TOKENS, see auth.go) are scoped credentials for
-//     other *programs* — Project Eidolon and send-to-kindle. They are matched
-//     against an in-memory table by requireScope.
+//   - Service tokens (the service_tokens table, see auth.go) are scoped credentials for
+//     other *programs* — Project Eidolon, send-to-kindle and Satlink. They are matched
+//     by hash against that table on every call by requireScope.
 //   - User tokens (this file) are credentials for *people*. They live in the
 //     user_tokens table, are matched by SHA-256, and guard the reader core.
 //

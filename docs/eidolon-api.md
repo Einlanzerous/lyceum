@@ -13,11 +13,13 @@ scope:
 Authorization: Bearer <token>
 ```
 
-Tokens are issued via the server's `LYCEUM_API_TOKENS` env (see
-[README](../README.md#ecosystem--agent-integration-lycm-400)). A missing or
-unknown token returns `401`; a valid token without `eidolon:read` returns `403`.
-If no tokens are configured the integration surface is closed (every request
-`401`s) — issue a token to enable it.
+Tokens are database service tokens, issued on the server with
+`lyceum service-token mint --label <consumer> --scope eidolon:read` (see
+[README](../README.md#ecosystem--agent-integration-lycm-400)). A missing,
+unknown or revoked token returns `401` (one body for all three); a valid token
+without `eidolon:read` returns `403`; a database error returns `503`. If no
+tokens exist the integration surface is closed (every request `401`s) — mint a
+token to enable it.
 
 ## GET /eidolon/books/{id}/location  (LYCM-403)
 

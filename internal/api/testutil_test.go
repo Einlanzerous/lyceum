@@ -3,7 +3,10 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"testing"
+
+	"github.com/magos/lyceum/internal/store"
 )
 
 // syntheticEPUB synthesizes a small but structurally valid EPUB with two spine
@@ -82,4 +85,23 @@ func syntheticEPUB(t *testing.T) []byte {
 		t.Fatalf("zip close: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// mintServiceToken mints a database service token the way the CLI does and
+// returns its plaintext.
+func mintServiceToken(t *testing.T, s *store.Store, label, scope string) string {
+	t.Helper()
+	_, plaintext, err := s.MintServiceToken(context.Background(), label, scope, "test")
+	if err != nil {
+		t.Fatalf("MintServiceToken(%s, %s): %v", label, scope, err)
+	}
+	return plaintext
+}
+
+// seedServiceTokens mints the eidolon:read and delivery:send tokens most
+// handler tests carry.
+func seedServiceTokens(t *testing.T, s *store.Store) (read, send string) {
+	t.Helper()
+	return mintServiceToken(t, s, "eidolon-test", store.ScopeEidolonRead),
+		mintServiceToken(t, s, "kindle-test", store.ScopeDeliverySend)
 }

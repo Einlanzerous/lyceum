@@ -24,10 +24,12 @@ Discovery of book ids uses the existing **unauthenticated** `GET /library`
 - **Token:** the Lyceum operator provisions one and shares the string
   out-of-band:
   ```sh
-  # on the Lyceum server, e.g. in .env
-  LYCEUM_API_TOKENS=eidolon-tts=eidolon:read
+  # on the Lyceum server; prints the token once, stores only its hash
+  docker exec lyceum lyceum service-token mint --label eidolon-tts --scope eidolon:read
   ```
-  Then every Eidolon request sends `Authorization: Bearer eidolon-tts`.
+  Then every Eidolon request sends `Authorization: Bearer <that token>`.
+  `lyceum service-token list` shows labels, scopes and last use; `revoke` cuts a
+  token off on its next request.
 - **Fail-closed:** with no token configured, or a missing/unknown token, every
   `/eidolon/*` request is `401`; a valid token without `eidolon:read` is `403`.
 
@@ -71,7 +73,7 @@ curl -s -H "$H" "$B/eidolon/books/8/chapter?index=5"          # by spine index
 ## What Eidolon needs from the Lyceum operator
 
 1. The reachable base URL (`http://<host>:<LYCEUM_ADDR port>`).
-2. An `eidolon:read` token (provisioned via `LYCEUM_API_TOKENS`).
+2. An `eidolon:read` token (minted with `lyceum service-token mint`).
 3. Confirmation the box is reachable from where Eidolon runs.
 
 Lyceum repo: `~/projects/lyceum` · API source: `internal/api/eidolon.go` ·

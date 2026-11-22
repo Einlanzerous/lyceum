@@ -184,11 +184,10 @@ func TestConnectErrorsOmitPassword(t *testing.T) {
 // struct wholesale.
 //
 // The config is a literal, not envConfig(): the Makefile does `include .env` +
-// `export`, so every variable in a developer's .env is in this process, and
-// buildAPIOptions log.Fatalf's on a malformed LYCEUM_API_TOKENS — which exits
-// the test binary and fails the whole package without so much as naming the
-// test that did it. A literal also makes "which branches logged" a property of
-// this file rather than of whoever ran it.
+// `export`, so every variable in a developer's .env is in this process and
+// the environment could flip which branches narrate themselves, and a literal
+// makes "which branches logged" a property of this file rather than of whoever
+// ran it.
 func TestStartupLogsOmitDatabaseCredentials(t *testing.T) {
 	// Every branch that narrates itself, turned on, in both its enabled and
 	// disabled voice where it has one. SMTP is deliberately left out: setting a

@@ -121,13 +121,18 @@ type Store interface {
 	ListSessions(ctx context.Context, userID int64, currentPlaintext string) ([]store.Session, error)
 	RevokeSession(ctx context.Context, userID, id int64) error
 	ListMembers(ctx context.Context) ([]store.Member, error)
+
+	// Service tokens (LYCM-140): the database-backed credentials behind
+	// requireScope, and the count GET /admin/users/active reports.
+	CheckServiceToken(ctx context.Context, plaintext, wantScope string) (store.ServiceTokenCheck, error)
+	AuditRefusedServiceToken(ctx context.Context, plaintext, label, reason string) error
+	CountActiveUsers(ctx context.Context, window time.Duration) (int, time.Time, error)
 }
 
 // API bundles the dependencies the handlers need.
 type API struct {
 	store    Store
 	dataDir  string
-	auth     *TokenAuth       // bearer-token table for the /eidolon + delivery routes
 	delivery *deliveryConfig  // "Send to Kindle" dispatcher + policy (nil when unconfigured)
 	acquirer Acquirer         // ISBN -> DRM-free copy requester (logging no-op by default)
 	covers   coverart.Fetcher // ISBN -> canonical cover art (nil = use embedded covers only)
@@ -160,6 +165,9 @@ type API struct {
 	// mobileBaseURL is the origin minted invites advertise (LYCM-102). Empty
 	// leaves sign_in_url out of the payload; see WithMobileBaseURL.
 	mobileBaseURL string
+
+	// routes is every pattern Handler registered, in order. Tests read it.
+	routes []string
 }
 
 // blobCacheControl is the caching policy for the cover and EPUB blob routes.
@@ -179,13 +187,6 @@ func (a *API) blobCacheControl() string {
 
 // Option configures an API at construction time.
 type Option func(*API)
-
-// WithAuth installs the bearer-token table guarding the ecosystem hooks
-// (/eidolon/*) and the send-to-kindle route. Without it those routes are
-// closed (every request 401s); core reader routes are unaffected.
-func WithAuth(auth *TokenAuth) Option {
-	return func(a *API) { a.auth = auth }
-}
 
 // WithCoverFetcher installs a source of canonical cover art (e.g. Open Library)
 // consulted at ingest. When set, a freshly-ingested book with a usable ISBN
@@ -282,80 +283,91 @@ func New(s Store, dataDir string, opts ...Option) *API {
 // mount it (it does not register /healthz, which main.go owns).
 func (a *API) Handler() *http.ServeMux {
 	mux := http.NewServeMux()
+	// handle registers a route and records its pattern, so a test can walk the
+	// real route table instead of a list that can drift from it.
+	a.routes = nil
+	handle := func(pattern string, h http.HandlerFunc) {
+		a.routes = append(a.routes, pattern)
+		mux.HandleFunc(pattern, h)
+	}
 
 	// Sign-in (LYCM-801). Redeeming an invite is the one route that must stay
 	// reachable without a session — it is how a client gets one.
-	mux.HandleFunc("POST /auth/session", a.handleAuthSession)
+	handle("POST /auth/session", a.handleAuthSession)
 	// Cloudflare Access SSO (LYCM-803). The browser SPA, sitting behind the CF
 	// edge, calls this on load to trade its tunnel-verified identity for a
 	// session — no second login. Like /auth/session it must stay reachable
 	// without a session; the CF JWT is the credential.
-	mux.HandleFunc("POST /auth/sso/cloudflare", a.handleAuthCFAccess)
-	mux.HandleFunc("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
-	mux.HandleFunc("GET /auth/me", a.requireUser(a.handleAuthMe))
-	mux.HandleFunc("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
+	handle("POST /auth/sso/cloudflare", a.handleAuthCFAccess)
+	handle("DELETE /auth/session", a.requireUser(a.handleAuthSignOut))
+	handle("GET /auth/me", a.requireUser(a.handleAuthMe))
+	handle("PATCH /auth/me", a.requireUser(a.handleAuthUpdateMe))
 	// "Add a device" (LYCM-105) — a key for yourself, not for a housemate, so it
 	// needs no ownership. See handleSelfInvite for why it is not an /admin route.
-	mux.HandleFunc("POST /auth/invite", a.requireUser(a.handleSelfInvite))
+	handle("POST /auth/invite", a.requireUser(a.handleSelfInvite))
 
 	// Your devices. A password-free session never expires, so the only real risk
 	// is a lost or lent device staying signed in forever — this is how its owner
 	// sees it and cuts it off.
-	mux.HandleFunc("GET /auth/sessions", a.requireUser(a.handleSessionList))
-	mux.HandleFunc("DELETE /auth/sessions/{id}", a.requireUser(a.handleSessionRevoke))
+	handle("GET /auth/sessions", a.requireUser(a.handleSessionList))
+	handle("DELETE /auth/sessions/{id}", a.requireUser(a.handleSessionRevoke))
 
 	// Household administration (LYCM-801). Owner only. POST /admin/users is the
 	// hook Purser's `lyceum` connector calls (SERV-38).
-	mux.HandleFunc("POST /admin/users", a.requireOwner(a.handleAdminUserCreate))
-	mux.HandleFunc("GET /admin/users", a.requireOwner(a.handleAdminUserList))
-	mux.HandleFunc("POST /admin/users/{id}/invite", a.requireOwner(a.handleAdminUserInvite))
-	mux.HandleFunc("DELETE /admin/users/{id}", a.requireOwner(a.handleAdminUserDelete))
+	handle("POST /admin/users", a.requireOwner(a.handleAdminUserCreate))
+	handle("GET /admin/users", a.requireOwner(a.handleAdminUserList))
+	handle("POST /admin/users/{id}/invite", a.requireOwner(a.handleAdminUserInvite))
+	handle("DELETE /admin/users/{id}", a.requireOwner(a.handleAdminUserDelete))
+
+	// Active-user count for Satlink (LYCM-140). Service token only, no parameter,
+	// and a count: a session cannot reach it and it reaches nothing else.
+	handle("GET /admin/users/active", a.requireScope(ScopeAdminRead, a.handleActiveUsers))
 
 	// The reader core. Every route below is the household's own read/write
 	// surface and requires a signed-in user (LYCM-801) — distinct from the
 	// scoped service tokens that guard the ecosystem hooks further down.
-	mux.HandleFunc("POST /upload", a.requireUser(a.handleUpload))
-	mux.HandleFunc("GET /library", a.requireUser(a.handleLibrary))
+	handle("POST /upload", a.requireUser(a.handleUpload))
+	handle("GET /library", a.requireUser(a.handleLibrary))
 
 	// Inventory (LYCM-601): the scan/capture surface LYCM-602 feeds.
-	mux.HandleFunc("POST /inventory", a.requireUser(a.handleInventoryCreate))
-	mux.HandleFunc("GET /inventory", a.requireUser(a.handleInventoryList))
+	handle("POST /inventory", a.requireUser(a.handleInventoryCreate))
+	handle("GET /inventory", a.requireUser(a.handleInventoryList))
 
 	// ISBN ingest batch review (LYCM-603): upload scans, verify matches on the
 	// desktop, confirm into inventory.
-	mux.HandleFunc("POST /ingest/batches", a.requireUser(a.handleBatchCreate))
-	mux.HandleFunc("GET /ingest/batches", a.requireUser(a.handleBatchList))
-	mux.HandleFunc("GET /ingest/batches/{id}", a.requireUser(a.handleBatchGet))
-	mux.HandleFunc("POST /ingest/batches/{id}/candidates", a.requireUser(a.handleBatchAddCandidate))
-	mux.HandleFunc("POST /ingest/batches/{id}/confirm-ready", a.requireUser(a.handleBatchConfirmReady))
-	mux.HandleFunc("POST /ingest/candidates/{id}/pick", a.requireUser(a.handleCandidatePick))
-	mux.HandleFunc("POST /ingest/candidates/{id}/confirm", a.requireUser(a.handleCandidateConfirm))
-	mux.HandleFunc("POST /ingest/candidates/{id}/skip", a.requireUser(a.handleCandidateSkip))
-	mux.HandleFunc("GET /ingest/search", a.requireUser(a.handleIngestSearch))
+	handle("POST /ingest/batches", a.requireUser(a.handleBatchCreate))
+	handle("GET /ingest/batches", a.requireUser(a.handleBatchList))
+	handle("GET /ingest/batches/{id}", a.requireUser(a.handleBatchGet))
+	handle("POST /ingest/batches/{id}/candidates", a.requireUser(a.handleBatchAddCandidate))
+	handle("POST /ingest/batches/{id}/confirm-ready", a.requireUser(a.handleBatchConfirmReady))
+	handle("POST /ingest/candidates/{id}/pick", a.requireUser(a.handleCandidatePick))
+	handle("POST /ingest/candidates/{id}/confirm", a.requireUser(a.handleCandidateConfirm))
+	handle("POST /ingest/candidates/{id}/skip", a.requireUser(a.handleCandidateSkip))
+	handle("GET /ingest/search", a.requireUser(a.handleIngestSearch))
 
-	mux.HandleFunc("PUT /sync", a.requireUser(a.handleSyncPut))
-	mux.HandleFunc("GET /sync", a.requireUser(a.handleSyncGet))
-	mux.HandleFunc("GET /books/{id}", a.requireUser(a.handleGetBook))
-	mux.HandleFunc("GET /books/{id}/cover", a.requireUser(a.handleCover))
-	mux.HandleFunc("GET /books/{id}/file", a.requireUser(a.handleFile))
-	mux.HandleFunc("DELETE /books/{id}", a.requireUser(a.handleDelete))
-	mux.HandleFunc("PATCH /books/{id}", a.requireUser(a.handleUpdateBook))
-	mux.HandleFunc("PUT /books/{id}/finished", a.requireUser(a.handleSetFinished))
+	handle("PUT /sync", a.requireUser(a.handleSyncPut))
+	handle("GET /sync", a.requireUser(a.handleSyncGet))
+	handle("GET /books/{id}", a.requireUser(a.handleGetBook))
+	handle("GET /books/{id}/cover", a.requireUser(a.handleCover))
+	handle("GET /books/{id}/file", a.requireUser(a.handleFile))
+	handle("DELETE /books/{id}", a.requireUser(a.handleDelete))
+	handle("PATCH /books/{id}", a.requireUser(a.handleUpdateBook))
+	handle("PUT /books/{id}/finished", a.requireUser(a.handleSetFinished))
 
 	// Ingest QC review queue (LYCM-58): held books plus approve / replace-cover.
-	mux.HandleFunc("GET /ingest/review", a.requireUser(a.handleReviewList))
-	mux.HandleFunc("POST /books/{id}/approve", a.requireUser(a.handleApprove))
-	mux.HandleFunc("POST /books/{id}/inventory", a.requireUser(a.handleLinkInventory))
-	mux.HandleFunc("POST /books/{id}/cover", a.requireUser(a.handleReplaceCover))
-	mux.HandleFunc("POST /books/{id}/cover/refetch", a.requireUser(a.handleRefetchCover))
+	handle("GET /ingest/review", a.requireUser(a.handleReviewList))
+	handle("POST /books/{id}/approve", a.requireUser(a.handleApprove))
+	handle("POST /books/{id}/inventory", a.requireUser(a.handleLinkInventory))
+	handle("POST /books/{id}/cover", a.requireUser(a.handleReplaceCover))
+	handle("POST /books/{id}/cover/refetch", a.requireUser(a.handleRefetchCover))
 
 	// "Send to Kindle" (LYCM-402). Both routes require the delivery:send scope.
-	mux.HandleFunc("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
-	mux.HandleFunc("GET /books/{id}/deliveries", a.requireScope(ScopeDeliverySend, a.handleListDeliveries))
+	handle("POST /books/{id}/send-to-kindle", a.requireScope(ScopeDeliverySend, a.handleSendToKindle))
+	handle("GET /books/{id}/deliveries", a.requireScope(ScopeDeliverySend, a.handleListDeliveries))
 
 	// Project Eidolon hooks (LYCM-403/404). Read-only; require eidolon:read.
-	mux.HandleFunc("GET /eidolon/books/{id}/location", a.requireScope(ScopeEidolonRead, a.handleEidolonLocation))
-	mux.HandleFunc("GET /eidolon/books/{id}/chapter", a.requireScope(ScopeEidolonRead, a.handleEidolonChapter))
+	handle("GET /eidolon/books/{id}/location", a.requireScope(ScopeEidolonRead, a.handleEidolonLocation))
+	handle("GET /eidolon/books/{id}/chapter", a.requireScope(ScopeEidolonRead, a.handleEidolonChapter))
 	return mux
 }
 

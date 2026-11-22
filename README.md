@@ -147,7 +147,7 @@ trips the guard and still starts with no configuration at all.
 
 Two token namespaces exist and are never interchangeable: **session tokens** (in
 the database, guard the reader core, belong to people) and the **service tokens**
-below (`LYCEUM_API_TOKENS`, scoped, belong to programs). A service token cannot
+below (database rows, scoped, issued with `lyceum service-token`, belong to programs). A service token cannot
 read a library; a session cannot drive a Kindle delivery.
 
 | Route | |
@@ -167,9 +167,13 @@ same book on the same shared tablet without colliding.
 
 ## Ecosystem & Agent Integration (LYCM-400)
 
-Phase 4 adds two integrations on top of the core, both gated by static bearer
-tokens (`LYCEUM_API_TOKENS`, scopes `eidolon:read` / `delivery:send`). See
-[`.env.example`](.env.example) for every knob.
+Phase 4 adds two integrations on top of the core, both gated by service
+tokens: hashed database rows, one scope each (`eidolon:read` / `delivery:send`),
+issued and revoked on the server with `lyceum service-token mint|revoke|list`
+(revocation takes effect on the next request; every issue and revoke is written
+to `audit_log`). A third scope, `admin:read`, reaches only the count-only
+`GET /admin/users/active` ([docs/active-users-api.md](docs/active-users-api.md)).
+See [`.env.example`](.env.example) for every knob.
 
 - **Send to Kindle** (LYCM-401/402) — configure an SMTP relay
   (`LYCEUM_SMTP_*`) and a `LYCEUM_KINDLE_ADDR`; deliveries run off an in-process

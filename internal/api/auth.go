@@ -1,79 +1,27 @@
 package api
 
 import (
-	"fmt"
+	"context"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
+
+	"github.com/magos/lyceum/internal/store"
 )
 
 // Scopes guarding the integration surface. Core reader routes (/library,
 // /upload, /sync, blob serving) are unauthenticated per existing policy; only
-// the ecosystem hooks added in LYCM-400 require a token.
+// the ecosystem hooks added in LYCM-400 (and the admin:read count) require a token.
 const (
 	// ScopeEidolonRead authorizes the read-only Project Eidolon hooks
 	// (/eidolon/*): current reading location and raw chapter text.
-	ScopeEidolonRead = "eidolon:read"
+	ScopeEidolonRead = store.ScopeEidolonRead
 	// ScopeDeliverySend authorizes triggering a "Send to Kindle" delivery.
-	ScopeDeliverySend = "delivery:send"
+	ScopeDeliverySend = store.ScopeDeliverySend
+	// ScopeAdminRead authorizes GET /admin/users/active (a count, nothing else).
+	ScopeAdminRead = store.ScopeAdminRead
 )
-
-// TokenAuth is a static, config-driven bearer-token table: it maps each token
-// to the set of scopes it carries. It is built once at boot from
-// LYCEUM_API_TOKENS (see ParseTokens) and is read-only thereafter, so it needs
-// no locking.
-type TokenAuth struct {
-	tokens map[string]map[string]bool
-}
-
-// ParseTokens builds a TokenAuth from a config string of the form
-//
-//	token1=eidolon:read,token2=eidolon:read|delivery:send
-//
-// Entries are comma-separated; within an entry the token and its
-// pipe-separated scope list are joined by '='. Whitespace around any field is
-// trimmed. An empty spec yields an empty table (every protected route then
-// 401s — the integration surface is closed until tokens are issued). It errors
-// on a malformed entry (missing '=', empty token, or an unknown scope) so a
-// typo in config fails loudly at boot rather than silently locking everyone
-// out.
-func ParseTokens(spec string) (*TokenAuth, error) {
-	a := &TokenAuth{tokens: map[string]map[string]bool{}}
-	for _, entry := range strings.Split(spec, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		token, scopeList, ok := strings.Cut(entry, "=")
-		token = strings.TrimSpace(token)
-		if !ok || token == "" {
-			return nil, fmt.Errorf("api: malformed token entry %q (want token=scope|scope)", entry)
-		}
-		scopes := map[string]bool{}
-		for _, s := range strings.Split(scopeList, "|") {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			if s != ScopeEidolonRead && s != ScopeDeliverySend {
-				return nil, fmt.Errorf("api: unknown scope %q for token (valid: %s, %s)", s, ScopeEidolonRead, ScopeDeliverySend)
-			}
-			scopes[s] = true
-		}
-		if len(scopes) == 0 {
-			return nil, fmt.Errorf("api: token %q has no scopes", token)
-		}
-		a.tokens[token] = scopes
-	}
-	return a, nil
-}
-
-// allows reports whether the given bearer token carries scope.
-func (a *TokenAuth) allows(token, scope string) bool {
-	if a == nil || token == "" {
-		return false
-	}
-	return a.tokens[token][scope]
-}
 
 // bearerToken extracts the token from an "Authorization: Bearer <token>"
 // header, returning "" when the header is absent or not a Bearer credential.
@@ -87,22 +35,57 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(h[len(scheme):])
 }
 
-// requireScope wraps next so it only runs for a request bearing a token with
-// the required scope. A missing or unrecognized token is 401; a recognized
-// token that lacks the scope is 403. When no token table is configured the
-// route is closed (401) — the ecosystem hooks are opt-in via config.
+// requireScope wraps next so it only runs for a request bearing a database
+// service token (LYCM-140) that carries the required scope.
+//
+//   - No token, an unknown one and a revoked one are all 401 with one body, so
+//     the response never says which. A presented unknown or revoked token is
+//     audited, once per hash prefix per hour.
+//   - A live token without the scope is 403.
+//   - A database error is 503, never an allow.
+//
+// There is no cache: a cache would delay revocation, and revocation is the
+// point. The table is read on every call; these routes carry little traffic.
 func (a *API) requireScope(scope string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
-		if token == "" || a.auth == nil || a.auth.tokens[token] == nil {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="lyceum"`)
-			http.Error(w, "missing or invalid token", http.StatusUnauthorized)
+		if token == "" {
+			refuseToken(w)
 			return
 		}
-		if !a.auth.allows(token, scope) {
+		check, err := a.store.CheckServiceToken(r.Context(), token, scope)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			a.auditRefused(r.Context(), token, "", "unknown")
+			refuseToken(w)
+			return
+		case err != nil:
+			log.Printf("auth: check service token: %v", err)
+			http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
+			return
+		case check.Revoked:
+			a.auditRefused(r.Context(), token, check.Label, "revoked")
+			refuseToken(w)
+			return
+		case check.Scope != scope:
 			http.Error(w, "token lacks required scope "+scope, http.StatusForbidden)
 			return
 		}
+		// The label, never the token, is what identifies a consumer in logs.
+		log.Printf("auth: service token %q (%s) %s %s", check.Label, scope, r.Method, r.URL.Path)
 		next(w, r)
+	}
+}
+
+func refuseToken(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="lyceum"`)
+	http.Error(w, "missing or invalid token", http.StatusUnauthorized)
+}
+
+// auditRefused records a refused presentation. A failure to audit is logged and
+// does not change the answer: the caller is refused either way.
+func (a *API) auditRefused(ctx context.Context, token, label, reason string) {
+	if err := a.store.AuditRefusedServiceToken(ctx, token, label, reason); err != nil {
+		log.Printf("auth: audit refused service token: %v", err)
 	}
 }

@@ -100,7 +100,6 @@ type config struct {
 	mobileBaseURL string // LYCEUM_MOBILE_BASE_URL — e.g. https://lyceum-direct.example.com
 
 	// Phase 4 (LYCM-400) ecosystem config, env-only.
-	apiTokens      string          // LYCEUM_API_TOKENS — bearer tokens for /eidolon + delivery (LYCM-405)
 	smtp           delivery.Config // LYCEUM_SMTP_* — "Send to Kindle" relay (LYCM-401)
 	kindleAddr     string          // LYCEUM_KINDLE_ADDR — default delivery recipient
 	kindleAutoSend bool            // LYCEUM_KINDLE_AUTO_SEND — deliver every upload (LYCM-402)
@@ -141,7 +140,6 @@ func envConfig() config {
 		cfAccessTeamDomain: os.Getenv("CF_ACCESS_TEAM_DOMAIN"),
 		cfAccessAUD:        os.Getenv("CF_ACCESS_AUD"),
 
-		apiTokens: os.Getenv("LYCEUM_API_TOKENS"),
 		smtp: delivery.Config{
 			Host:     os.Getenv("LYCEUM_SMTP_HOST"),
 			Port:     envOrInt("LYCEUM_SMTP_PORT", 587),
@@ -228,18 +226,13 @@ func envBool(key string, def bool) bool {
 	return def
 }
 
-// buildAPIOptions assembles the api.Options from config: the bearer-token table
-// (LYCM-405) and, when an SMTP relay is configured, the "Send to Kindle"
+// buildAPIOptions assembles the api.Options from config: user auth and, when an SMTP relay is configured, the "Send to Kindle"
 // dispatcher (LYCM-401/402). It returns a cleanup func to drain the dispatcher
 // on shutdown.
 func buildAPIOptions(cfg config, st *store.Store) ([]api.Option, func()) {
 	cleanup := func() {}
 
-	auth, err := api.ParseTokens(cfg.apiTokens)
-	if err != nil {
-		log.Fatalf("parse LYCEUM_API_TOKENS: %v", err)
-	}
-	opts := []api.Option{api.WithAuth(auth), api.WithUserAuth(cfg.userAuth)}
+	opts := []api.Option{api.WithUserAuth(cfg.userAuth)}
 	if cfg.userAuth {
 		log.Printf("auth: reader core requires a signed-in user")
 	} else {
@@ -381,6 +374,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "set-series" {
 		runSetSeries(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "service-token" {
+		runServiceToken(os.Args[2:])
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "mint-token" {

@@ -38,7 +38,7 @@ const (
 )
 
 // tokenPrefix marks a Lyceum user token, so it is recognizable in a log or a
-// paste and distinguishable from a LYCEUM_API_TOKENS service token.
+// paste and distinguishable from a lys_ service token.
 const tokenPrefix = "lyc_"
 
 // InviteTTL bounds how long an unredeemed invite stays usable. Redeeming one
@@ -98,12 +98,16 @@ func hashToken(plaintext string) string {
 
 // newToken generates a fresh 256-bit token, returned as a prefixed,
 // URL-safe string.
-func newToken() (string, error) {
+func newToken() (string, error) { return newTokenWithPrefix(tokenPrefix) }
+
+// newTokenWithPrefix is newToken with a caller-chosen prefix, so a service token
+// (lys_) can never be mistaken for a user session (lyc_).
+func newTokenWithPrefix(prefix string) (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("store: generate token: %w", err)
 	}
-	return tokenPrefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
+	return prefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 // CreateUser adds a member. The email is normalized; a collision with an
