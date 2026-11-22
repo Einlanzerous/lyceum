@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/Einlanzerous/lyceum/compare/v1.13.2...v1.14.0) (2026-11-22)
+
+
+### Features
+
+* **auth:** database service tokens, audit log and active-users count (LYCM-140) ([#106](https://github.com/Einlanzerous/lyceum/issues/106)) ([6def367](https://github.com/Einlanzerous/lyceum/commit/6def3672f2f0e971909d3855da39b17e56f5b910))
+
 ## [1.13.2](https://github.com/Einlanzerous/lyceum/compare/v1.13.1...v1.13.2) (2026-10-25)
 
 
