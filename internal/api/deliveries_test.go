@@ -47,20 +47,18 @@ func (f *fakeSender) calls() []sentBook {
 	return append([]sentBook(nil), f.sent...)
 }
 
-const (
-	tokenRead = "eid-token"
-	tokenSend = "snd-token"
-)
+// tokenRead and tokenSend are database service tokens (eidolon:read and
+// delivery:send), re-minted by seedServiceTokens for each server a test builds.
+// They are package variables so the many call sites need not thread them; the
+// api tests do not run in parallel.
+var tokenRead, tokenSend string
 
 func newDeliveryServer(t *testing.T, s *store.Store, sender BookSender, kindleAddr string, autoSend bool) *httptest.Server {
 	t.Helper()
-	auth, err := ParseTokens(tokenRead + "=eidolon:read," + tokenSend + "=delivery:send")
-	if err != nil {
-		t.Fatalf("ParseTokens: %v", err)
-	}
+	tokenRead, tokenSend = seedServiceTokens(t, s)
 	disp := NewDispatcher(s, sender, 2, 5*time.Second)
 	t.Cleanup(disp.Close)
-	srv := httptest.NewServer(New(s, "", WithAuth(auth), WithDeliveries(disp, kindleAddr, autoSend)).Handler())
+	srv := httptest.NewServer(New(s, "", WithDeliveries(disp, kindleAddr, autoSend)).Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }

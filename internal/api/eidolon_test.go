@@ -38,11 +38,8 @@ func seedRealBook(t *testing.T, s *store.Store, hash string, data []byte) store.
 
 func newEidolonServer(t *testing.T, s *store.Store) *httptest.Server {
 	t.Helper()
-	auth, err := ParseTokens(tokenRead + "=eidolon:read," + tokenSend + "=delivery:send")
-	if err != nil {
-		t.Fatalf("ParseTokens: %v", err)
-	}
-	srv := httptest.NewServer(New(s, "", WithAuth(auth)).Handler())
+	tokenRead, tokenSend = seedServiceTokens(t, s)
+	srv := httptest.NewServer(New(s, "").Handler())
 	t.Cleanup(srv.Close)
 	return srv
 }

@@ -23,6 +23,15 @@ import (
 // is unavailable.
 func testStore(t *testing.T) *store.Store {
 	t.Helper()
+	s, _ := testStoreAndPool(t)
+	return s
+}
+
+// testStoreAndPool is testStore plus the pool behind it, for tests that must
+// reach past the store API (backdating a timestamp, closing the pool to fail a
+// query).
+func testStoreAndPool(t *testing.T) (*store.Store, *pgxpool.Pool) {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping DB-backed test")
@@ -40,7 +49,7 @@ func testStore(t *testing.T) *store.Store {
 		t.Fatalf("Migrate: %v", err)
 	}
 	truncate(ctx, t, pool)
-	return store.New(pool, t.TempDir())
+	return store.New(pool, t.TempDir()), pool
 }
 
 // connectSchema opens a pool pinned to its own Postgres schema via search_path,
@@ -84,7 +93,7 @@ func truncate(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	// and the schema insists on it. Clear the members and every credential
 	// instead, so each case starts from a lone, token-less owner (LYCM-801).
 	if _, err := pool.Exec(ctx,
-		`DELETE FROM user_tokens; DELETE FROM users WHERE NOT is_owner`); err != nil {
+		`DELETE FROM user_tokens; DELETE FROM users WHERE NOT is_owner; DELETE FROM service_tokens; DELETE FROM audit_log`); err != nil {
 		t.Fatalf("reset users: %v", err)
 	}
 }

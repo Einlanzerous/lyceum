@@ -581,18 +581,15 @@ func TestDisplayNameRoundTrip(t *testing.T) {
 }
 
 // TestServiceTokensCannotReachTheReaderCore guards the namespace split: an
-// eidolon:read token is a credential for a *program*, and must not double as a
+// database eidolon:read token is a credential for a *program*, and must not double as a
 // household member's session.
 func TestServiceTokensCannotReachTheReaderCore(t *testing.T) {
 	s := testStore(t)
-	auth, err := ParseTokens("svc-token=eidolon:read")
-	if err != nil {
-		t.Fatalf("ParseTokens: %v", err)
-	}
-	srv := httptest.NewServer(New(s, "", WithAuth(auth), WithUserAuth(true)).Handler())
+	svc := mintServiceToken(t, s, "svc", store.ScopeEidolonRead)
+	srv := httptest.NewServer(New(s, "", WithUserAuth(true)).Handler())
 	t.Cleanup(srv.Close)
 
-	if resp := do(t, http.MethodGet, srv.URL+"/library", "svc-token", nil); resp.StatusCode != http.StatusUnauthorized {
+	if resp := do(t, http.MethodGet, srv.URL+"/library", svc, nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("service token reached /library: %d, want 401", resp.StatusCode)
 	}
 
