@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"time"
 )
@@ -35,7 +36,11 @@ func (a *API) handleActiveUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	n, asOf, err := a.store.CountActiveUsers(r.Context(), activeWindow)
 	if err != nil {
-		serverError(w, "count active users", err)
+		// 503, not serverError's 500: the count is unavailable, which is what the
+		// contract tells Satlink to expect, and the same answer requireScope gives
+		// when the database cannot be reached. The body names no error detail.
+		log.Printf("api: count active users: %v", err)
+		http.Error(w, "active-user count unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, activeUsersJSON{

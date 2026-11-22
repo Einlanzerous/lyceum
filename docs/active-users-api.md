@@ -26,7 +26,7 @@ the old id; both tokens are valid in between and no restart is needed.
 | `200` | the count below |
 | `401` | no token, unknown token or revoked token (one body for all three) |
 | `403` | a live token without `admin:read` |
-| `503` | the database is unreachable, **or** `LYCEUM_AUTH` is off (see below) |
+| `503` | the database is unreachable or the count query fails, **or** `LYCEUM_AUTH` is off (see below) |
 
 ## GET /admin/users/active
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -423,4 +424,30 @@ func mustRead(t *testing.T, resp *http.Response) []byte {
 func decodeBytes[T any](t *testing.T, b []byte) T {
 	t.Helper()
 	return decode[T](t, &http.Response{Body: io.NopCloser(strings.NewReader(string(b)))})
+}
+
+// failingCount is a store whose count query fails while token lookup still works,
+// so the failure under test is the handler's, not requireScope's.
+type failingCount struct{ *store.Store }
+
+func (failingCount) CountActiveUsers(context.Context, time.Duration) (int, time.Time, error) {
+	return 0, time.Time{}, errors.New("boom: secret detail")
+}
+
+// A failed count query is 503 with a short reason and no count, never a 500 and
+// never {active: 0}.
+func TestActiveUsersCountFailureIs503(t *testing.T) {
+	s := testStore(t)
+	admin := mintServiceToken(t, s, "satlink", store.ScopeAdminRead)
+	srv := httptest.NewServer(New(failingCount{s}, "", WithUserAuth(true)).Handler())
+	t.Cleanup(srv.Close)
+
+	resp := do(t, http.MethodGet, srv.URL+"/admin/users/active", admin, nil)
+	body := string(mustRead(t, resp))
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	if strings.Contains(body, "active\"") || strings.Contains(body, "{") || strings.Contains(body, "boom") {
+		t.Fatalf("body = %q, want a short reason with no count and no error detail", body)
+	}
 }
