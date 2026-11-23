@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/Einlanzerous/lyceum/compare/v1.14.0...v1.14.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **web:** native dialogs, focus rings, menu keyboard nav, Firefox 160 floor (LYCM-142) ([#108](https://github.com/Einlanzerous/lyceum/issues/108)) ([0b9fc31](https://github.com/Einlanzerous/lyceum/commit/0b9fc3169c3ebaa864666263a139ad6fbfeecfef))
+
 ## [1.14.0](https://github.com/Einlanzerous/lyceum/compare/v1.13.2...v1.14.0) (2026-11-22)
 
 
