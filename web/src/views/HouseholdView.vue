@@ -13,6 +13,7 @@
 
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import ModalDialog from '@/components/ModalDialog.vue'
 import {
   AdminDisabledError,
   inviteMember,
@@ -327,7 +328,7 @@ $ export LYCEUM_AUTH=true
     <!-- Remove: the one destructive act here. Name exactly what is lost (their -->
     <!-- bookmarks) and exactly what is not (the shelf), because the fear is that -->
     <!-- removing a person removes their books. -->
-    <div v-if="confirmRemove" class="scrim" role="dialog" aria-modal="true">
+    <ModalDialog v-if="confirmRemove" @close="confirmRemove = null">
       <div class="confirm">
         <div class="confirm__title">Remove {{ confirmRemove.display_name }}?</div>
         <p class="confirm__body">
@@ -341,7 +342,7 @@ $ export LYCEUM_AUTH=true
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   </section>
 </template>
 
@@ -552,7 +553,6 @@ $ export LYCEUM_AUTH=true
   border: 1px solid var(--border-strong);
   color: var(--text);
   font: 500 13.5px var(--font-ui);
-  outline: none;
 }
 .newbie__hint {
   margin: 10px 0 0;
@@ -618,16 +618,6 @@ $ export LYCEUM_AUTH=true
   color: var(--dim);
 }
 
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(8, 8, 7, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
 .confirm {
   width: 400px;
   max-width: 100%;

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import InviteReveal from './InviteReveal.vue'
+import InviteQr from './InviteQr.vue'
 import type { Invite, User } from '@/api/auth'
 
 // The QR renders through the `qrcode` package; nothing here is about that. The
@@ -88,7 +89,7 @@ describe('a second reveal in the same session', () => {
 // The failure is invisible here and total on the scanning device.
 describe('the sign-in URL the QR is given', () => {
   const qrProps = (wrapper: ReturnType<typeof mountReveal>) =>
-    wrapper.findComponent({ name: 'InviteQr' }).props() as {
+    wrapper.findComponent(InviteQr).props() as {
       token: string
       signInUrl?: string
     }

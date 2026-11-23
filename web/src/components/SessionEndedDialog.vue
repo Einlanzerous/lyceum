@@ -13,6 +13,7 @@
 
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import ModalDialog from '@/components/ModalDialog.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -24,7 +25,11 @@ async function signInAgain(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="auth.endedReason" class="scrim" role="dialog" aria-modal="true">
+  <ModalDialog
+    v-if="auth.endedReason"
+    :dismissable="false"
+    style="--modal-bg: rgba(8, 8, 7, 0.78); --modal-blur: 3px"
+  >
     <div class="sheet">
       <div class="sheet__icon" aria-hidden="true">🔒</div>
 
@@ -47,22 +52,10 @@ async function signInAgain(): Promise<void> {
 
       <button type="button" class="sheet__btn" @click="signInAgain">Sign in</button>
     </div>
-  </div>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.scrim {
-  position: fixed;
-  inset: 0;
-  /* Above the reader chrome: this must be the only thing you can act on. */
-  z-index: 80;
-  background: rgba(8, 8, 7, 0.78);
-  backdrop-filter: blur(3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
 .sheet {
   width: 420px;
   max-width: 100%;

@@ -2,8 +2,8 @@ import { defineConfig, devices } from '@playwright/test'
 
 // Reader smoke (LYCM-204): epub.js renders into a real iframe, so this is the
 // acceptance path the unit tests cannot cover. It drives the system Chrome
-// (channel 'chrome') against a running dev server + backend — no bundled
-// browser download. Bring the stack up first (see web/e2e/README.md), or set
+// (channel 'chrome') and Playwright's bundled Firefox (`bunx playwright install
+// firefox`) against a running dev server + backend. Bring the stack up first (see web/e2e/README.md), or set
 // PLAYWRIGHT_BASE_URL to point elsewhere.
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5180'
 
@@ -16,8 +16,11 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL,
-    channel: 'chrome',
     headless: true,
   },
-  projects: [{ name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' } }],
+  projects: [
+    { name: 'chrome', use: { ...devices['Desktop Chrome'], channel: 'chrome' } },
+    // Firefox is the primary browser (CLAUDE.md "Browser target").
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+  ],
 })

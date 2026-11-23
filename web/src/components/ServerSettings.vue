@@ -6,6 +6,7 @@
 import { ref } from 'vue'
 import { useServer } from '@/api/useServer'
 import { normalizeServerUrl } from '@/api/base'
+import { isPlainEnter } from '@/library/keys'
 
 const emit = defineEmits<{ saved: [] }>()
 
@@ -68,7 +69,7 @@ async function onTest(): Promise<void> {
         autocorrect="off"
         spellcheck="false"
         placeholder="http://your-server:8080"
-        @keyup.enter="onSave"
+        @keydown.enter="isPlainEnter($event) && onSave()"
       />
       <button type="button" class="conn__btn conn__btn--ghost" @click="onTest">Test</button>
       <button type="button" class="conn__btn conn__btn--brass" @click="onSave">Save</button>
@@ -113,7 +114,6 @@ async function onTest(): Promise<void> {
   font: 500 14px var(--font-ui);
 }
 .conn__input:focus {
-  outline: none;
   border-color: var(--brass);
 }
 .conn__btn {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
+import ModalDialog from './ModalDialog.vue'
 
 // An argosy-style search: an overlay that opens above the shelf on demand
 // (icon, "/", or Cmd/Ctrl-K) rather than a bar living permanently in the chrome.
@@ -34,62 +35,49 @@ function clear(): void {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="search">
-      <div v-if="open" class="search" @keydown.esc.prevent="emit('close')">
-        <div class="search__backdrop" @click="emit('close')" />
-        <div class="search__panel" role="dialog" aria-label="Search your library">
-          <div class="search__field">
-            <span class="search__icon" aria-hidden="true">⌕</span>
-            <input
-              ref="input"
-              :value="modelValue"
-              type="text"
-              class="search__input"
-              placeholder="Search by title or author…"
-              autocomplete="off"
-              spellcheck="false"
-              aria-label="Search your library"
-              @input="onInput"
-            />
-            <button
-              v-if="modelValue"
-              type="button"
-              class="search__clear"
-              aria-label="Clear search"
-              @click="clear"
-            >
-              ✕
-            </button>
-            <kbd class="search__hint">esc</kbd>
-          </div>
-          <div v-if="modelValue.trim()" class="search__meta">
-            {{ resultCount }} {{ resultCount === 1 ? 'match' : 'matches' }}
-          </div>
-        </div>
+  <!-- A native modal <dialog> (LYCM-142): Esc, the backdrop click, the inert page -->
+  <!-- and focus return to whatever opened the search all come from ModalDialog. -->
+  <ModalDialog v-if="open" class="search" aria-label="Search your library" @close="emit('close')">
+    <div class="search__panel">
+      <div class="search__field">
+        <span class="search__icon" aria-hidden="true">⌕</span>
+        <input
+          ref="input"
+          :value="modelValue"
+          type="text"
+          class="search__input"
+          placeholder="Search by title or author…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Search your library"
+          @input="onInput"
+        />
+        <button
+          v-if="modelValue"
+          type="button"
+          class="search__clear"
+          aria-label="Clear search"
+          @click="clear"
+        >
+          ✕
+        </button>
+        <kbd class="search__hint">esc</kbd>
       </div>
-    </Transition>
-  </Teleport>
+      <div v-if="modelValue.trim()" class="search__meta">
+        {{ resultCount }} {{ resultCount === 1 ? 'match' : 'matches' }}
+      </div>
+    </div>
+  </ModalDialog>
 </template>
 
 <style scoped>
 .search {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: clamp(60px, 14vh, 140px);
+  --modal-bg: rgba(8, 8, 7, 0.44);
+  --modal-align: flex-start;
+  --modal-pad: clamp(60px, 14dvh, 140px) 0 0;
 }
-.search__backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 8, 7, 0.44);
-  backdrop-filter: blur(2px);
-}
-:root[data-theme='light'] .search__backdrop {
-  background: rgba(28, 26, 23, 0.28);
+:root[data-theme='light'] .search {
+  --modal-bg: rgba(28, 26, 23, 0.28);
 }
 .search__panel {
   position: relative;
@@ -116,7 +104,6 @@ function clear(): void {
   background: transparent;
   color: var(--text);
   font: 500 16px var(--font-ui);
-  outline: none;
 }
 .search__input::placeholder {
   color: var(--dim);
@@ -141,33 +128,5 @@ function clear(): void {
   padding-left: 4px;
   font: 500 12px var(--font-ui);
   color: var(--muted);
-}
-
-.search-enter-active,
-.search-leave-active {
-  transition: opacity 0.16s ease;
-}
-.search-enter-active .search__panel,
-.search-leave-active .search__panel {
-  transition:
-    transform 0.16s ease,
-    opacity 0.16s ease;
-}
-.search-enter-from,
-.search-leave-to {
-  opacity: 0;
-}
-.search-enter-from .search__panel,
-.search-leave-to .search__panel {
-  transform: translateY(-8px);
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .search-enter-active,
-  .search-leave-active,
-  .search-enter-active .search__panel,
-  .search-leave-active .search__panel {
-    transition: none;
-  }
 }
 </style>

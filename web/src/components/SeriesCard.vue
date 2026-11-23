@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { coverSrc } from '@/api/coverSrc'
 import { formatProgress } from '@/api/progress'
 import type { SeriesGroup } from '@/library/series'
+import { isPlainEnter } from '@/library/keys'
 
 // continueBookId is the volume to resume when this series is the pinned "current
 // read": it turns the Continue chip into a direct link into that book, rather
@@ -29,7 +30,7 @@ const progressLabel = computed(() => formatProgress(props.series.progress))
     :aria-expanded="open"
     :title="`${series.name} — ${count} books`"
     @click="$emit('toggle')"
-    @keydown.enter.prevent="$emit('toggle')"
+    @keydown.enter.prevent="isPlainEnter($event) && $emit('toggle')"
     @keydown.space.prevent="$emit('toggle')"
   >
     <!-- Fanned stack: two offset layers peek out behind the top cover. -->

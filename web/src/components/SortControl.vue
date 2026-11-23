@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { SORT_OPTIONS, type SortDir, type SortKey } from '@/library/sort'
+import { menuItems, navigateMenu } from '@/library/menuNav'
 
 const props = defineProps<{ sortKey: SortKey; dir: SortDir }>()
 const emit = defineEmits<{
@@ -10,18 +11,45 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+const trigger = ref<HTMLButtonElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
+
+const OPTIONS = '[role="option"]'
 
 const currentLabel = computed(
   () => SORT_OPTIONS.find((o) => o.key === props.sortKey)?.label ?? 'Sort',
 )
 const dirLabel = computed(() => (props.dir === 'asc' ? 'Ascending' : 'Descending'))
 
+// Opening lands focus on the current option; closing from the keyboard (a pick or
+// Escape) hands it back to the trigger.
+async function openMenu(): Promise<void> {
+  open.value = true
+  await nextTick()
+  const opts = menuItems(menu.value, OPTIONS)
+  ;(opts.find((o) => o.getAttribute('aria-selected') === 'true') ?? opts[0])?.focus()
+}
+function closeToTrigger(): void {
+  open.value = false
+  trigger.value?.focus()
+}
 function toggle(): void {
-  open.value = !open.value
+  if (open.value) open.value = false
+  else void openMenu()
 }
 function select(key: SortKey): void {
   emit('update:sortKey', key)
-  open.value = false
+  closeToTrigger()
+}
+function onTriggerKey(e: KeyboardEvent): void {
+  if (e.key === 'ArrowDown' && !open.value) {
+    e.preventDefault()
+    void openMenu()
+  }
+}
+function onMenuKey(e: KeyboardEvent): void {
+  if (navigateMenu(e, menuItems(menu.value, OPTIONS))) return
+  if (e.key === 'Tab') open.value = false
 }
 function toggleDir(): void {
   emit('update:dir', props.dir === 'asc' ? 'desc' : 'asc')
@@ -32,7 +60,7 @@ function onDocClick(e: MouseEvent): void {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
 }
 function onKeydown(e: KeyboardEvent): void {
-  if (open.value && e.key === 'Escape') open.value = false
+  if (open.value && e.key === 'Escape') closeToTrigger()
 }
 onMounted(() => {
   document.addEventListener('click', onDocClick)
@@ -47,12 +75,14 @@ onBeforeUnmount(() => {
 <template>
   <div ref="root" class="sort" role="group" aria-label="Sort library">
     <button
+      ref="trigger"
       type="button"
       class="sort__trigger"
       :class="{ 'is-open': open }"
       :aria-expanded="open"
       aria-haspopup="listbox"
       @click="toggle"
+      @keydown="onTriggerKey"
     >
       <span class="sort__eyebrow">Sort</span>
       <span class="sort__value">{{ currentLabel }}</span>
@@ -70,13 +100,21 @@ onBeforeUnmount(() => {
     </button>
 
     <Transition name="sort-pop">
-      <ul v-if="open" class="sort__menu" role="listbox" aria-label="Sort by">
+      <ul
+        v-if="open"
+        ref="menu"
+        class="sort__menu"
+        role="listbox"
+        aria-label="Sort by"
+        @keydown="onMenuKey"
+      >
         <li v-for="opt in SORT_OPTIONS" :key="opt.key" role="presentation">
           <button
             type="button"
             class="sort__opt"
             :class="{ 'is-active': opt.key === sortKey }"
             role="option"
+            tabindex="-1"
             :aria-selected="opt.key === sortKey"
             @click="select(opt.key)"
           >

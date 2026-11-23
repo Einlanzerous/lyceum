@@ -16,6 +16,7 @@
 import { computed, ref, watch } from 'vue'
 import type { Invite } from '@/api/auth'
 import InviteQr from './InviteQr.vue'
+import ModalDialog from './ModalDialog.vue'
 
 const props = defineProps<{
   /** The freshly minted invite, or null once it has been let go. */
@@ -110,7 +111,9 @@ async function copyAndClose(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="invite || lost" class="scrim" role="dialog" aria-modal="true">
+  <!-- Esc and the backdrop only dismiss the "gone" sheet. On a live reveal they -->
+  <!-- would throw the once-only key away without the ✕'s recovery hand-off. -->
+  <ModalDialog v-if="invite || lost" :dismissable="!invite" @close="emit('close', true)">
     <!-- The reveal -->
     <div v-if="invite" class="sheet" :class="{ 'is-copied': copied }">
       <header class="sheet__head">
@@ -254,22 +257,10 @@ async function copyAndClose(): Promise<void> {
         </div>
       </div>
     </div>
-  </div>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(8, 8, 7, 0.72);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
 .sheet {
   width: 560px;
   max-width: 100%;

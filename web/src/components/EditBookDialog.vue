@@ -2,10 +2,11 @@
 // Edit a shelf book's title, author and series (LYCM-129). Until now these were
 // fixed at ingest: an EPUB with no series metadata stayed series-less for good,
 // and the only fix was an UPDATE in Postgres. Opens from the tile menu.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Book } from '@/api/types'
 import type { BookPatch } from '@/api/client'
 import { draftOf, patchOf } from '@/library/bookDraft'
+import ModalDialog from './ModalDialog.vue'
 
 const props = defineProps<{ book: Book }>()
 const emit = defineEmits<{
@@ -20,21 +21,13 @@ function submit(): void {
   if (!canSave.value) return
   emit('save', props.book.id, patchOf(draft.value))
 }
-
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape') emit('close')
-}
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div
-    class="scrim"
-    role="dialog"
-    aria-modal="true"
+  <ModalDialog
     aria-label="Edit book details"
-    @click.self="emit('close')"
+    style="--modal-bg: rgba(8, 8, 7, 0.62); --modal-pad: 16px"
+    @close="emit('close')"
   >
     <form class="sheet" @submit.prevent="submit">
       <h2 class="sheet__title">Edit details</h2>
@@ -69,20 +62,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         <button type="submit" class="btn" :disabled="!canSave">Save</button>
       </div>
     </form>
-  </div>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgba(8, 8, 7, 0.62);
-  backdrop-filter: blur(2px);
-}
 .sheet {
   width: min(440px, 100%);
   padding: 22px 24px 20px;
@@ -118,7 +101,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font: 400 14px var(--font-ui);
 }
 .field__input:focus {
-  outline: none;
   border-color: var(--brass);
 }
 .field-row {

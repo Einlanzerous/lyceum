@@ -23,6 +23,7 @@ import {
 import { inferDeviceLabel } from '@/api/device'
 import { hasBackend, isNativeShell } from '@/api/base'
 import { peekLegacyProfileName } from '@/profile'
+import { isPlainEnter } from '@/library/keys'
 import { useAuthStore } from '@/stores/auth'
 import ServerSettings from '@/components/ServerSettings.vue'
 
@@ -215,7 +216,7 @@ async function submit(): Promise<void> {
             maxlength="40"
             aria-label="Device name"
             @blur="editingDevice = false"
-            @keyup.enter="editingDevice = false"
+            @keydown.enter="isPlainEnter($event) && (editingDevice = false)"
           />
         </div>
 
@@ -474,7 +475,6 @@ async function submit(): Promise<void> {
   font:
     400 14px ui-monospace,
     monospace;
-  outline: none;
 }
 .key__input::placeholder {
   color: var(--dimmer);
@@ -504,7 +504,6 @@ async function submit(): Promise<void> {
   color: var(--text);
   font: 600 11.5px var(--font-ui);
   padding: 5px 8px;
-  outline: none;
 }
 .linkish {
   border: 0;

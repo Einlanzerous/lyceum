@@ -164,6 +164,17 @@ guard. A new per-book lookup inside a library loop belongs in a batch.
   moves on a construct-server deploy dispatch. Do not describe a merge as
   shipping.
 
+## Frontend (diffs touching `web/**` `.vue` / `.css`)
+
+Firefox is the primary browser (CLAUDE.md, "Browser target"; floor Firefox 160). Flag:
+
+- motion not gated on `prefers-reduced-motion`
+- a modal that is not a `<dialog>` opened with `showModal()` (use `ModalDialog.vue`)
+- an Enter handler on a text field that does not guard `isComposing` (use `isPlainEnter`, on `keydown`)
+- `outline: none` without a `:focus-visible` ring
+- a CSS feature Firefox 160 lacks, outside `@supports` (e.g. `interpolate-size`, anchor positioning)
+- a `::-webkit-` rule without its standard property
+
 ## Verification bar
 
 Report a finding only when you can point at the line that causes it and name the

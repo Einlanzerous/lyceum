@@ -10,21 +10,48 @@
 // useful thing this menu can do is answer "whose progress am I about to move?"
 // before you open a book, not after.
 
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { menuItems, navigateMenu } from '@/library/menuNav'
 
 const router = useRouter()
 const auth = useAuthStore()
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+const trigger = ref<HTMLButtonElement | null>(null)
+const menu = ref<HTMLElement | null>(null)
+
+const ITEMS = '[role="menuitem"]'
+
+async function openMenu(): Promise<void> {
+  open.value = true
+  await nextTick()
+  menuItems(menu.value, ITEMS)[0]?.focus()
+}
+// Closing from the keyboard hands focus back to the avatar; an outside click or a
+// navigation leaves focus wherever the person put it.
+function closeToTrigger(): void {
+  open.value = false
+  trigger.value?.focus()
+}
+function onTriggerKey(e: KeyboardEvent): void {
+  if (e.key === 'ArrowDown' && !open.value) {
+    e.preventDefault()
+    void openMenu()
+  }
+}
+function onMenuKey(e: KeyboardEvent): void {
+  if (navigateMenu(e, menuItems(menu.value, ITEMS))) return
+  if (e.key === 'Tab') open.value = false
+}
 
 function onDocClick(e: MouseEvent): void {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false
 }
 function onEsc(e: KeyboardEvent): void {
-  if (e.key === 'Escape') open.value = false
+  if (open.value && e.key === 'Escape') closeToTrigger()
 }
 onMounted(() => {
   document.addEventListener('click', onDocClick)
@@ -50,17 +77,19 @@ async function signOut(): Promise<void> {
 <template>
   <div ref="root" class="am">
     <button
+      ref="trigger"
       type="button"
       class="am__avatar"
       :aria-expanded="open"
       aria-haspopup="menu"
       :title="auth.displayName || 'Account'"
-      @click="open = !open"
+      @click="open ? (open = false) : openMenu()"
+      @keydown="onTriggerKey"
     >
       {{ auth.initial }}
     </button>
 
-    <div v-if="open" class="am__menu" role="menu">
+    <div v-if="open" ref="menu" class="am__menu" role="menu" @keydown="onMenuKey">
       <div class="am__who">
         <div class="am__who-avatar" aria-hidden="true">{{ auth.initial }}</div>
         <div class="am__who-text">
@@ -73,7 +102,7 @@ async function signOut(): Promise<void> {
         </div>
       </div>
 
-      <button type="button" class="am__item" role="menuitem" @click="go('/settings')">
+      <button type="button" class="am__item" role="menuitem" tabindex="-1" @click="go('/settings')">
         Settings
       </button>
       <button
@@ -81,6 +110,7 @@ async function signOut(): Promise<void> {
         type="button"
         class="am__item"
         role="menuitem"
+        tabindex="-1"
         @click="go('/household')"
       >
         Household
@@ -90,6 +120,7 @@ async function signOut(): Promise<void> {
         type="button"
         class="am__item am__item--out"
         role="menuitem"
+        tabindex="-1"
         @click="signOut"
       >
         Sign out
