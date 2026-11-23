@@ -27,7 +27,9 @@ onMounted(() => {
 })
 
 // close() (not just removing the node) is what hands focus back to the opener.
+let unmounting = false
 onBeforeUnmount(() => {
+  unmounting = true
   const d = el.value
   if (d && typeof d.close === 'function' && d.open) d.close()
 })
@@ -38,13 +40,22 @@ function onCancel(e: Event): void {
   if (props.dismissable) emit('close')
 }
 
+// Chromium only lets `cancel` be prevented once per user activation, so a second Esc
+// closes the dialog natively and skips onCancel. Whatever closed it, the parent's
+// state still says "open": ask it to close, or (when it must be answered) reopen.
+function onNativeClose(): void {
+  if (unmounting) return
+  if (props.dismissable) emit('close')
+  else if (typeof el.value?.showModal === 'function') el.value.showModal()
+}
+
 function onClick(e: MouseEvent): void {
   if (props.dismissable && e.target === el.value) emit('close')
 }
 </script>
 
 <template>
-  <dialog ref="el" class="modal" @cancel="onCancel" @click="onClick">
+  <dialog ref="el" class="modal" @cancel="onCancel" @close="onNativeClose" @click="onClick">
     <slot />
   </dialog>
 </template>

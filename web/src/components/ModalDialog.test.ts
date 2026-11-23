@@ -40,4 +40,24 @@ describe('ModalDialog (LYCM-142)', () => {
     expect(w.emitted('close')).toBeUndefined()
     w.unmount()
   })
+
+  it('follows a native close (second Esc in Chromium) when dismissable', async () => {
+    const w = mount(ModalDialog, { attachTo: document.body })
+    await w.find('dialog').trigger('close')
+    expect(w.emitted('close')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('reopens after a native close when it must be answered', async () => {
+    const w = mount(ModalDialog, { props: { dismissable: false }, attachTo: document.body })
+    const d = w.find('dialog').element as HTMLDialogElement
+    let reopened = 0
+    d.showModal = () => {
+      reopened++
+    }
+    await w.find('dialog').trigger('close')
+    expect(reopened).toBe(1)
+    expect(w.emitted('close')).toBeUndefined()
+    w.unmount()
+  })
 })
