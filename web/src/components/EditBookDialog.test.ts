@@ -47,12 +47,19 @@ describe('EditBookDialog', () => {
     expect(w.emitted('save')).toBeUndefined()
   })
 
-  it('closes on Cancel, Escape and a click on the scrim', async () => {
+  it('closes on Cancel, Escape (the dialog cancel event) and a click on the backdrop', async () => {
     const w = mount(EditBookDialog, { props: { book }, attachTo: document.body })
     await w.find('button[type=button]').trigger('click')
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await w.find('.scrim').trigger('click')
+    await w.find('dialog').trigger('cancel')
+    await w.find('dialog').trigger('click')
     expect(w.emitted('close')).toHaveLength(3)
+    w.unmount()
+  })
+
+  it('ignores clicks inside the sheet', async () => {
+    const w = mount(EditBookDialog, { props: { book }, attachTo: document.body })
+    await w.find('form').trigger('click')
+    expect(w.emitted('close')).toBeUndefined()
     w.unmount()
   })
 })

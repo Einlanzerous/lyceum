@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { clearSeriesDraft, loadSeriesDraft, saveSeriesDraft } from '@/library/seriesDraft'
 import { seriesNames } from '@/library/series'
 import { useLibraryStore } from '@/stores/library'
+import ModalDialog from '@/components/ModalDialog.vue'
 
 const store = useIngestStore()
 const auth = useAuthStore()
@@ -633,12 +634,15 @@ function relTime(iso: string): string {
       </div>
 
       <!-- Add-book modal: single combined field, back-arrow nav (LYCM-75) -->
-      <div
+      <ModalDialog
         v-if="showAdd"
-        class="addm__scrim"
-        role="dialog"
-        aria-modal="true"
-        @click.self="closeAdd"
+        style="
+          --modal-bg: rgba(8, 8, 7, 0.7);
+          --modal-blur: 3px;
+          --modal-align: flex-start;
+          --modal-pad: 84px 24px 24px;
+        "
+        @close="closeAdd"
       >
         <div class="addm">
           <div class="addm__head">
@@ -673,7 +677,7 @@ function relTime(iso: string): string {
             </li>
           </ul>
         </div>
-      </div>
+      </ModalDialog>
     </template>
   </section>
 </template>
@@ -1314,17 +1318,6 @@ function relTime(iso: string): string {
 }
 
 /* add-book modal */
-.addm__scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: rgba(8, 8, 7, 0.7);
-  backdrop-filter: blur(3px);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 84px 24px 24px;
-}
 .addm {
   width: 520px;
   max-width: 100%;

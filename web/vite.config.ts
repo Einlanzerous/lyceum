@@ -32,6 +32,12 @@ export default defineConfig(({ mode }) => ({
       process.env.VITE_LYCEUM_DEFAULT_SERVER ?? '',
     ),
   },
+  build: {
+    // Firefox is the primary browser: es2022 plus Firefox 160 (the floor, see
+    // CLAUDE.md "Browser target") and the Chrome/Safari that Baseline Widely
+    // available implies. Anything newer is progressive enhancement.
+    target: ['es2022', 'firefox160', 'chrome120', 'safari17'],
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

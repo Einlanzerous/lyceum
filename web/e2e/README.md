@@ -2,8 +2,9 @@
 
 epub.js renders into a real iframe and is not meaningfully testable under
 jsdom/vitest, so the rendering path (LYCM-204/205/206) is covered here with a
-Playwright smoke driving the **system Chrome** (`channel: 'chrome'` — no bundled
-browser download).
+Playwright smoke driving the **system Chrome** (`channel: 'chrome'`) and, as the
+primary browser, Playwright's bundled Firefox (`bunx playwright install firefox`,
+then `--project=firefox`).
 
 ## Run
 

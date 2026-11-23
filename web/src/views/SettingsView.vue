@@ -4,6 +4,7 @@
 // the reader watches, so a change here re-renders an open book live.
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { isPlainEnter } from '@/library/keys'
 import { useTheme, type Theme } from '@/theme'
 import { useReadingFont } from '@/reader/readingFont'
 import { useLineSpacing } from '@/reader/lineSpacing'
@@ -174,7 +175,7 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
                 autocomplete="off"
                 spellcheck="false"
                 aria-label="Display name"
-                @keyup.enter="saveName"
+                @keydown.enter="isPlainEnter($event) && saveName()"
                 @keyup.esc="editingName = false"
               />
             </div>
@@ -541,7 +542,6 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 10%, transparent);
   color: var(--text);
   font: 600 15px var(--font-ui);
-  outline: none;
 }
 .btn {
   padding: 9px 16px;
@@ -577,7 +577,6 @@ const specimenFamily = computed(() => resolveFontFamily(font.value) ?? 'var(--fo
   color: var(--dim);
 }
 .profile__name:focus {
-  outline: none;
   border-bottom-color: var(--brass);
 }
 </style>

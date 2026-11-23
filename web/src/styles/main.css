@@ -93,6 +93,15 @@ body,
   margin: 0;
 }
 
+/* Mobile browser chrome collapses and expands: 100% / vh track the *large*
+   viewport, so the reader's paging height jumps. dvh follows the visible one.
+   (Firefox 101+; the plain height above is the fallback.) */
+@supports (height: 100dvh) {
+  #app {
+    height: 100dvh;
+  }
+}
+
 body {
   font-family: var(--font-ui);
   background: var(--bg);
@@ -114,6 +123,14 @@ body {
 
 button {
   font-family: var(--font-ui);
+}
+
+/* Keyboard focus ring (LYCM-142). One brass ring for everything focusable; it only
+   shows for keyboard focus on buttons and links, and always on text fields. Never
+   remove an outline without putting a :focus-visible ring back. */
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
 }
 
 /* Shared motion (design: page-turn 180ms, toast rises 16px / 200ms). */

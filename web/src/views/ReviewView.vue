@@ -632,7 +632,6 @@ function onDelete(b: Book): Promise<void> {
   font-size: 14px;
 }
 .field__input:focus {
-  outline: none;
   border-color: var(--brass);
 }
 .card__actions {
